@@ -1,5 +1,6 @@
 {
   "id": "ck-hd5-sizing",
+  "pared": true,
   "pillar": "stability",
   "category": "storage",
   "finding_ids": [

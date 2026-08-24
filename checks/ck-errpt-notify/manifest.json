@@ -1,5 +1,6 @@
 {
   "id": "ck-errpt-notify",
+  "pared": true,
   "pillar": "operational-readiness",
   "category": "monitoring",
   "finding_ids": [

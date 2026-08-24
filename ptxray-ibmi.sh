@@ -6,7 +6,7 @@ export PATH
 LC_ALL=C
 export LC_ALL
 
-PTXRAY_VERSION=1.3.0
+PTXRAY_VERSION=1.4.0
 FORMAT=text
 COMPLIANCE=cis-l1
 while [ "$#" -gt 0 ]; do

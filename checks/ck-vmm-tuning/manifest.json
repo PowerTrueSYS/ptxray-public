@@ -1,5 +1,6 @@
 {
   "id": "ck-vmm-tuning",
+  "pared": true,
   "pillar": "stability",
   "category": "performance",
   "finding_ids": [

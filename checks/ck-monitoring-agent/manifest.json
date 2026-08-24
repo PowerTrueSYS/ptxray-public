@@ -1,5 +1,6 @@
 {
   "id": "ck-monitoring-agent",
+  "pared": true,
   "pillar": "operational-readiness",
   "category": "monitoring",
   "finding_ids": [

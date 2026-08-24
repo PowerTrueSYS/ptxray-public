@@ -1,5 +1,6 @@
 {
   "id": "ck-adapter-microcode",
+  "pared": true,
   "pillar": "currency",
   "category": "lifecycle",
   "finding_ids": [

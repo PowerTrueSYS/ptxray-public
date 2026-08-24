@@ -1,5 +1,6 @@
 {
   "id": "ck-symlink-dangling",
+  "pared": true,
   "pillar": "stability",
   "category": "security",
   "finding_ids": [

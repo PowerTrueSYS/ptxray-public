@@ -1,5 +1,6 @@
 {
   "id": "ck-storage-layout",
+  "pared": true,
   "pillar": "resiliency",
   "category": "storage",
   "finding_ids": [

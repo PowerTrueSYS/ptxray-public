@@ -1,5 +1,6 @@
 {
   "id": "ck-alt-disk-recoverability",
+  "pared": true,
   "pillar": "backup",
   "category": "resilience",
   "finding_ids": [

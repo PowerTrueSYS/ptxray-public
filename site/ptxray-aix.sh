@@ -13,8 +13,8 @@
 #
 # Easy run: ./ptxray-aix.sh
 # Stdout:   ./ptxray-aix.sh [--html|--json] > report.html
-#   Run as root. Production scans refuse an unprivileged invocation before
-#   collecting evidence.
+#   Best run as root — a few reads (emgr -l, sysdumpdev -l, bootlist) need it.
+#   Unprivileged runs degrade those checks to WARN or NOT_ASSESSED and say so.
 # network-lint: allow-next=6 -- customer transfer documentation; never executed
 # Transfer in (workstation to AIX/VIOS):
 # scp ptxray-aix.sh ptxray-review-pack.sh ptxray-review-validate.awk root@<aix-host>:/tmp/
@@ -28,14 +28,16 @@
 #   AIXRAY_TODAY=YYYY-MM-DD freeze "today" for deterministic date math
 set -u
 
-# Predictable command resolution for the AIX root environment.
+# Predictable command resolution for root AND unprivileged runs: the AIX
+# default non-root PATH lacks /usr/sbin, where emgr, lsdev, sysdumpdev and
+# friends live — without this an unprivileged run silently skips checks.
 PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
 export PATH
 # AIX lparstat prints comma decimals under a non-C LC_NUMERIC; all parsing here
 # is C-locale by contract, so pin the locale.
 LC_ALL=C; export LC_ALL
 
-VERSION="1.3.0"
+VERSION="1.4.0"
 DATA_VINTAGE="unknown"
 DATA_VINTAGE_H="unknown"
 
@@ -4017,9 +4019,8 @@ function add { # category id label status sev observed meaning fix [controls]
 }
 
 MYUID=$(aix id_u id -u)
-if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "${MYUID:-}" != "0" ]; then
-  echo "ptxray-aix.sh requires root; no scan was run." >&2
-  exit 2
+if [ "${MYUID:-0}" != "0" ]; then
+  echo "running without root: root-only checks may report WARN or NOT_ASSESSED" >&2
 fi
 function nr_warn { # category id label <what> <command> [controls] [status] [severity]
   typeset NR_STATUS NR_SEVERITY

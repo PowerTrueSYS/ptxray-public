@@ -1,5 +1,6 @@
 {
   "id": "ck-account-inventory-delta",
+  "pared": true,
   "pillar": "security",
   "category": "security",
   "finding_ids": [

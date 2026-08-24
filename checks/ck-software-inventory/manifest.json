@@ -1,5 +1,6 @@
 {
   "id": "ck-software-inventory",
+  "pared": true,
   "pillar": "currency",
   "category": "patch",
   "finding_ids": [

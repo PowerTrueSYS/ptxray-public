@@ -1,5 +1,6 @@
 {
   "id": "ck-jfs-legacy",
+  "pared": true,
   "pillar": "stability",
   "category": "storage",
   "finding_ids": [

@@ -1,5 +1,6 @@
 {
   "id": "ck-fs-lv-slack",
+  "pared": true,
   "pillar": "stability",
   "category": "storage",
   "finding_ids": [

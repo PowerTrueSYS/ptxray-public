@@ -1,5 +1,6 @@
 {
   "id": "ck-backup-job",
+  "pared": true,
   "pillar": "backup",
   "category": "monitoring",
   "finding_ids": [

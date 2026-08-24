@@ -1,5 +1,6 @@
 {
   "id": "ck-io-pacing",
+  "pared": true,
   "pillar": "stability",
   "category": "performance",
   "finding_ids": [

@@ -1,5 +1,6 @@
 {
   "id": "ck-dump-history",
+  "pared": true,
   "pillar": "stability",
   "category": "errors",
   "finding_ids": [

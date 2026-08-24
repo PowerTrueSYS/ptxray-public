@@ -1,5 +1,6 @@
 {
   "id": "ck-cpu-snapshot",
+  "pared": true,
   "pillar": "stability",
   "category": "performance",
   "finding_ids": [
