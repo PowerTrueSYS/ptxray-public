@@ -1,6 +1,6 @@
 # PTxray: read-only IBM AIX and IBM i health, risk, and security assessment
 
-PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. Version 1.3.0 runs as a single ksh88 file under AIX `/bin/sh` (and IBM i PASE ksh), reads system state, makes zero network calls during assessment execution, and reports findings without remediating the host.
+PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. Version 1.4.0 runs as a single ksh88 file under AIX `/bin/sh` (and IBM i PASE ksh), reads system state, makes zero network calls during assessment execution, and reports findings without remediating the host.
 
 **Official page:** [powertruesystems.com/aixray](https://powertruesystems.com/aixray)
 
@@ -25,10 +25,10 @@ PTxray is useful for:
 
 ## What is included?
 
-- [`ptxray-aix.sh`](ptxray-aix.sh) — the complete AIX v1 assessment, version 1.3.0. The public release also publishes this as [`aixray-aix.sh`](aixray-aix.sh), a byte-identical alias, so existing download links and run commands keep working.
+- [`ptxray-aix.sh`](ptxray-aix.sh) — the complete AIX v1 assessment, version 1.4.0. The public release also publishes this as [`aixray-aix.sh`](aixray-aix.sh), a byte-identical alias, so existing download links and run commands keep working.
 - [`ptxray-ibmi.sh`](ptxray-ibmi.sh) — the IBM i assessment, a single self-contained monolith graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. Download it straight from the release ([`ptxray-ibmi.sh`](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh)) and verify it against [`SHA256SUMS`](SHA256SUMS) before you run it.
 - [`ptxray-review-pack.sh`](ptxray-review-pack.sh) — the offline helper that creates a pseudonymized review copy and a separate local decoding key
-- [`checks/`](checks/) — 388 standalone ksh check tools, each paired with its `manifest.json`
+- [`checks/`](checks/) — 387 standalone ksh check tools, each paired with its `manifest.json`
 - [`catalog.json`](catalog.json) — the generated, sorted manifest catalog with SHA-256 hashes and the declared check count
 - [`SECURITY.md`](SECURITY.md) and [`docs/VERIFY.md`](docs/VERIFY.md) — the trust boundary, caveats, and repeatable public-repository verification commands
 - [`site/index.html`](site/index.html) — the public download page for `powertruesystems.com/aixray`
@@ -57,7 +57,7 @@ PTxray evaluates selected controls against observed system state. Coverage is pa
 | No fabricated assessment result | `NOT_ASSESSED` is a first-class output state. Missing, unreadable, malformed, ambiguous, or unsupported evidence is reported as unavailable rather than silently converted to `PASS`. Search the assembled source for `NOT_ASSESSED` to inspect each branch. |
 | Declared standalone inventory | [`catalog.json`](catalog.json) records `check_count`; each entry resolves to one paired script and manifest under [`checks/`](checks/), and the public tests require all three counts to agree. |
 | Exact artifact identity | Each catalog entry carries the SHA-256 digest of its referenced standalone shell artifact. The catalog is sorted by check ID for deterministic review. |
-| v1 only | The assembled script and all standalone scripts declare version `1.3.0`. This repository does not contain a v2 implementation. |
+| v1 only | The assembled script and all standalone scripts declare version `1.4.0`. This repository does not contain a v2 implementation. |
 
 “Read-only” describes the tool’s effect on target system configuration. If you redirect output or request an export, PTxray writes the output path you selected. The optional offline FLRTVC mode also uses a private temporary directory and removes it on exit. “zero egress” describes assessment execution; obtaining the script is, of course, a separate download.
 
