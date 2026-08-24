@@ -1,5 +1,208 @@
 # Release notes
 
+## v1.4.0
+
+If you downloaded v1.3.0, download v1.4.0 and run it again. This release
+rewrites what a scan hands you. The checks still read the same box the same
+read-only way; the report they produce is new, and 25 checks that could only
+ever report an inventory or a refusal have been taken out of the compliance
+groups rather than left padding the count.
+
+Two things this release does not do, stated up front so you can plan around
+them: the currency producer lane is not in this release, and the currency
+section of a scan says so in as many words instead of implying a clean result.
+
+### IBM i edition
+
+`ptxray-ibmi.sh` ships unchanged from v1.3.0 apart from its declared version: same
+CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 grading on IBM i 7.4 and 7.5, same read-only
+PASE run. The report rewrite above is the AIX edition's; the IBM i report is the v1.3.0 form.
+
+### What changed for you
+
+**The report is new.** A scan now produces one structured document and renders
+every view from it — the HTML report, the print form and the terminal
+snapshot are three views of one document, never three separate calculations.
+That is the whole point of the rewrite: a number in the printed page and the
+same number on your terminal cannot disagree, because neither one computed it.
+
+The page is three things, top to bottom, and nothing else:
+
+- **The hero.** A five-ring aperture, one ring per pillar, each ring labelled
+  with its score and its name and each label a link into that pillar's
+  section. The middle carries the overall score, the hostname and the scan
+  date — or `NOT SCORED` and an `n OF m ASSESSED` line when coverage is too
+  thin to grade honestly.
+- **The pillar sections.** One collapsed section per pillar. The summary row
+  carries a gauge, the pillar name, the context that pillar is judged in
+  (the AIX level, the firmware level, the standards you selected), a
+  one-line statement of how the score was derived, and a proportional
+  FAIL/WARN/PASS bar. Opening a section lists its controls, worst first, each
+  with its verdict, what was found, and the command and captured output the
+  verdict came from.
+- **The Blueprint box.** The last element on the page.
+
+**The report carries findings and evidence. It does not carry remediation.**
+No fix text, no cost estimate, no outage window appears on any row. That is a
+deliberate line: the report is the X-ray, and a remediation plan for your box
+is a separate piece of work that starts from it.
+
+**A refusal reads as a refusal.** A control PTxray could not assess renders
+the word `NOT ASSESSED`, a box saying why it could not be assessed, and the
+severity that control would have carried — as `ck-sec-apars` does on our lab
+box, rendering `NOT ASSESSED`, `The probe ran but produced no output to
+assess.` and a `high` exposure — so an unassessed critical control
+cannot sit on the page wearing the same shape as a passing one. It groups
+with the warnings and it counts as a warning in the pillar score. It is never
+folded into the passes.
+
+**A print form.** The report converts to a page-broken print layout you send
+to Print → Save as PDF in any browser. Page one is the hero plus a one-line
+index of every pillar; each pillar then expands onto its own page, opened, so
+a printed copy carries the same evidence a clicked-open browser copy does.
+There is no PDF binary, no font download and no network call anywhere in that
+path.
+
+**A terminal snapshot.** Add `--tty` alongside `--out` and the same document
+also renders as a compact ASCII headline on stderr — host, platform, OS level,
+scan date and the overall score — so a scripted run can log the verdict without
+parsing HTML. It is a modifier on the report, not a mode of its own: the report
+is still written to `--out`, and the snapshot goes to stderr so it never mixes
+into piped output.
+
+**A provenance stamp on every report, not only when something is wrong.**
+Each definitions source renders its id, whether it was bundled or fetched,
+its `as_of` date, its origin, and its age in whole days — with `STALE` when
+that age exceeds 30 days. You can tell at a glance how old the data behind a
+verdict is, on a clean report as much as on a bad one.
+
+### The pare: 25 checks out of the groups
+
+Twenty-five checks are flagged `pared` and no longer appear in any compliance
+group. Eight were refusal-only or inventory-only — they reported what is
+installed, or reported that they could not judge, without ever rendering a
+verdict. Seventeen were performance and housekeeping tuning checks that do
+not belong in a security-and-currency posture scan.
+
+The check directories stay: several remain useful as fact emitters and the
+history is preserved. What changes is that they stop inflating a compliance
+denominator they were never going to answer.
+
+One customer-visible coverage change: the **FFIEC group drops from 34 to 31
+controls**. `ck-fs-lv-slack`, `ck-jfs-legacy` (`II.C.11`) and `ck-savevg`
+(`II.C.21`) were the only pared checks carrying compliance tags. CIS Level 1
+and Level 2 and STIG coverage are unchanged.
+
+The backup checks in the pared set are not lost work — the questions they
+tried to answer from inside an LPAR are better answered by asking you during
+onboarding, which is where they are going.
+
+### Under the hood: one control, one tool
+
+The scanner is built from per-tool modules rather than one script with
+everything inlined. The runner's job is to run doors and pass their output
+along; it does not contain a check body, a probe or an HTML row. Every
+hardware and OS fact on the report — the machine, the AIX level, the firmware
+level, CPU, memory, paging, filesystems, storage and recovery posture — now
+comes from a probe captured on your box and handed to a pure transformer that
+parses it and invents nothing.
+
+### Currency: an honest refusal, not a clean result
+
+**The currency producer lane is not in this release. It lands after 1.4.**
+
+PTxray's currency evaluation needs producer records describing which
+definition sources are loaded. Those producers are not built yet. Rather than
+render a currency section that looks fine because it had nothing to judge,
+the currency lane refuses and says so. On a completely healthy box, on a
+completely broken box, the answer today is the same refusal — that is the
+correct behaviour for a component that cannot see its inputs, and it is
+called out here so nobody reads a quiet currency panel as a pass.
+
+The definitions lane is a different mechanism and its evaluator does work.
+Supply a `.aixray-defs` bundle and PTxray reads every source in it offline,
+with no network call: on our lab box a current bundle evaluated to
+`UNVERIFIED` because one source was 42 days old against a 30-day threshold — a
+real verdict on real data, which is exactly what the currency lane cannot yet
+give you.
+
+**How to supply the bundle.** `--html` requires `--definitions-bundle`, and
+that is the path we test and ship: the bundle's sources are evaluated offline
+and stamped into the report's provenance block. Passing
+`--definitions-bundle` *without* `--html`, to get the standalone acquisition
+block on its own, does not complete in this build — the tool that produces
+that block's input does not exist in the tree yet. Use the bundle through the
+report.
+
+### What did not change
+
+PTxray is still a read-only assessment. It does not remediate findings,
+install or remove software, change configuration, restart services, alter
+accounts, or reboot the system.
+
+The on-box scanner is still honest about air-gapped operation: it does not
+phone home, fetch reference data, upload a report, perform a live DNS lookup,
+or open an outbound network connection. The new report is a single
+self-contained HTML file — no external stylesheet, no external script, no
+remote font, no remote image. Reports stay local unless you choose to
+transfer them.
+
+### Release process note
+
+The `sec-14-review` gate was skipped for this release by operator ruling on
+2026-08-23. It is recorded here rather than left out of the record.
+
+### Already fixed for 1.4.1
+
+Four things are known and scheduled rather than silently carried:
+
+- **The print form drops the provenance stamp.** `report.html` carries the
+  definition-source block; `report-print.html` does not.
+- **Checks describe their reasons in prose.** When a control is `NOT ASSESSED`
+  or `N/A`, PTxray infers a typed reason by pattern-matching the sentence the
+  check wrote. Unrecognised wording now degrades to "Reason not typed by the
+  check." rather than failing the report, but the durable fix is for checks to
+  emit a typed reason field alongside the prose.
+- **A single non-conforming row can still cost the whole report.** The
+  renderer validates the document before it renders and refuses outright on a
+  uniqueness violation. It should degrade the offending row instead: a report
+  with one under-typed row is worth more than no report.
+- **The currency producer lane.** See above.
+
+### Known limitations
+
+The v1.2.0 known limitations all still apply:
+
+- Run as root for the intended coverage. A non-root run is supported but
+  incomplete because several patch, dump, boot, account, audit, SSH, and
+  service-policy reads require privilege.
+- The public scanner neither fetches nor bundles IBM's `flrtvc.ksh` or full
+  `apar.csv`. A complete current CVE sweep requires an authorized, locally
+  supplied FLRTVC report or inputs. Without them, source-dependent clean
+  results remain incomplete.
+- This is a point-in-time, bounded posture scan, not continuous monitoring or
+  an exhaustive filesystem/application audit. Workload-specific tuning and
+  controls outside a read-only in-LPAR view still require administrator
+  review.
+- A review-pack file is pseudonymized, not anonymized. It can retain
+  operational detail and must be inspected locally before sharing; never send
+  its separate decoding key with it.
+- Producing a report writes the operator-selected output. Locally supplied
+  FLRTVC inputs also use a private temporary directory; an abrupt termination
+  can leave that directory for manual removal. Neither operation changes
+  assessed AIX/VIOS configuration or state.
+
+And two new to this release:
+
+- The currency lane refuses on every box until the producer lane ships. See
+  above.
+- `--definitions-bundle` used *without* `--html` exits 2 at the
+  acquisition-rendering step and leaves a zero-byte `acquisition.html` behind.
+  Delete that file; it carries no meaning. With `--html` — the shipped path —
+  the bundle is consumed by the report and this does not arise.
+- Scan history and compare-to-last-run are designed for in the document
+  contract but not built. Every scan is independent.
+
 ## v1.3.0
 
 PTxray joins the IBM i platform and takes its production name. This release
