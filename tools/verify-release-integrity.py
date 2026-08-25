@@ -8,16 +8,21 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import subprocess
 import sys
 from typing import Any
 
 
 SCANNER_PATH = "ptxray-aix.sh"
 IBMI_SCANNER_PATH = "ptxray-ibmi.sh"
+DEFINITIONS_DOWNLOADER_PATH = "ptxray-defs.sh"
 SITE_SCANNER_PATH = "site/ptxray-aix.sh"
 REVIEW_HELPER_PATH = "ptxray-review-pack.sh"
 REVIEW_VALIDATOR_PATH = "ptxray-review-validate.awk"
 CHECKSUM_MANIFEST_PATH = "SHA256SUMS"
+CHECKSUM_SIGNATURE_PATH = "SHA256SUMS.sig"
+RELEASE_PUBLIC_KEY_PATH = "POWERTRUE-RELEASE-PUBLIC.pem"
 CURRENT_PAYLOAD_ARTIFACTS = (
     SCANNER_PATH,
     IBMI_SCANNER_PATH,
@@ -28,21 +33,40 @@ CURRENT_RELEASE_ARTIFACTS = (
     *CURRENT_PAYLOAD_ARTIFACTS,
     CHECKSUM_MANIFEST_PATH,
 )
+SIGNED_PAYLOAD_ARTIFACTS = (
+    "aixray-aix.sh",
+    SCANNER_PATH,
+    IBMI_SCANNER_PATH,
+    DEFINITIONS_DOWNLOADER_PATH,
+    REVIEW_HELPER_PATH,
+    REVIEW_VALIDATOR_PATH,
+)
+SIGNED_RELEASE_TREE_ARTIFACTS = (
+    *SIGNED_PAYLOAD_ARTIFACTS,
+    CHECKSUM_MANIFEST_PATH,
+    CHECKSUM_SIGNATURE_PATH,
+    RELEASE_PUBLIC_KEY_PATH,
+)
+SIGNED_RELEASE_ASSETS = (
+    *SIGNED_PAYLOAD_ARTIFACTS,
+    CHECKSUM_MANIFEST_PATH,
+    CHECKSUM_SIGNATURE_PATH,
+    RELEASE_PUBLIC_KEY_PATH,
+)
 LEGACY_RELEASE_ARTIFACTS = {
     "0.1.0": (SCANNER_PATH, REVIEW_HELPER_PATH),
 }
-# Byte-copy transition aliases published as release assets only (rebrand R2).
-# An alias is NOT a SHA256SUMS payload and NOT a required tagged-tree file: it
-# carries no manifest line, so pre-rename download links keep resolving without
-# changing what SHA256SUMS proves. Each alias MUST be byte-identical to the
-# release payload it mirrors; validate_assets asserts that same-bytes invariant.
-# Mirrors tools/render-public-release.py RELEASE_ASSET_ALIASES. Retire at 2.0.
+# Byte-copy transition alias (rebrand R2). Before 1.5 it was asset-only; the
+# signed 1.5 contract also records it in SHA256SUMS and the tagged tree. In both
+# forms it MUST be byte-identical to the canonical payload. Retire at 2.0.
 CURRENT_RELEASE_ASSET_ALIASES = {
     "aixray-aix.sh": SCANNER_PATH,
 }
 VERSION_VARIABLES = {
-    SCANNER_PATH: "VERSION",
-    REVIEW_HELPER_PATH: "AIXRAY_REVIEW_PACK_VERSION",
+    SCANNER_PATH: ("VERSION", False),
+    DEFINITIONS_DOWNLOADER_PATH: ("PTXRAY_DEFS_VERSION", False),
+    IBMI_SCANNER_PATH: ("PTXRAY_VERSION", True),
+    REVIEW_HELPER_PATH: ("AIXRAY_REVIEW_PACK_VERSION", False),
 }
 
 
@@ -50,8 +74,26 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def is_signed_release_version(version: str | None) -> bool:
+    if version is None:
+        return False
+    match = re.match(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?", version)
+    if match is None:
+        return False
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0)) >= (1, 5, 0)
+
+
 def release_artifacts_for_version(version: str | None) -> tuple[str, ...]:
+    if is_signed_release_version(version):
+        return SIGNED_RELEASE_TREE_ARTIFACTS
     return LEGACY_RELEASE_ARTIFACTS.get(version, CURRENT_RELEASE_ARTIFACTS)
+
+
+def release_assets_for_version(version: str | None) -> tuple[str, ...]:
+    if is_signed_release_version(version):
+        return SIGNED_RELEASE_ASSETS
+    return release_artifacts_for_version(version)
 
 
 def release_asset_aliases_for_version(version: str | None) -> dict[str, str]:
@@ -59,6 +101,76 @@ def release_asset_aliases_for_version(version: str | None) -> dict[str, str]:
     if version in LEGACY_RELEASE_ARTIFACTS:
         return {}
     return dict(CURRENT_RELEASE_ASSET_ALIASES)
+
+
+def remove_shell_line_continuations(shell_text: str) -> str:
+    """Apply the shell's pre-tokenization backslash-newline removal."""
+    output = []
+    quote = ""
+    comment = False
+    word_started = False
+    index = 0
+    while index < len(shell_text):
+        character = shell_text[index]
+        following = shell_text[index + 1] if index + 1 < len(shell_text) else ""
+
+        if comment:
+            if character == "\\" and following == "\n":
+                index += 2
+                continue
+            output.append(character)
+            index += 1
+            if character == "\n":
+                comment = False
+                word_started = False
+            continue
+
+        if quote == "'":
+            output.append(character)
+            index += 1
+            if character == "'":
+                quote = ""
+            continue
+
+        if quote == '"':
+            if character == "\\" and following == "\n":
+                index += 2
+                continue
+            output.append(character)
+            index += 1
+            if character == "\\" and following:
+                output.append(following)
+                index += 1
+            elif character == '"':
+                quote = ""
+            continue
+
+        if character == "\\" and following == "\n":
+            index += 2
+            continue
+        if character == "\\" and following:
+            output.extend((character, following))
+            index += 2
+            word_started = True
+            continue
+        if character in "'\"":
+            quote = character
+            output.append(character)
+            index += 1
+            word_started = True
+            continue
+        if character == "#" and not word_started:
+            comment = True
+            output.append(character)
+            index += 1
+            continue
+        output.append(character)
+        index += 1
+        if character.isspace() or character in ";&|()<>":
+            word_started = False
+        else:
+            word_started = True
+    return "".join(output)
 
 
 class Validator:
@@ -79,9 +191,11 @@ class Validator:
         self.failed_reads: set[str] = set()
         self.version = self._version_from_tag()
         self.release_artifacts = release_artifacts_for_version(self.version)
+        self.release_assets = release_assets_for_version(self.version)
         self.release_asset_aliases = release_asset_aliases_for_version(
             self.version
         )
+        self.observed_key_fingerprint: str | None = None
 
     def fail(self, message: str) -> None:
         self.errors.append(message)
@@ -205,7 +319,9 @@ class Validator:
                 continue
             entries[relative] = digest.lower()
 
-        if self.version == "0.1.0":
+        if is_signed_release_version(self.version):
+            expected_payloads = SIGNED_PAYLOAD_ARTIFACTS
+        elif self.version == "0.1.0":
             expected_payloads = CURRENT_PAYLOAD_ARTIFACTS
         else:
             if catalog is None:
@@ -263,6 +379,97 @@ class Validator:
                     f"SHA256SUMS digest mismatch for {relative}: "
                     f"manifest sha256={expected} tagged sha256={actual}"
                 )
+
+    def validate_release_signature(self) -> None:
+        if not is_signed_release_version(self.version):
+            return
+        manifest = self.read_tree_file(CHECKSUM_MANIFEST_PATH)
+        signature = self.read_tree_file(CHECKSUM_SIGNATURE_PATH)
+        public_key = self.read_tree_file(RELEASE_PUBLIC_KEY_PATH)
+        if manifest is None or signature is None or public_key is None:
+            return
+
+        openssl = shutil.which("openssl")
+        if openssl is None:
+            self.fail("OpenSSL is required to verify the release signature")
+            return
+        manifest_path = self._tree_path(CHECKSUM_MANIFEST_PATH)
+        signature_path = self._tree_path(CHECKSUM_SIGNATURE_PATH)
+        public_key_path = self._tree_path(RELEASE_PUBLIC_KEY_PATH)
+        if (
+            manifest_path is None
+            or signature_path is None
+            or public_key_path is None
+        ):
+            return
+
+        key_details = subprocess.run(
+            [
+                openssl,
+                "pkey",
+                "-pubin",
+                "-in",
+                str(public_key_path),
+                "-text",
+                "-noout",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if key_details.returncode != 0:
+            self.fail(
+                "release public key is not a readable OpenSSL public key: "
+                + key_details.stderr.strip()
+            )
+            return
+        if re.search(r"Public-Key:\s*\(3072 bit\)", key_details.stdout) is None:
+            self.fail("release public key must be RSA-3072")
+            return
+
+        verification = subprocess.run(
+            [
+                openssl,
+                "dgst",
+                "-sha256",
+                "-verify",
+                str(public_key_path),
+                "-signature",
+                str(signature_path),
+                str(manifest_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if verification.returncode != 0 or "Verified OK" not in verification.stdout:
+            detail = (verification.stdout + verification.stderr).strip()
+            self.fail(
+                "release signature verification failed"
+                + (f": {detail}" if detail else "")
+            )
+            return
+
+        fingerprint = subprocess.run(
+            [
+                openssl,
+                "pkey",
+                "-pubin",
+                "-in",
+                str(public_key_path),
+                "-outform",
+                "DER",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if fingerprint.returncode != 0:
+            self.fail("cannot derive the release public key SPKI-DER fingerprint")
+            return
+        self.observed_key_fingerprint = sha256_bytes(fingerprint.stdout)
 
     def load_catalog(self) -> dict[str, Any] | None:
         content = self.read_tree_file(
@@ -384,7 +591,9 @@ class Validator:
     def validate_versions(self) -> None:
         if self.version is None:
             return
-        for relative, variable in VERSION_VARIABLES.items():
+        for relative, (variable, allow_unquoted) in VERSION_VARIABLES.items():
+            if relative not in self.release_artifacts:
+                continue
             content = self.read_tree_file(relative)
             if content is None:
                 continue
@@ -393,11 +602,25 @@ class Validator:
             except UnicodeDecodeError as exc:
                 self.fail(f"{relative} is not valid UTF-8: {exc}")
                 continue
-            pattern = re.compile(
-                rf"(?m)^{re.escape(variable)}=[\"']([^\"']+)[\"'][ \t]*$"
+            source = remove_shell_line_continuations(source)
+            quoted = re.findall(
+                rf"(?m)^{re.escape(variable)}=[\"']([^\"']+)[\"'][ \t]*$",
+                source,
             )
-            declarations = pattern.findall(source)
-            if len(declarations) != 1:
+            unquoted = []
+            if allow_unquoted:
+                unquoted = re.findall(
+                    rf"(?m)^{re.escape(variable)}=([0-9][0-9A-Za-z.+-]*)[ \t]*$",
+                    source,
+                )
+            declarations = quoted + unquoted
+            assignments = re.findall(
+                rf"(?m)(?:^|;[ \t]*)(?:export[ \t]+|readonly[ \t]+|"
+                rf"typeset(?:[ \t]+-[A-Za-z]+)*[ \t]+)?"
+                rf"{re.escape(variable)}[ \t]*=",
+                source,
+            )
+            if len(declarations) != 1 or len(assignments) != 1:
                 self.fail(
                     f"version declaration missing or ambiguous in {relative}: "
                     f'expected exactly one {variable}="{self.version}"'
@@ -424,9 +647,9 @@ class Validator:
             self.fail(f"cannot list release asset directory: {exc}")
             return
 
-        # The published surface is the SHA256SUMS-listed release artifacts plus
-        # the byte-copy transition aliases, which carry no manifest line.
-        expected_names = set(self.release_artifacts) | set(
+        # The published surface is the release contract plus any transition
+        # alias used by a pre-1.5 asset-only release.
+        expected_names = set(self.release_assets) | set(
             self.release_asset_aliases
         )
         for missing in sorted(expected_names - entries.keys()):
@@ -434,7 +657,7 @@ class Validator:
         for unexpected in sorted(entries.keys() - expected_names):
             self.fail(f"unexpected release asset: {unexpected}")
 
-        for relative in self.release_artifacts:
+        for relative in self.release_assets:
             asset = entries.get(relative)
             tagged = self.read_tree_file(relative)
             if asset is None or tagged is None:
@@ -454,9 +677,8 @@ class Validator:
                     f"asset sha256={sha256_bytes(published)}"
                 )
 
-        # R2 same-bytes invariant: a transition alias is not on the manifest,
-        # so nothing else proves its bytes. It MUST be byte-identical to the
-        # payload it mirrors; a drifted alias is a release-integrity error.
+        # R2 same-bytes invariant applies whether the alias is asset-only
+        # (legacy) or also manifest-bound (1.5+).
         for alias_name, target in self.release_asset_aliases.items():
             asset = entries.get(alias_name)
             target_bytes = self.read_tree_file(target)
@@ -480,6 +702,7 @@ class Validator:
     def run(self) -> bool:
         self.validate_required_release_files()
         catalog = self.load_catalog()
+        self.validate_release_signature()
         self.validate_sha256sums(catalog)
         if catalog is not None:
             self.validate_catalog(catalog)
@@ -498,6 +721,13 @@ class Validator:
                 file=sys.stderr,
             )
             return
+
+        if self.observed_key_fingerprint is not None:
+            print(
+                "release-integrity: INFO: observed release public key "
+                "SPKI-DER SHA-256="
+                f"{self.observed_key_fingerprint}; compare independently"
+            )
 
         for relative in self.release_artifacts:
             content = self.contents[relative]

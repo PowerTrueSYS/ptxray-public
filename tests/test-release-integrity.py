@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +31,7 @@ def sha256(path: Path) -> str:
 class ReleaseIntegrityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
-            prefix="aixray-release-integrity-"
+            prefix="ptxray-release-integrity-"
         )
         self.base = Path(self.temporary.name)
         self.tree = self.base / "tree"
@@ -74,8 +75,8 @@ class ReleaseIntegrityTests(unittest.TestCase):
         (self.assets / "ptxray-ibmi.sh").write_bytes(ibmi)
         (self.assets / "ptxray-review-pack.sh").write_bytes(review)
         (self.assets / "ptxray-review-validate.awk").write_bytes(validator)
-        # aixray-aix.sh ships as an asset-only byte-copy alias of ptxray-aix.sh:
-        # no SHA256SUMS line, no tagged-tree entry, byte-identical to the scanner.
+        # Before 1.5, aixray-aix.sh is an asset-only byte-copy alias. The signed
+        # 1.5 contract also records the alias in the tagged tree and manifest.
         (self.assets / "aixray-aix.sh").write_bytes(scanner)
         self.write_catalog()
         self.write_sha256sums()
@@ -149,6 +150,111 @@ class ReleaseIntegrityTests(unittest.TestCase):
             text=True,
             check=False,
         )
+
+    def configure_signed_v150_candidate(self) -> None:
+        version = "1.5.0"
+        scanner = (
+            "#!/bin/sh\n"
+            f'VERSION="{version}"\n'
+            "exit 0\n"
+        ).encode()
+        review = (
+            "#!/bin/sh\n"
+            f'AIXRAY_REVIEW_PACK_VERSION="{version}"\n'
+            "exit 0\n"
+        ).encode()
+        definitions = (
+            "#!/bin/sh\n"
+            f'PTXRAY_DEFS_VERSION="{version}"\n'
+            "# signed definitions downloader fixture\n"
+            "exit 0\n"
+        ).encode()
+        ibmi = (
+            "#!/bin/sh\n"
+            f"PTXRAY_VERSION={version}\n"
+            "exit 0\n"
+        ).encode()
+        for directory in (self.tree, self.assets):
+            (directory / "ptxray-aix.sh").write_bytes(scanner)
+            (directory / "ptxray-review-pack.sh").write_bytes(review)
+            (directory / "ptxray-defs.sh").write_bytes(definitions)
+            (directory / "ptxray-ibmi.sh").write_bytes(ibmi)
+            (directory / "aixray-aix.sh").write_bytes(scanner)
+        (self.tree / "site" / "ptxray-aix.sh").write_bytes(scanner)
+        self.write_catalog(version=version)
+        self.write_sha256sums(
+            artifacts=(
+                "aixray-aix.sh",
+                "ptxray-aix.sh",
+                "ptxray-defs.sh",
+                "ptxray-ibmi.sh",
+                "ptxray-review-pack.sh",
+                "ptxray-review-validate.awk",
+            )
+        )
+        private_key = self.base / "fixture-private.pem"
+        key_generation = subprocess.run(
+            [
+                "openssl",
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:3072",
+                "-out",
+                str(private_key),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            0,
+            key_generation.returncode,
+            key_generation.stdout + key_generation.stderr,
+        )
+        public_key = self.tree / "POWERTRUE-RELEASE-PUBLIC.pem"
+        public_generation = subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(private_key),
+                "-pubout",
+                "-out",
+                str(public_key),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            0,
+            public_generation.returncode,
+            public_generation.stdout + public_generation.stderr,
+        )
+        signature = self.tree / "SHA256SUMS.sig"
+        signing = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                str(private_key),
+                "-out",
+                str(signature),
+                str(self.tree / "SHA256SUMS"),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, signing.returncode, signing.stdout + signing.stderr)
+        shutil.copy2(public_key, self.assets / public_key.name)
+        shutil.copy2(signature, self.assets / signature.name)
 
     def assert_failed_with(self, expected: str) -> subprocess.CompletedProcess[str]:
         result = self.run_gate()
@@ -331,6 +437,69 @@ class ReleaseIntegrityTests(unittest.TestCase):
         self.assert_failed_with(
             "SHA256SUMS digest mismatch for ptxray-review-validate.awk"
         )
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_exact_signed_surface_passes(self) -> None:
+        self.configure_signed_v150_candidate()
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertEqual(0, result.returncode, combined)
+        self.assertIn("release-integrity: PASS: v1.5.0", result.stdout)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_later_runtime_version_override(self) -> None:
+        self.configure_signed_v150_candidate()
+        scanner_path = self.tree / "ptxray-aix.sh"
+        scanner = scanner_path.read_text(encoding="utf-8")
+        scanner_path.write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
+        )
+        (self.tree / "site" / "ptxray-aix.sh").write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
+        )
+        (self.tree / "aixray-aix.sh").write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
+        )
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("version declaration missing or ambiguous", combined)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_continued_line_version_override(self) -> None:
+        self.configure_signed_v150_candidate()
+        scanner_path = self.tree / "ptxray-aix.sh"
+        scanner = scanner_path.read_text(encoding="utf-8")
+        payload = scanner + ":; VERSION\\\n=9.9.9\n"
+        scanner_path.write_text(payload, encoding="utf-8")
+        (self.tree / "site" / "ptxray-aix.sh").write_text(
+            payload, encoding="utf-8"
+        )
+        (self.tree / "aixray-aix.sh").write_text(
+            payload, encoding="utf-8"
+        )
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("version declaration missing or ambiguous", combined)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_a_tampered_manifest_signature(self) -> None:
+        self.configure_signed_v150_candidate()
+        (self.tree / "SHA256SUMS.sig").write_bytes(b"not a signature\n")
+        (self.assets / "SHA256SUMS.sig").write_bytes(b"not a signature\n")
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("release signature verification failed", combined)
 
     def test_v010_legacy_two_asset_surface_still_passes(self) -> None:
         legacy_version = "0.1.0"

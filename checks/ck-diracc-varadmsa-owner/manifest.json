@@ -6,7 +6,7 @@
     "diracc_varadmsa_owner"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -ldn /var/adm/sa"

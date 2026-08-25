@@ -6,7 +6,7 @@
     "stale_privileged_accounts"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lsuser -a admin maxage account_locked time_last_login ALL"

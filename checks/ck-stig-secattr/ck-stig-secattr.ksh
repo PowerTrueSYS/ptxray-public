@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -390,26 +445,35 @@ V-215337|/etc/security/login.cfg|default|logindelay|ge|4
 # attribute value is NA. Numeric compare only; op le treats an observed 0 as a FAIL (0 =
 # disabled/unlimited on AIX). If nothing was readable at all (NAPPLIC=0) the finding is a
 # root-gated WARN rather than a hollow PASS.
-function eval_secattr {
-  typeset PAIRS CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+typeset CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+typeset SA_USER_RAW SA_USER_RC SA_USER_CAP SA_LOGIN_RAW SA_LOGIN_RC SA_LOGIN_CAP
 
-  # distinct file|stanza pairs in first-seen (deterministic) order
-  PAIRS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' 'NF>=6 && $1 !~ /^#/ && $2!="" && !seen[$2 FS $3]++{print $2"|"$3}')
-  [ -z "$PAIRS" ] && return 0
-
-  # one lssec per stanza; parse "stanza attr=val attr=val" into "file|stanza|attr|value"
-  # lines. An unreadable stanza (rc!=0 or empty) emits nothing -> its rules fall to NA.
-  # KEEP the per-stanza attribute lists in tools/capture-fixtures.sh in sync with R_SECATTR.
-  CAP=$(printf '%s\n' "$PAIRS" | while IFS='|' read SA_F SA_S; do
-    [ -z "$SA_F" ] && continue
-    SA_ATTRS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' -v f="$SA_F" -v s="$SA_S" '$2==f && $3==s{printf " -a %s", $4}')
-    SA_SLUG=$(printf '%s' "$SA_F" | sed 's|.*/||; s|\.cfg$||')_$SA_S
-    SA_RAW=$(aix "stig_secattr_$SA_SLUG" lssec -f "$SA_F" -s "$SA_S" $SA_ATTRS)
-    if [ $? -eq 0 ] && [ -n "$SA_RAW" ]; then
-      printf '%s\n' "$SA_RAW" | awk -v f="$SA_F" -v s="$SA_S" \
-        '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print f "|" s "|" substr($i,1,e-1) "|" substr($i,e+1)}}'
-    fi
-  done)
+# Keep both reads static and exactly aligned with manifest.json. If either complete stanza
+# capture is unavailable, do not turn the other stanza's partial evidence into a PASS.
+SA_USER_RAW=$(aix stig_secattr_user_default lssec -f /etc/security/user -s default \
+  -a loginretries -a maxulogs -a minupperalpha -a minloweralpha -a mindigit \
+  -a mindiff -a minage -a maxage -a minlen -a minspecialchar -a maxrepeats); SA_USER_RC=$?
+if [ "$SA_USER_RC" -ne 0 ] || [ -z "$SA_USER_RAW" ]; then
+  CTLS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' \
+    'NF>=6 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+  add security stig_secattr "STIG account policy" WARN med "n/a" \
+    "Could not read the complete /etc/security account-policy evidence; no STIG account-policy rule was assessed." \
+    "re-run PTxray as root and verify both required lssec stanzas are readable." "$CTLS"
+else
+  SA_LOGIN_RAW=$(aix stig_secattr_login_default lssec -f /etc/security/login.cfg \
+    -s default -a logindelay); SA_LOGIN_RC=$?
+  if [ "$SA_LOGIN_RC" -ne 0 ] || [ -z "$SA_LOGIN_RAW" ]; then
+    CTLS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' \
+      'NF>=6 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_secattr "STIG account policy" WARN med "n/a" \
+      "Could not read the complete /etc/security account-policy evidence; no STIG account-policy rule was assessed." \
+      "re-run PTxray as root and verify both required lssec stanzas are readable." "$CTLS"
+  else
+    SA_USER_CAP=$(printf '%s\n' "$SA_USER_RAW" | awk \
+      '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print "/etc/security/user|default|" substr($i,1,e-1) "|" substr($i,e+1)}}')
+    SA_LOGIN_CAP=$(printf '%s\n' "$SA_LOGIN_RAW" | awk \
+      '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print "/etc/security/login.cfg|default|" substr($i,1,e-1) "|" substr($i,e+1)}}')
+    CAP=$(printf '%s\n%s\n' "$SA_USER_CAP" "$SA_LOGIN_CAP")
 
   # one awk pass: rules then captured values -> per-rule verdict + summary
   RAW=$({ printf '%s\n' "$R_SECATTR"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
@@ -467,6 +531,11 @@ function eval_secattr {
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more account/password-policy attributes in /etc/security are weaker than the DISA STIG for IBM AIX 7.x mandates — each is a documented hardening gap an auditor will flag, and it applies to every account inheriting the default stanza."
     FIX="tighten the failing attributes with chsec (chsec -f <file> -s default -a <attr>=<value>); the compliance report lists every rule, the required value, and the observed value."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more account-policy attributes were unavailable; the readable rules passed, but the full STIG account-policy group could not be assessed."
+    FIX="re-run PTxray as root and verify each required lssec stanza and attribute is readable."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"
@@ -475,9 +544,9 @@ function eval_secattr {
   fi
   add security stig_secattr "STIG account policy" "$ST" "$SEV" "$OBS" "$MEAN" "$FIX" "$CTLS"
   F_RULES[$((NFIND-1))]="$DETAIL"
-}
-  # stig_secattr — data-driven STIG account/attribute policy rule engine (R_SECATTR)
-  eval_secattr
+  fi
+fi
+# stig_secattr — data-driven STIG account/attribute policy rule engine (R_SECATTR)
 }
 
 function standalone_run {

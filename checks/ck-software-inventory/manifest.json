@@ -9,7 +9,7 @@
   "captures": [
     "cap-lslpp-qcl"
   ],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lslpp -qcL"

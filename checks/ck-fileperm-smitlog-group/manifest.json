@@ -6,7 +6,7 @@
     "fileperm_smitlog_group"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lsuser -a home root",

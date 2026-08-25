@@ -8,7 +8,7 @@
   "captures": [
     "cap-errpt-a7"
   ],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "errpt -a -s <cutoff>"

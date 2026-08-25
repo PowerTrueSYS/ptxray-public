@@ -2,7 +2,7 @@
 
 If you run IBM Power, you already know the quiet problem: AIX and IBM Power systems are extraordinarily stable, and that stability breeds silence. Systems run for years without a reboot, the person who built them has retired, and nobody is quite sure what is current, what is exposed, and what would actually happen in a failure. An audit is how you replace assumption with evidence.
 
-This is a practical, vendor-honest checklist for auditing an AIX system end to end — what to check, why it matters, and what "good" looks like. It is written the way an administrator actually works, with the real commands. At the end of each section we note how [PTxray](https://powertruesystems.com/aixray) — a free, open-source, read-only assessment — collects the same evidence in one pass, so you can choose to do it by hand or let the tool do the gathering.
+This is a practical, vendor-honest checklist for auditing an AIX system end to end — what to check, why it matters, and what "good" looks like. It is written the way an administrator actually works, with the real commands. At the end of each section we note how [PTxray](https://powertruesystems.com/ptxray/) — a free, open-source, read-only assessment — collects the same evidence in one pass, so you can choose to do it by hand or let the tool do the gathering.
 
 **Two ground rules for any honest audit.** First, an audit reports what is *measurably true right now*; it does not prove a system is secure, compliant, or recoverable. A `PASS` on a check is a statement about that one piece of evidence, not a guarantee. Second, when evidence is missing or unreadable, the honest answer is "not assessed" — not a hopeful "looks fine." Keep both rules in mind and your audit will be worth trusting.
 
@@ -76,27 +76,29 @@ If you manage Power through a Hardware Management Console, the HMC deserves its 
 
 ## Doing all of this in one honest pass: PTxray
 
-Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/aixray) was built to close.
+Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/ptxray/) was built to close.
 
-PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — in one read-only pass, and produces an HTML or JSON report you keep.
+PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — and produces an HTML or JSON report you keep. PTxray 1.5.0 is the current published release at `releases/latest`.
 
 What makes it safe to run on a production system you care about:
 
-- **Read-only on system configuration.** It reads state and reports; it does not remediate or change the host. The only writes are the report you asked for and a temporary FLRTVC scratch directory that is removed on exit.
-- **Zero network egress during assessment.** It carries its reference data locally and sends nothing off the box while it runs. You can inspect the command surface before you run it.
-- **One inspectable file, no install.** It is a single ksh88-compatible shell script that runs under the AIX `/bin/sh` you already have — no bash, no Python, no package installation, no agent left behind.
+- **Read-only assessment probes.** They read state and report; they do not remediate or change the host. Requested reports, protected temporary scratch, and the separate signed-definitions cache are documented local writes.
+- **No network during assessment.** Before the probes begin, the runner may invoke the separate, adjacent, digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions update by default and discloses the request first; `--offline` uses the signed cache. The assessment probes themselves send nothing off the box.
+- **Inspectable ksh, no package or agent install.** The AIX runner is one ksh88-compatible shell script under AIX `/bin/sh`; the definitions downloader is a separate adjacent ksh program and may create its documented cache. PTxray 1.5 requires root on AIX. Its VIOS lane remains disabled pending live acceptance.
 - **It refuses to guess.** When evidence is missing, unreadable, or ambiguous, PTxray reports `NOT_ASSESSED` rather than quietly converting it to a `PASS`. An audit tool that invents reassurance is worse than no tool; PTxray is honest about what it could and could not see.
 
 Because it is open source, you do not have to take any of that on faith — the source, the per-check manifests, and the SHA-256 hashes are all public on [GitHub](https://github.com/PowerTrueSYS/ptxray-public), so a cautious admin can read exactly what runs before it runs.
 
-Download it, review it, copy it to your AIX host, and run:
+The commands below describe the published PTxray 1.5 release. Download the
+complete signed asset set, verify it, review it, copy it to your AIX host, and
+run:
 
 ```sh
 chmod 700 ptxray-aix.sh
 ./ptxray-aix.sh
 ```
 
-You will get `aixray-<hostname>-<date>.html` in the current directory — open it in a browser, or save it as PDF to hand to your team.
+You will get `ptxray-<hostname>-<date>.html` in the current directory — open it in a browser, or save it as PDF to hand to your team.
 
 ## If you'd rather have it fixed and watched
 

@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -364,27 +419,40 @@ function mon2num {
   # boot as a proxy and says so. Veteran signal: if the kernel fileset is NEWER than the last
   # boot, the running kernel is the pre-update one and a reboot is pending — confirm a bosboot
   # was run so the boot image carries the patched kernel before that reboot.
-  KINST=$(aix lslpp_h_kernel lslpp -h bos.mp64 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-1][0-9]\/[0-3][0-9]\/[0-9][0-9]$/){print $i; exit}}')
-  WB=$(aix who_b who -b)
-  BMON=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+1); exit}}')
-  BDAY=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+2); exit}}')
-  BMM=$(mon2num "${BMON:-}")
-  if [ -n "$KINST" ] && [ -n "$BMM" ] && [ -n "$BDAY" ]; then
-    KMM=$(printf '%s' "$KINST" | cut -d/ -f1)
-    KDD=$(printf '%s' "$KINST" | cut -d/ -f2)
-    KYY=$(printf '%s' "$KINST" | cut -d/ -f3)
-    KJUL=$(d2j "20$KYY-$KMM-$KDD")
-    BYEAR=${TODAY%%-*}
-    BJUL=$(d2j "$BYEAR-$BMM-$BDAY")
-    # who -b has no year; if the inferred date lands in the future it must be last year.
-    [ "$BJUL" -gt $(( TODAY_J + 2 )) ] && BJUL=$(d2j "$(( BYEAR - 1 ))-$BMM-$BDAY")
-    if [ "$KJUL" -gt "$BJUL" ]; then
-      add resilience bosboot_currency "Boot image currency" WARN med "kernel bos.mp64 installed $KINST, after last boot $BMON $BDAY" \
-          "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (PTxray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
-          "confirm a bosboot was applied for the new kernel ('bosboot -av' if unsure — it rebuilds the hd5 boot image) and schedule the pending reboot; verify the boot device with 'bootlist -m normal -o'." "ffiec:II.C.21"
+  KRAW=$(aix lslpp_h_kernel lslpp -h bos.mp64); KRAW_RC=$?
+  WB=$(aix who_b who -b); WB_RC=$?
+  if [ "$KRAW_RC" -ne 0 ] || [ "$WB_RC" -ne 0 ]; then
+    add resilience bosboot_currency "Boot image currency" NOT_ASSESSED med \
+        "kernel-history rc=$KRAW_RC, last-boot rc=$WB_RC" \
+        "PTxray could not obtain both read-only inputs needed to compare the installed kernel date with the last boot, so boot-image currency was not assessed." \
+        "make 'lslpp -h bos.mp64' and 'who -b' readable, then rerun PTxray." "ffiec:II.C.21"
+  else
+    KINST=$(printf '%s\n' "$KRAW" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-1][0-9]\/[0-3][0-9]\/[0-9][0-9]$/){print $i; exit}}')
+    BMON=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+1); exit}}')
+    BDAY=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+2); exit}}')
+    BMM=$(mon2num "${BMON:-}")
+    if [ -z "$KINST" ] || [ -z "$BMM" ] || [ -z "$BDAY" ]; then
+      add resilience bosboot_currency "Boot image currency" NOT_ASSESSED med \
+          "kernel install date or last-boot date was missing or unparseable" \
+          "PTxray obtained the read-only command output but could not parse both dates needed to compare the installed kernel with the last boot, so boot-image currency was not assessed." \
+          "review 'lslpp -h bos.mp64' and 'who -b' output, correct the evidence problem, then rerun PTxray." "ffiec:II.C.21"
     else
-      add resilience bosboot_currency "Boot image currency" PASS low "booted $BMON $BDAY, after kernel bos.mp64 install $KINST" \
-          "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (PTxray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
+      KMM=$(printf '%s' "$KINST" | cut -d/ -f1)
+      KDD=$(printf '%s' "$KINST" | cut -d/ -f2)
+      KYY=$(printf '%s' "$KINST" | cut -d/ -f3)
+      KJUL=$(d2j "20$KYY-$KMM-$KDD")
+      BYEAR=${TODAY%%-*}
+      BJUL=$(d2j "$BYEAR-$BMM-$BDAY")
+      # who -b has no year; if the inferred date lands in the future it must be last year.
+      [ "$BJUL" -gt $(( TODAY_J + 2 )) ] && BJUL=$(d2j "$(( BYEAR - 1 ))-$BMM-$BDAY")
+      if [ "$KJUL" -gt "$BJUL" ]; then
+        add resilience bosboot_currency "Boot image currency" WARN med "kernel bos.mp64 installed $KINST, after last boot $BMON $BDAY" \
+            "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (PTxray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
+            "confirm a bosboot was applied for the new kernel ('bosboot -av' if unsure — it rebuilds the hd5 boot image) and schedule the pending reboot; verify the boot device with 'bootlist -m normal -o'." "ffiec:II.C.21"
+      else
+        add resilience bosboot_currency "Boot image currency" PASS low "booted $BMON $BDAY, after kernel bos.mp64 install $KINST" \
+            "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (PTxray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
+      fi
     fi
   fi
 }

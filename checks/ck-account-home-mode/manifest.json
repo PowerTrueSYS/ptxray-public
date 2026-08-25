@@ -9,7 +9,7 @@
     "account_home_acl"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lsuser -R files -a id home ALL",

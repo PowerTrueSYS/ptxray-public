@@ -6,7 +6,7 @@
     "errpt_hw"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "errpt -d H -T PERM -s <cutoff>"

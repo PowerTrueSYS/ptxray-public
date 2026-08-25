@@ -6,7 +6,7 @@
     "shell_timeout_readonly"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E 'TMOUT|TIMEOUT' /etc/profile"

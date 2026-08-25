@@ -6,7 +6,7 @@
     "rctcpip_autoconf6"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep \"^#start[[:blank:]]/usr/sbin/autoconf6\" /etc/rc.tcpip"

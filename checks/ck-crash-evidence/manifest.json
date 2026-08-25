@@ -6,7 +6,7 @@
     "crash_evidence"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "find /var/adm/ras -name vmcore* -mtime -30 -print"

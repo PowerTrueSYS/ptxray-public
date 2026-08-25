@@ -6,10 +6,10 @@
     "world_writable"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
-    "find /etc /usr/local/bin -xdev -type f -perm -002"
+    "find /etc /usr/local/bin -xdev -type f -perm -002 -print"
   ],
   "tags": [
     "cis-l1"

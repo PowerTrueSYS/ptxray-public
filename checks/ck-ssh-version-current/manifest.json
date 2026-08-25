@@ -6,7 +6,7 @@
     "sshd_version"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "sshd -V"

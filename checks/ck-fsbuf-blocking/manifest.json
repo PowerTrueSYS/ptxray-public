@@ -7,7 +7,7 @@
     "fsbuf_blocking"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "vmstat -v"

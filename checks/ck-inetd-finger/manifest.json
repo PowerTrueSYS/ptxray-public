@@ -6,7 +6,7 @@
     "inetd_finger"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*finger[\t ]' /etc/inetd.conf"

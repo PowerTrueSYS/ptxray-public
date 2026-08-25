@@ -6,7 +6,7 @@
     "inetd_comsat"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*comsat[\t ]' /etc/inetd.conf"

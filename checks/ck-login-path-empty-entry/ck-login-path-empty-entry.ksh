@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize

@@ -14,21 +14,26 @@ import tempfile
 
 COUNT_CLAIM_TARGETS = {
     "README.md": 1,
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "llms.txt": 1,
     "site/index.html": 2,
 }
 COUNT_PROPERTY_TARGETS = {
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "site/index.html": 1,
 }
-VERSION_CLAIM_TARGETS = {
-    "README.md": 3,
-    "llms.txt": 3,
-    "site/index.html": 3,
+PUBLISHED_VERSION_CLAIM_TARGETS = {
+    "README.md": 1,
+    "llms.txt": 1,
+    "site/index.html": 1,
+}
+CANDIDATE_VERSION_CLAIM_TARGETS = {
+    "README.md": 0,
+    "llms.txt": 1,
+    "site/index.html": 0,
 }
 VERSION_PROPERTY_TARGETS = {
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "site/index.html": 1,
 }
 COUNT_CLAIM_RE = re.compile(
@@ -48,8 +53,15 @@ VERSION_CLAIM_RE = re.compile(
     rf"(\bversion(?:\s*:\s*|\s+)`?){VERSION_VALUE_PATTERN}(`?)",
     re.IGNORECASE,
 )
+CANDIDATE_VERSION_CLAIM_RE = re.compile(
+    rf"(\bcandidate version(?:\s*:\s*|\s+)`?){VERSION_VALUE_PATTERN}(`?)",
+    re.IGNORECASE,
+)
 VERSION_PROPERTY_RE = re.compile(
     r'("softwareVersion"\s*:\s*")[^"\r\n]+(")'
+)
+CANDIDATE_STATUS_RE = re.compile(
+    r'data-release-status="unpublished-([0-9]+\.[0-9]+)-release-candidate"'
 )
 
 
@@ -79,10 +91,36 @@ def declared_release_shape(root: Path) -> tuple[int, str]:
     return count, version
 
 
+def release_channel(root: Path, version: str) -> str:
+    """Return the explicit customer-copy channel for this candidate tree."""
+    site_path = root / "site/index.html"
+    try:
+        site = site_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise ShapeError(f"cannot read site/index.html: {exc}") from exc
+    candidate_series = CANDIDATE_STATUS_RE.findall(site)
+    if not candidate_series:
+        return "published"
+    if len(candidate_series) != 1:
+        raise ShapeError(
+            "site/index.html must contain exactly one unpublished-candidate "
+            f"status marker; found {len(candidate_series)}"
+        )
+    declared_series = ".".join(version.split(".", 2)[:2])
+    if candidate_series[0] != declared_series:
+        raise ShapeError(
+            "site/index.html candidate status marker does not match "
+            f"catalog.json tool_version ({candidate_series[0]} != "
+            f"{declared_series})"
+        )
+    return "candidate"
+
+
 def render_customer_copy(
     root: Path,
     count: int,
     version: str,
+    channel: str,
 ) -> dict[Path, tuple[str, str]]:
     rendered: dict[Path, tuple[str, str]] = {}
     for relative, expected_claims in COUNT_CLAIM_TARGETS.items():
@@ -107,8 +145,14 @@ def render_customer_copy(
                 f"{relative} has {property_count} standaloneCheckCount "
                 f"property value(s); expected {expected_properties}"
             )
-        expected_versions = VERSION_CLAIM_TARGETS.get(relative, 0)
-        updated, version_count = VERSION_CLAIM_RE.subn(
+        if channel == "candidate":
+            version_targets = CANDIDATE_VERSION_CLAIM_TARGETS
+            version_claim_re = CANDIDATE_VERSION_CLAIM_RE
+        else:
+            version_targets = PUBLISHED_VERSION_CLAIM_TARGETS
+            version_claim_re = VERSION_CLAIM_RE
+        expected_versions = version_targets.get(relative, 0)
+        updated, version_count = version_claim_re.subn(
             lambda match: f"{match.group(1)}{version}{match.group(2)}",
             updated,
         )
@@ -179,7 +223,8 @@ def main() -> int:
     root = args.repo_root
     try:
         count, version = declared_release_shape(root)
-        rendered = render_customer_copy(root, count, version)
+        channel = release_channel(root, version)
+        rendered = render_customer_copy(root, count, version, channel)
     except ShapeError as exc:
         print(f"release-shape: FAIL: {exc}", file=sys.stderr)
         return 1
@@ -200,7 +245,7 @@ def main() -> int:
             return 1
         print(
             "release-shape: PASS: customer copy matches "
-            f"count {count} and version {version}"
+            f"count {count} and {channel} version {version}"
         )
         return 0
 
@@ -216,7 +261,7 @@ def main() -> int:
     names = ", ".join(str(path.relative_to(root)) for path in changed) or "no files"
     print(
         f"release-shape: updated {names} from declared count {count} "
-        f"and version {version}"
+        f"and {channel} version {version}"
     )
     return 0
 

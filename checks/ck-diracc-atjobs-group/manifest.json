@@ -6,7 +6,7 @@
     "diracc_atjobs_group"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -ldn /var/spool/cron/atjobs"

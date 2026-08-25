@@ -6,7 +6,7 @@
     "inetd_rusersd"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*rusersd[\t ]' /etc/inetd.conf"

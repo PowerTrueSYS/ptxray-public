@@ -6,7 +6,7 @@
     "inetd_daytime"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*daytime[\t ]' /etc/inetd.conf"

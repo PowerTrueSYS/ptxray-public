@@ -1,14 +1,13 @@
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "@id": "https://powertruesystems.com/aixray#software",
+  "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "An open-source, read-only IBM AIX and IBM i posture assessment delivered as a single ksh88-compatible shell file with zero egress during assessment execution and explicit NOT_ASSESSED results when evidence is unavailable.",
-  "url": "https://powertruesystems.com/aixray",
+  "description": "The PTxray 1.5.0 published release for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
+  "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "downloadUrl": "https://powertruesystems.com/aixray/",
-  "softwareVersion": "1.4.0",
+  "softwareVersion": "1.5.0",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -18,7 +17,7 @@
     "IBM i 7.5"
   ],
   "programmingLanguage": "KornShell (ksh88-compatible AIX /bin/sh; IBM i PASE ksh)",
-  "softwareRequirements": "AIX /bin/sh and standard AIX userland, or IBM i PASE ksh for the IBM i edition; no bash, Python, GNU userland, package installation, or assessment-time network access required.",
+  "softwareRequirements": "IBM AIX 7.2 or 7.3 with AIX /bin/sh; AIX requires root. IBM i 7.4 or 7.5 uses PASE ksh and IBM i requires QSECOFR as both session and system user. The VIOS lane is disabled pending live acceptance. Keep the same-release digest-bound ptxray-defs.sh adjacent to the runner. Assessment probes require no network access; connected definitions updates require fixed-path curl and OpenSSL.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",
@@ -27,8 +26,13 @@
     "url": "https://powertruesystems.com"
   },
   "featureList": [
-    "Read-only system posture assessment",
-    "Zero network egress during assessment execution",
+    "Assessment changes no system configuration and performs no remediation",
+    "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
+    "PTxray 1.5 AIX requires root; IBM i requires QSECOFR; VIOS is not yet enabled",
+    "The runner verifies and invokes the separate adjacent same-release digest-bound ptxray-defs.sh before assessment",
+    "Connected mode attempts to download current signed definitions by default; --offline uses signed cache; --definitions-bundle imports a local signed bundle and adjacent signature",
+    "Old or stale definitions produce an explicit age warning",
+    "Air-gapped assessment execution is supported with a valid signed cache or local signed bundle",
     "HTML and JSON reports",
     "Supported compliance-oriented views",
     "Explicit NOT_ASSESSED status for unavailable evidence",
@@ -37,7 +41,7 @@
     "IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5: 76 of 89 CIS Level 1 controls receive an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i",
     "387 standalone check tools with machine-readable manifests"
   ],
-  "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only, zero egress",
+  "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
     {
       "@type": "PropertyValue",
@@ -58,6 +62,11 @@
       "@type": "PropertyValue",
       "name": "assessmentNetworkEgress",
       "value": "none"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "definitionsCacheWrite",
+      "value": "/var/ptxray/definitions before assessment"
     }
   ]
 }

@@ -6,7 +6,7 @@
     "inetd_xmquery"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*xmquery[\t ]' /etc/inetd.conf"

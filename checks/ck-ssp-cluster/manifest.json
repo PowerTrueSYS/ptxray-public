@@ -6,13 +6,13 @@
     "ssp_cluster"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ioscli cluster -status"
   ],
   "tags": [],
-  "blurb": "This check reports the health of the Shared Storage Pool (SSP) / CAA cluster on a VIOS. If a node or the pool reports DOWN, DEGRADED, FAILED or INCOMPLETE, the SSP's shared storage may have lost a redundant path, so it warns. When the cluster and all nodes report OK it passes, and when no cluster is defined it is not applicable.",
+  "blurb": "This check reports the health of the Shared Storage Pool (SSP) / CAA cluster on a VIOS. If a node or the pool reports DOWN, DEGRADED, FAILED or INCOMPLETE, the shared SSP storage may have lost a redundant path, so it warns. When the cluster and all nodes report OK it passes, and when no cluster is defined it is not applicable.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-ssp-cluster/ck-ssp-cluster.ksh"
 }

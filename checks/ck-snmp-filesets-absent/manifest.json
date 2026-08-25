@@ -6,7 +6,7 @@
     "snmp_filesets_absent"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lslpp -Lcq bos.net.tcp.snmp",

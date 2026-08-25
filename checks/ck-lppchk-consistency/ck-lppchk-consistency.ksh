@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -350,45 +405,13 @@ AIXRAY_TOOL=ck-lppchk-consistency
 
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
-function aixv_confirmed {
-  typeset key rc
-  key=$1; shift
-  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
-    if [ -r "$AIXRAY_FIXTURES/$key.out" ] || [ -r "$AIXRAY_FIXTURES/$key.err" ]; then
-      [ -r "$AIXRAY_FIXTURES/$key.out" ] && cat "$AIXRAY_FIXTURES/$key.out"
-      [ -r "$AIXRAY_FIXTURES/$key.err" ] && cat "$AIXRAY_FIXTURES/$key.err"
-      if [ -r "$AIXRAY_FIXTURES/$key.rc" ]; then
-        read rc < "$AIXRAY_FIXTURES/$key.rc"
-      else
-        rc=126
-      fi
-      return $rc
-    fi
-    return 127
-  fi
-  # Capture mode — same gap as aixv(), but the .rc rule is DIFFERENT and the
-  # difference is the whole point of this wrapper. aix()/aixv() omit .rc on
-  # success as a space optimisation, and their replay defaults a missing .rc to
-  # rc=0. This function deliberately treats a missing .rc as 126 ("no completion
-  # signal was ever recorded"), so borrowing that optimisation would make every
-  # successful capture replay as an unconfirmed one. Always write .rc here.
-  if [ -n "${AIXRAY_CAPTURE_DIR:-}" ]; then
-    "$@" > "$AIXRAY_CAPTURE_DIR/$key.out" 2> "$AIXRAY_CAPTURE_DIR/$key.err"
-    rc=$?
-    echo "$rc" > "$AIXRAY_CAPTURE_DIR/$key.rc"
-    cat "$AIXRAY_CAPTURE_DIR/$key.out"
-    cat "$AIXRAY_CAPTURE_DIR/$key.err"
-    return $rc
-  fi
-  "$@" 2>&1
-}
-  LSLPPQ=$(aixv_confirmed lslpp_qcL lslpp -qcL); LSLPPQ_RC=$?   # colon form drives the fileset-state parse; the
+  LSLPPQ=$(aixv lslpp_qcL lslpp -qcL); LSLPPQ_RC=$?   # colon form drives the fileset-state parse; the
     TOTALFS=$(printf '%s\n' "$LSLPPQ" | awk -F: 'NF>=6 && $1!="" && $2!="" && $3 ~ /^[0-9]/ && $6 ~ /^[ABCO]$/ {n++} END{print n+0}')
   # lppchk_consistency — a DIFFERENT, complementary signal from fileset_state above:
   # fileset_state reads lslpp's own recorded STATE column (catches a fileset already marked
   # BROKEN); lppchk -v independently verifies REQUISITE/dependency consistency across the whole
   # installed set (catches a fileset whose prerequisites are missing/mismatched even though its
-  # own STATE looks fine) — docs/aixray-spec-v2.md Sec 5 cap-filesets row, IBM-sourced
+  # own STATE looks fine) — v2 assessment contract Section 5 cap-filesets row, IBM-sourced
   # (upgrade-readiness-checks.md Sec 4). Escalates to 'lppchk -m3 -v' (Sec 5's own escalation
   # rule) for full detail on any inconsistency — never asserts a specific IBM error-message
   # shape (real failure text was not observable on the read-only, currently-clean lab boxes);
@@ -399,42 +422,34 @@ function aixv_confirmed {
   # call spelled '2>&1' but 'aix()' had already redirected the real command's stderr to
   # /dev/null internally before that '2>&1' ever ran, so an rc=0 stderr-only diagnostic was
   # laundered into a false clean PASS -- see 'aixv's own header comment).
-  LPPCHKOUT=$(aixv_confirmed lppchk_v lppchk -v); LPPCHK_RC=$?
+  LPPCHKOUT=$(aixv lppchk_v lppchk -v); LPPCHK_RC=$?
   # rc 127 means "command/fixture absent" (this codebase's established convention, e.g. the
   # 'ifixes' check above) -- a MISSING result must degrade to WARN "not assessed," never a
   # confident FAIL. Caught live during this check's own test-suite run (round 1 self-review):
   # every fixture set that has no 'lppchk_v.out' fixture file initially reported a false FAIL
   # "inconsistent (rc=127)" instead of the honest "could not run" -- exactly the NOT_ASSESSED-
   # laundered-into-a-verdict defect class this repo's own discipline exists to catch before
-  # shipping, not after. Uses 'aixv_confirmed' (not the plain 'aixv') so an rc=0 that was only
-  # EVER assumed (no <key>.rc file recorded at all) can never be treated identically to a
-  # GENUINELY confirmed rc=0 -- see 'aixv_confirmed's own header comment (adversarial confirming
-  # review, 2026-07-14, HIGH: 'rc=0 + empty output' is genuinely ambiguous between a real
-  # clean result and a wholesale capture-session failure, and no purely-textual corroboration
-  # -- however many independent-looking signals -- can rule out a failure mode that empties
-  # ALL of them identically; only a genuine, distinctly-recorded completion signal closes
-  # this, on the CAPTURE THIS CHECK ITSELF DEPENDS ON, not merely a related one).
+  # shipping, not after. A clean-looking empty capture is corroborated below with
+  # count_nonempty_lines, whose numeric stdout is a positive completion signal recorded by the
+  # ordinary read-only capture spine; no check-local capture writer is needed.
   if [ "$LPPCHK_RC" -eq 127 ]; then
     add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" WARN low "unreadable" \
         "Could not run 'lppchk -v' on this box." "check 'lppchk -v' manually."
   elif [ "$LPPCHK_RC" -eq 0 ] && [ -z "$LPPCHKOUT" ]; then
-    # rc=0 here is a GENUINELY CONFIRMED reading (aixv_confirmed's 126 sentinel, meaning "no
-    # completion signal was ever recorded," would already have failed this exact equality
-    # test) -- "rc=0, no output" is lppchk -v's own documented clean-success shape, and this
-    # is now a real completion signal for THIS capture, not an assumption. A second,
-    # independent invocation ('lppchk -m3 -v', the documented escalation), ALSO required to
-    # be genuinely confirmed rc=0 with empty output (not merely assumed), plus the box's own
-    # fileset inventory clearing a small floor, corroborate further -- raising the bar over
-    # trusting a single confirmed reading alone, though not a mathematical completeness proof
-    # (disclosed honestly, same as this codebase's own FLRT apar_scan floor gate discloses
-    # its own floor is "not a completeness proof").
-    LPPCHKM3=$(aixv_confirmed lppchk_m3v lppchk -m3 -v); LPPCHKM3_RC=$?
-    if [ "$LPPCHKM3_RC" -eq 0 ] && [ -z "$LPPCHKM3" ] && [ "${LSLPPQ_RC:-1}" -eq 0 ] && [ "${TOTALFS:-0}" -ge 5 ]; then
+    # "rc=0, no output" is lppchk -v's documented clean-success shape. Re-run that
+    # exact probe and the independent '-m3 -v' escalation through count_nonempty_lines:
+    # each must emit the positive literal count 0 and return rc=0. Unlike an empty raw
+    # capture, the recorded numeric count cannot be confused with a missing capture.
+    LPPCHKCOUNT=$(aix lppchk_v_count count_nonempty_lines lppchk -v); LPPCHKCOUNT_RC=$?
+    LPPCHKM3COUNT=$(aix lppchk_m3v_count count_nonempty_lines lppchk -m3 -v); LPPCHKM3_RC=$?
+    if [ "$LPPCHKCOUNT_RC" -eq 0 ] && [ -n "$LPPCHKCOUNT" ] && [ "$LPPCHKCOUNT" = 0 ] &&
+       [ "$LPPCHKM3_RC" -eq 0 ] && [ -n "$LPPCHKM3COUNT" ] && [ "$LPPCHKM3COUNT" = 0 ] &&
+       [ "${LSLPPQ_RC:-1}" -eq 0 ] && [ "${TOTALFS:-0}" -ge 5 ]; then
       add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" PASS low "consistent" \
           "'lppchk -v' AND the independent 'lppchk -m3 -v' escalation both returned a genuinely confirmed clean result (rc=0, stdout and stderr both empty), and the fileset inventory itself ($TOTALFS filesets) is a real, populated AIX system, not an empty/truncated capture." "n/a"
     else
       add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" WARN low "not assessed — capture empty or unconfirmed" \
-          "'lppchk -v' reported no output, which is its documented clean-success shape -- but this cannot be credited as a clean scan without independent corroboration: the 'lppchk -m3 -v' cross-check returned rc=$LPPCHKM3_RC${LPPCHKM3:+ with output}, and/or the fileset inventory ('lslpp -qcL', confirmed rc=${LSLPPQ_RC:-unknown}, ${TOTALFS:-0} structurally valid row(s)) is empty, failed, token-shaped, unconfirmed, or implausibly small. Neither signal alone proves 'lppchk -v' itself actually completed; disagreement or an unconfirmed/implausible inventory means this cannot be assumed a genuine clean result." \
+          "'lppchk -v' reported no output, which is its documented clean-success shape -- but this cannot be credited as a clean scan without independent corroboration: its positive completion count was '${LPPCHKCOUNT:-missing}' (rc=$LPPCHKCOUNT_RC), the 'lppchk -m3 -v' cross-check count was '${LPPCHKM3COUNT:-missing}' (rc=$LPPCHKM3_RC), and/or the fileset inventory ('lslpp -qcL', rc=${LSLPPQ_RC:-unknown}, ${TOTALFS:-0} structurally valid row(s)) is empty, failed, token-shaped, unconfirmed, or implausibly small. Neither signal alone proves 'lppchk -v' itself actually completed; disagreement or an unconfirmed/implausible inventory means this cannot be assumed a genuine clean result." \
           "run 'lppchk -v 2>&1' and 'lppchk -m3 -v 2>&1' manually as root, and confirm 'lslpp -qcL' returns the full fileset inventory, before treating this as a clean scan."
     fi
   else

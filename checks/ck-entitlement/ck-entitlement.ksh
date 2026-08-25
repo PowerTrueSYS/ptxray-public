@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -358,26 +413,50 @@ function ipart { typeset v; v=${1%.*}; case "$v" in ''|*[!0-9-]*) v=0;; esac; ec
 function lpif { printf '%s\n' "$LPI" | awk -v k="$1" 'index($0,k)==1 && index($0,":")>0 {sub(/^[^:]*:[ \t]*/,""); sub(/[ \t]+$/,""); print; exit}'; }
 
   typeset TYPE MODE ENT OVP WEIGHT SMT IDLE PHYSC ENTC ENTI ENTCI IDLEI
-  LPI=$(aix lparstat_i lparstat -i)
-  TYPE=$(lpif "Type"); MODE=$(lpif "Mode"); ENT=$(lpif "Entitled Capacity")
-  OVP=$(lpif "Online Virtual CPUs"); WEIGHT=$(lpif "Variable Capacity Weight")
-  LPS=$(aix lparstat_2_1 lparstat 2 1)
-  set -- $(printf '%s\n' "$LPS" | awk '
-    $1 ~ /^[0-9]+\.[0-9]+$/ && $4 ~ /^[0-9]+\.[0-9]+$/ &&
-      $5 ~ /^[0-9]+\.[0-9]+$/ && $6 ~ /^[0-9]+\.[0-9]+$/ && NF>=6 {
-        i=$4; p=$5; e=$6; found=1
-      }
-    END{if(found)print i+0, p+0, e+0}')
-  IDLE=${1:-}; PHYSC=${2:-}; ENTC=${3:-}
-  SMT=$(printf '%s\n' "$TYPE" | awk -F- '{print $NF}'); case "$SMT" in ''|*[!0-9]*) SMT="?";; esac
-  ENTI=$(ipart "$ENT"); ENTCI=$(ipart "$ENTC"); IDLEI=$(ipart "$IDLE")
-  case "$TYPE" in
+  LPI=$(aix lparstat_i lparstat -i); LPI_RC=$?
+  LPS=$(aix lparstat_2_1 lparstat 2 1); LPS_RC=$?
+  TYPE=""; MODE=""; ENT=""; OVP=""; WEIGHT=""
+  IDLE=""; PHYSC=""; ENTC=""
+  if [ "$LPI_RC" -eq 0 ] && [ -n "$LPI" ] &&
+     [ "$LPS_RC" -eq 0 ] && [ -n "$LPS" ]; then
+    TYPE=$(lpif "Type"); MODE=$(lpif "Mode"); ENT=$(lpif "Entitled Capacity")
+    OVP=$(lpif "Online Virtual CPUs"); WEIGHT=$(lpif "Variable Capacity Weight")
+    LPS_SAMPLE=$(printf '%s\n' "$LPS" | awk '
+      $1 ~ /^[0-9]+\.[0-9]+$/ && $4 ~ /^[0-9]+\.[0-9]+$/ &&
+        $5 ~ /^[0-9]+\.[0-9]+$/ && $6 ~ /^[0-9]+\.[0-9]+$/ && NF>=6 {
+          i=$4; p=$5; e=$6; found=1
+        }
+      END{if(found)print i+0, p+0, e+0}')
+    set -- $LPS_SAMPLE
+    IDLE=${1:-}; PHYSC=${2:-}; ENTC=${3:-}
+  fi
+  if [ "$LPI_RC" -ne 0 ] || [ -z "$LPI" ] ||
+     [ "$LPS_RC" -ne 0 ] || [ -z "$LPS" ]; then
+    add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+        "not assessed — lparstat probe failed (info rc=$LPI_RC out=${#LPI}; sample rc=$LPS_RC out=${#LPS})" \
+        "CPU entitlement cannot be assessed because the partition configuration or utilization sample was not captured." \
+        "run 'lparstat -i' and 'lparstat 2 1' manually and investigate the failed probe." ""
+  elif [ -z "$TYPE" ] || [ -z "$OVP" ] || [ -z "$IDLE" ] ||
+       [ -z "$PHYSC" ] || [ -z "$ENTC" ]; then
+    add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+        "not assessed — lparstat output did not contain the required fields" \
+        "CPU entitlement cannot be assessed because the partition type, CPU count, or utilization fields were incomplete." \
+        "run 'lparstat -i' and 'lparstat 2 1' manually and verify their output formats." ""
+  else
+    SMT=$(printf '%s\n' "$TYPE" | awk -F- '{print $NF}'); case "$SMT" in ''|*[!0-9]*) SMT="?";; esac
+    ENTI=$(ipart "$ENT"); ENTCI=$(ipart "$ENTC"); IDLEI=$(ipart "$IDLE")
+    case "$TYPE" in
     *Dedicated*)
       add performance entitlement "LPAR CPU entitlement" PASS low \
           "dedicated, $OVP VP(s), SMT-$SMT, idle ${IDLE}% (snapshot)" \
           "This is a dedicated-processor LPAR — it owns its cores. Idle here is fine; there is no shared-pool entitlement to right-size." "n/a";;
     *Shared*)
-      if [ "$ENTCI" -ge 90 ] && [ "$IDLEI" -lt 10 ]; then
+      if [ -z "$MODE" ] || [ -z "$ENT" ]; then
+        add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+            "not assessed — shared-partition entitlement fields unreadable" \
+            "CPU entitlement cannot be assessed because lparstat omitted the shared mode or entitled capacity." \
+            "run 'lparstat -i' manually and verify Mode and Entitled Capacity." ""
+      elif [ "$ENTCI" -ge 90 ] && [ "$IDLEI" -lt 10 ]; then
         add performance entitlement "LPAR CPU entitlement" WARN med \
             "shared $MODE, ent $ENT, physc $PHYSC (${ENTC}% entc), idle ${IDLE}%" \
             "The LPAR is pinned near 100% of its entitled capacity with almost no idle — it is under-entitled and being throttled to its guarantee (uncapped can borrow only when the pool has spare cycles)." \
@@ -396,7 +475,8 @@ function lpif { printf '%s\n' "$LPI" | awk -v k="$1" 'index($0,k)==1 && index($0
       add performance entitlement "LPAR CPU entitlement" WARN low "type ${TYPE:-unknown}" \
           "Could not classify the LPAR as shared or dedicated from lparstat -i." \
           "check 'lparstat -i' (Type/Mode/Entitled Capacity) manually.";;
-  esac
+    esac
+  fi
 }
 
 function standalone_run {

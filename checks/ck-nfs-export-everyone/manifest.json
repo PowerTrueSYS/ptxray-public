@@ -6,10 +6,9 @@
     "nfs_export_everyone"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
-    "showmount -e",
     "exportfs",
     "test -e /etc/exports",
     "cat /etc/exports"
@@ -17,7 +16,7 @@
   "tags": [
     "cis-l2"
   ],
-  "blurb": "This check lists the directories the system is actively sharing over NFS and fails when any share is marked as available to everyone, meaning the share imposes no client restriction. A directory shared this openly can be mounted by any system that can reach it over the network, without credentials, letting an unauthenticated party read or alter the files it holds.",
+  "blurb": "This check reads the local active NFS export table and fails when any exported directory lacks an explicit client access allow list. An unrestricted export can be mounted by any system that can reach it, exposing its files to unauthorized reading or modification.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-nfs-export-everyone/ck-nfs-export-everyone.ksh"
 }

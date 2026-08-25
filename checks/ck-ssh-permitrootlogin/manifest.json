@@ -6,7 +6,7 @@
     "ssh_permitrootlogin"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "/usr/bin/egrep \"^PermitRootLogin\" /etc/ssh/sshd_config"

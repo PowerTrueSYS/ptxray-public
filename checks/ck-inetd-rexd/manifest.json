@@ -6,7 +6,7 @@
     "inetd_rexd"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*rexd[\t ]' /etc/inetd.conf"

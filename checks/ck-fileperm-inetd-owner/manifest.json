@@ -6,7 +6,7 @@
     "fileperm_inetd_owner"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -ln /etc/inetd.conf"

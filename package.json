@@ -1,7 +1,14 @@
 {
-  "name": "aixray-public-tests",
+  "name": "ptxray-public-tests",
+  "description": "Focused public-contract checks for the unpublished PTxray 1.5 release candidate",
   "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "homepage": "https://powertruesystems.com/ptxray/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/PowerTrueSYS/ptxray-public"
+  },
   "scripts": {
     "test": "tests/run-tests.sh"
   }

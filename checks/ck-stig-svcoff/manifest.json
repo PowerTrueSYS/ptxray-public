@@ -10,7 +10,6 @@
   "read_only": true,
   "commands": [
     "grep -v '^#' /etc/inetd.conf",
-    "lssrc -a",
     "grep -E '^[\t ]*start ' /etc/rc.tcpip"
   ],
   "tags": [

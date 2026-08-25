@@ -6,7 +6,7 @@
     "umask_default"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lssec -f /etc/security/user -s default -a umask"

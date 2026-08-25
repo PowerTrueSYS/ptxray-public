@@ -1,5 +1,41 @@
 # Release notes
 
+<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->
+
+## v1.5.0
+
+PTxray 1.5.0 is the current published release for IBM AIX and IBM i. It
+completes the AIXray-to-PTxray rename, separates signed-definition acquisition
+from assessment, and publishes an offline-signed nine-asset release set.
+
+The AIX runner requires root; the IBM i runner requires
+QSECOFR. Each runner authenticates and invokes the separate adjacent
+`ptxray-defs.sh` before assessment. Connected mode attempts a signed-definitions
+update by default, while `--offline` uses a signed cache and
+`--definitions-bundle` accepts a local signed bundle. Assessment probes remain
+no-egress, read-only on system configuration, and non-remediating.
+
+The release includes the AIX and IBM i runners, definitions downloader, review
+helper and validator, the byte-identical `aixray-aix.sh` compatibility alias,
+`SHA256SUMS`, its detached signature, and the release public key. The
+authoritative release-key fingerprint is:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
+
+The canonical site is `https://powertruesystems.com/ptxray/` and the canonical
+repository is `https://github.com/PowerTrueSYS/ptxray-public`. The legacy site
+URL `https://powertruesystems.com/aixray/` has an active HTTP 308 redirect to
+the canonical site, which returns HTTP 200. The legacy GitHub repository URL
+`https://github.com/PowerTrueSYS/aixray-public` has an active HTTP 301 redirect
+to the canonical repository, which returns HTTP 200. These redirect facts
+preserve old links while all current documentation and release assets use the
+PTxray name.
+
+The VIOS lane remains disabled pending live VIOS acceptance and is not claimed
+by this release.
+
 ## v1.4.0
 
 If you downloaded v1.3.0, download v1.4.0 and run it again. This release
@@ -147,11 +183,6 @@ self-contained HTML file — no external stylesheet, no external script, no
 remote font, no remote image. Reports stay local unless you choose to
 transfer them.
 
-### Release process note
-
-The `sec-14-review` gate was skipped for this release by operator ruling on
-2026-08-23. It is recorded here rather than left out of the record.
-
 ### Already fixed for 1.4.1
 
 Four things are known and scheduled rather than silently carried:
@@ -218,10 +249,12 @@ an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls
 are CIS-manual or not-yet-implemented and are disclosed by the scanner rather
 than dropped (registry as_of 2026-08-19); on other releases it reports the
 release-independent evidence it can assess and omits borrowed control numbers.
-Like the AIX edition it
-changes nothing, installs nothing, and makes no network calls during
-assessment, and it reports `NOT_ASSESSED` when evidence is unavailable rather
-than inventing a result. There is no DISA STIG for IBM i, so none is claimed.
+Like the AIX edition it changes no system configuration and installs nothing,
+and it reports `NOT_ASSESSED` when evidence is unavailable rather than
+inventing a result. The 1.3 and 1.4 IBM i runner does use IBM's network-backed
+`SYSTOOLS.FIRMWARE_CURRENCY` and `SYSTOOLS.GROUP_PTF_CURRENCY` views, so those
+published IBM i releases are not no-egress assessments. There is no DISA STIG
+for IBM i, so none is claimed.
 
 ### PTxray rename
 
@@ -303,10 +336,11 @@ operator-supplied FLRTVC path.
 reports. It does not remediate a host, install or remove software, change
 configuration, restart services, alter accounts, or reboot the system.
 
-**Zero network calls during assessment execution.** The scanner does not phone
+**Zero network calls in the AIX assessment.** The AIX runner does not phone
 home, fetch reference data, upload a report, perform a live DNS lookup, or open
-an outbound network connection. Reports stay local unless an operator chooses to
-transfer them. Obtaining the script is, as always, a separate download.
+an outbound network connection. The IBM i exception is documented above.
+Reports stay local unless an operator chooses to transfer them. Obtaining the
+script is, as always, a separate download.
 
 **The download is still the monolith plus the standalone `ck-*` tools.**
 

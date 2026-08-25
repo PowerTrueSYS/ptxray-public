@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -30,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -69,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -281,8 +316,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +352,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -357,28 +412,71 @@ function ipart { typeset v; v=${1%.*}; case "$v" in ''|*[!0-9-]*) v=0;; esac; ec
 
   # Veteran signal: idle high with low run queue = headroom; run queue > 2x logical CPUs =
   # threads waiting on CPU even if %busy looks OK. Point-in-time, not a trend.
-  set -- $(printf '%s\n' "$(aix vmstat_1_2 vmstat 1 2)" | \
-           awk '$1 ~ /^[0-9]+$/ && NF>=18 {r=$1; pi=$6; po=$7; id=$16; pc=$18} END{print r+0, pi+0, po+0, id+0, pc}')
-  R=${1:-0}; PI=${2:-0}; PO=${3:-0}; ID=${4:-0}; PC=${5:-}
-  LCPU=$(printf '%s\n' "$(aix lparstat_2_1 lparstat 2 1)" | \
-         awk '{for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1)print substr($i,6)}' | awk 'NR==1{print}')
-  case "$LCPU" in ''|*[!0-9]*) LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}');; esac
-  case "$LCPU" in ''|*[!0-9]*) LCPU=1;; esac
-  IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
-  if [ "$IDI" -lt 10 ]; then
+  VMSTAT=$(aix vmstat_1_2 vmstat 1 2); VMSTAT_RC=$?
+  LPS=$(aix lparstat_2_1 lparstat 2 1); LPS_RC=$?
+  VMSAMPLE=""
+  if [ "$VMSTAT_RC" -eq 0 ] && [ -n "$VMSTAT" ]; then
+    VMSAMPLE=$(printf '%s\n' "$VMSTAT" | awk '
+      $1 ~ /^[0-9]+$/ && NF>=18 {
+        r=$1; pi=$6; po=$7; id=$16; pc=$18; found=1
+      }
+      END{if(found)print r+0, pi+0, po+0, id+0, pc}')
+  fi
+  set -- $VMSAMPLE
+  R=${1:-}; PI=${2:-}; PO=${3:-}; ID=${4:-}; PC=${5:-}
+  LCPU=""
+  if [ "$LPS_RC" -eq 0 ] && [ -n "$LPS" ]; then
+    LCPU=$(printf '%s\n' "$LPS" | awk '
+      {for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1){print substr($i,6); exit}}')
+  fi
+  case "$LCPU" in
+    ''|*[!0-9]*)
+      if [ "$PRTCONF_RC" -eq 0 ] && [ -n "$PRTCONF" ]; then
+        LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}')
+      fi
+      ;;
+  esac
+  if [ "$VMSTAT_RC" -ne 0 ] || [ -z "$VMSTAT" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat probe failed (rc=$VMSTAT_RC out=${#VMSTAT})" \
+        "CPU headroom cannot be assessed because the vmstat sample was not captured." \
+        "run 'vmstat 1 2' manually and investigate why the probe failed." ""
+  elif [ -z "$VMSAMPLE" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat returned no usable sample" \
+        "CPU headroom cannot be assessed because vmstat output did not contain the expected numeric sample." \
+        "run 'vmstat 1 2' manually and verify its output format." ""
+  elif [ "$LPS_RC" -ne 0 ] && { [ "$PRTCONF_RC" -ne 0 ] || [ -z "$PRTCONF" ]; }; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — CPU-count probes failed (lparstat rc=$LPS_RC; prtconf rc=$PRTCONF_RC)" \
+        "CPU headroom cannot be assessed without a trustworthy logical-CPU count." \
+        "run 'lparstat 2 1' and 'prtconf' manually and investigate the failed probes." ""
+  else
+    case "$LCPU" in
+      ''|*[!0-9]*|0)
+        add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+            "not assessed — logical CPU count unreadable" \
+            "CPU headroom cannot be assessed because neither lparstat nor prtconf provided a usable CPU count." \
+            "run 'lparstat 2 1' and 'prtconf' manually and verify their output." ""
+        return
+        ;;
+    esac
+    IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
+    if [ "$IDI" -lt 10 ]; then
     add performance cpu_snapshot "CPU headroom (snapshot)" WARN med \
         "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
         "CPU is near saturation in this one sample — low idle with the run queue backing up. This is a point-in-time snapshot, not a trend." \
         "confirm with 'nmon'/'topas' over time; if sustained, chase the top consumers or review CPU sizing/entitlement." ""
-  elif [ "$R" -gt "$RQ" ]; then
+    elif [ "$R" -gt "$RQ" ]; then
     add performance cpu_snapshot "CPU headroom (snapshot)" WARN low \
         "run queue r=$R vs $LCPU logical CPUs, idle ${ID}%" \
         "The run queue is more than twice the logical-CPU count while idle is ${ID}% — threads are waiting to dispatch even though average CPU looks OK. Point-in-time snapshot." \
         "confirm with 'vmstat 2'/'nmon' over time; if sustained, look at SMT settings, thread affinity, or CPU sizing." ""
-  else
+    else
     add performance cpu_snapshot "CPU headroom (snapshot)" PASS low \
         "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
         "CPU has headroom in this sample: idle ${ID}% with a short run queue for $LCPU logical CPUs (point-in-time snapshot, not a trend)." "n/a"
+    fi
   fi
 }
 

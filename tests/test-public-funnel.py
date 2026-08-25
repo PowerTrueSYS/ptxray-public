@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline contract tests for the public AIXray customer funnel."""
+"""Offline contract tests for the public PTxray customer funnel."""
 
 from __future__ import annotations
 
@@ -35,19 +35,33 @@ RELEASE_SHAPE_SYNC = ROOT / "tools" / "sync-release-shape.py"
 PUBLIC_WORKFLOW = ROOT / ".github" / "workflows" / "public-checks.yml"
 VERIFY_GUIDE = ROOT / "docs" / "VERIFY.md"
 RELEASE_NOTES = ROOT / "docs" / "RELEASE-NOTES.md"
-DOWNLOAD_PAGE_URL = "https://powertruesystems.com/aixray/"
+SECURITY_POLICY = ROOT / "SECURITY.md"
+JSONLD = ROOT / "ptxray.jsonld"
+PACKAGE_MANIFEST = ROOT / "package.json"
+PACKAGE_LOCK = ROOT / "package-lock.json"
+AGENT_INSTRUCTIONS = ROOT / "AGENTS.md"
+LEGACY_NAME_ALLOWLIST = ROOT / "docs" / "LEGACY-NAME-ALLOWLIST.md"
+DOWNLOAD_PAGE_URL = "https://powertruesystems.com/ptxray/"
+RELEASE_KEY_TRUST_URL = "https://powertruesystems.com/security/ptxray-release-key/"
+CANONICAL_REPOSITORY_URL = "https://github.com/PowerTrueSYS/ptxray-public"
 RELEASE_ASSET_URL = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh"
 )
 RELEASE_ASSET_URL_IBMI = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh"
 )
-# Tracks the shipped artifact, not the v0.1.0 one this file was written
-# against. Private commit 93c14326 ("remove review CTA response-time promise")
-# deliberately dropped "replies within 2 business days" -- a response-time SLA
-# on a free review is a commitment the product does not want to make. Pinning
-# the old wording here made this gate assert a promise the scanner no longer
-# prints, so it could only pass against a stale artifact.
+PUBLISHED_VERSION = "1.5.0"
+SIGNED_PAYLOADS = (
+    "aixray-aix.sh",
+    "ptxray-aix.sh",
+    "ptxray-defs.sh",
+    "ptxray-ibmi.sh",
+    "ptxray-review-pack.sh",
+    "ptxray-review-validate.awk",
+)
+# Tracks the shipped artifact rather than preserving an obsolete response-time
+# promise. A free review has no response-time SLA, so this gate pins only the
+# wording the public scanner actually prints.
 REVIEW_CTA = (
     "Free engineer review: email your report to "
     "review@powertruesystems.com — a principal engineer will review it "
@@ -75,7 +89,7 @@ PROGRESS = (
 CUSTOMER_FILES = (
     ROOT / "README.md",
     SITE / "index.html",
-    ROOT / "aixray.jsonld",
+    JSONLD,
     ROOT / "llms.txt",
 )
 
@@ -269,8 +283,10 @@ class PublicFunnelTests(unittest.TestCase):
         (destination / "site").mkdir(parents=True)
         for relative in (
             "README.md",
+            "aixray-aix.sh",
             "catalog.json",
             "ptxray-aix.sh",
+            "ptxray-defs.sh",
             "ptxray-ibmi.sh",
             "ptxray-review-pack.sh",
             "ptxray-review-validate.awk",
@@ -290,29 +306,18 @@ class PublicFunnelTests(unittest.TestCase):
     def write_release_checksums(
         self, candidate: Path, overrides: dict[str, str] | None = None
     ) -> None:
-        """Write a SHA256SUMS covering exactly what catalog.json declares.
+        """Write the exact six-payload signed-release manifest.
 
-        A release manifest lists the three top-level payloads plus one
-        standalone tool per catalog check. Fixtures that hand-write only the
-        three top-level lines describe a shape no render produces, so they stop
-        exercising the digest logic they exist for and fail on payload-set
-        membership instead. `overrides` plants a specific digest for one path.
+        Standalone check digests remain bound by catalog.json; they are not
+        separately published release assets. `overrides` plants a specific
+        digest for one payload without weakening payload-set membership.
         """
-        catalog = json.loads(
-            (candidate / "catalog.json").read_text(encoding="utf-8")
-        )
-        artifacts = [
-            "ptxray-aix.sh",
-            "ptxray-ibmi.sh",
-            "ptxray-review-pack.sh",
-            "ptxray-review-validate.awk",
-        ] + [entry["artifact"] for entry in catalog["checks"]]
         overrides = overrides or {}
         (candidate / "SHA256SUMS").write_text(
             "".join(
                 f"{overrides.get(artifact) or sha256(candidate / artifact)}"
                 f"  {artifact}\n"
-                for artifact in artifacts
+                for artifact in SIGNED_PAYLOADS
             ),
             encoding="utf-8",
         )
@@ -336,7 +341,7 @@ class PublicFunnelTests(unittest.TestCase):
 
     def test_documented_hash_verification_accepts_declared_shape(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-declared-shape-"
+            prefix="ptxray-verify-declared-shape-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
@@ -352,22 +357,6 @@ class PublicFunnelTests(unittest.TestCase):
                 encoding="utf-8",
             )
             shutil.rmtree(candidate / "checks" / removed["id"])
-            # SHA256SUMS covers every payload the catalog declares, so a tree
-            # that declares one check fewer also ships one payload fewer. Before
-            # the manifest listed the standalone tools this pruning was
-            # unnecessary and the fixture omitted it; leaving it out now makes
-            # the fixture describe a release shape that could never be built.
-            sums_path = candidate / "SHA256SUMS"
-            sums_path.write_text(
-                "".join(
-                    line
-                    for line in sums_path.read_text(encoding="utf-8").splitlines(
-                        keepends=True
-                    )
-                    if line.split("  ", 1)[-1].strip() != removed["artifact"]
-                ),
-                encoding="utf-8",
-            )
             readme_path = candidate / "README.md"
             readme = readme_path.read_text(encoding="utf-8")
             readme_path.write_text(
@@ -386,7 +375,7 @@ class PublicFunnelTests(unittest.TestCase):
 
     def test_documented_hash_verification_names_missing_artifact(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-missing-"
+            prefix="ptxray-verify-missing-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
@@ -409,7 +398,7 @@ class PublicFunnelTests(unittest.TestCase):
 
     def test_documented_hash_verification_names_mismatched_artifacts(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-mismatch-"
+            prefix="ptxray-verify-mismatch-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
@@ -431,20 +420,13 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertNotIn("Traceback", combined)
 
-    def test_documented_hash_verification_checks_v020_manifest(self) -> None:
+    def test_documented_hash_verification_checks_signed_manifest(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-v020-manifest-"
+            prefix="ptxray-verify-v020-manifest-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
             shutil.copytree(ROOT / "checks", candidate / "checks")
-            catalog_path = candidate / "catalog.json"
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-            catalog["tool_version"] = "0.2.0"
-            catalog_path.write_text(
-                json.dumps(catalog, indent=2) + "\n",
-                encoding="utf-8",
-            )
             validator = candidate / "ptxray-review-validate.awk"
             validator.write_text('BEGIN { print "validated" }\n', encoding="utf-8")
             self.write_release_checksums(
@@ -462,20 +444,13 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertNotIn("Traceback", combined)
 
-    def test_documented_hash_verification_accepts_v020_manifest_docs(self) -> None:
+    def test_documented_hash_verification_accepts_signed_manifest_docs(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-v020-manifest-docs-"
+            prefix="ptxray-verify-v020-manifest-docs-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
             shutil.copytree(ROOT / "checks", candidate / "checks")
-            catalog_path = candidate / "catalog.json"
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-            catalog["tool_version"] = "0.2.0"
-            catalog_path.write_text(
-                json.dumps(catalog, indent=2) + "\n",
-                encoding="utf-8",
-            )
             validator = candidate / "ptxray-review-validate.awk"
             validator.write_text('BEGIN { print "validated" }\n', encoding="utf-8")
             self.write_release_checksums(candidate)
@@ -511,7 +486,7 @@ class PublicFunnelTests(unittest.TestCase):
 
     def test_documented_hash_verification_rejects_symlinked_parent(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-verify-symlink-"
+            prefix="ptxray-verify-symlink-"
         ) as temporary:
             base = Path(temporary)
             candidate = base / "candidate"
@@ -568,18 +543,25 @@ class PublicFunnelTests(unittest.TestCase):
         if notify is not None:
             self.assertNotRegex(notify.group(0), r"\brequired\b")
 
+        self.assertIn(
+            '<input type="hidden" name="_next" '
+            f'value="{DOWNLOAD_PAGE_URL}">',
+            site_html,
+        )
+        self.assertNotIn("/ptxray/ready/", site_html)
+
     def test_download_references_are_direct(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
-        root_jsonld = json.loads((ROOT / "aixray.jsonld").read_text())
+        root_jsonld = json.loads(JSONLD.read_text())
         site_jsonld = inline_jsonld(site_html)
 
         # The public download page is still the advertised entry point.
         self.assertIn(DOWNLOAD_PAGE_URL, readme)
         self.assertIn(DOWNLOAD_PAGE_URL, llms)
-        self.assertEqual(DOWNLOAD_PAGE_URL, root_jsonld.get("downloadUrl"))
-        self.assertEqual(DOWNLOAD_PAGE_URL, site_jsonld.get("downloadUrl"))
+        self.assertNotIn("downloadUrl", root_jsonld)
+        self.assertNotIn("downloadUrl", site_jsonld)
 
         # It links straight to the public release asset — no lead gate.
         self.assertIn(RELEASE_ASSET_URL, site_html)
@@ -589,15 +571,275 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertNotIn(retired_headline, readme)
         self.assertNotIn(retired_headline, llms)
 
-    def test_ibmi_asset_is_advertised_with_download_and_hashes(self) -> None:
-        # The IBM i monolith ships as its own downloadable release asset. The
-        # public surface must advertise it directly and point at SHA256SUMS for
-        # verification, exactly as the AIX scanner is advertised.
+    def test_public_identity_is_canonical_ptxray(self) -> None:
+        self.assertTrue(JSONLD.is_file(), "ptxray.jsonld is missing")
+        self.assertFalse(
+            (ROOT / "aixray.jsonld").exists(),
+            "legacy JSON-LD filename must not remain",
+        )
+        if not JSONLD.is_file():
+            return
+
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        audit_guide = (ROOT / "docs" / "auditing-aix.md").read_text(
+            encoding="utf-8"
+        )
+        agent_instructions = AGENT_INSTRUCTIONS.read_text(encoding="utf-8")
+        robots = (ROOT / "robots.txt").read_text(encoding="utf-8")
+        package = json.loads(PACKAGE_MANIFEST.read_text(encoding="utf-8"))
+        package_lock = json.loads(PACKAGE_LOCK.read_text(encoding="utf-8"))
+        root_jsonld = json.loads(JSONLD.read_text(encoding="utf-8"))
+        site_jsonld = inline_jsonld(site_html)
+
+        for artifact in (
+            ROOT / "ptxray-aix.sh",
+            ROOT / "aixray-aix.sh",
+            SITE / "ptxray-aix.sh",
+        ):
+            scanner = artifact.read_text(encoding="utf-8")
+            with self.subTest(artifact=artifact.relative_to(ROOT)):
+                self.assertIn('"tool": "ptxray"', scanner)
+                self.assertNotIn('"tool": "aixray"', scanner)
+                self.assertNotIn("aixray-flrtvc.", scanner)
+                self.assertNotIn("aixray-spec-v2.md", scanner)
+
+        self.assertEqual("ptxray-public-tests", package.get("name"))
+        self.assertEqual("ptxray-public-tests", package_lock.get("name"))
+        self.assertEqual(
+            "ptxray-public-tests",
+            package_lock.get("packages", {}).get("", {}).get("name"),
+        )
+        self.assertEqual(CANONICAL_REPOSITORY_URL, package.get("repository", {}).get("url"))
+        self.assertEqual(DOWNLOAD_PAGE_URL, package.get("homepage"))
+        self.assertRegex((ROOT / "NOTICE").read_text(encoding="utf-8"), r"(?m)^PTxray$")
+        self.assertRegex(agent_instructions, r"(?m)^# ptxray-public$")
+        self.assertIn(CANONICAL_REPOSITORY_URL, readme)
+        self.assertIn(CANONICAL_REPOSITORY_URL, llms)
+        self.assertIn(CANONICAL_REPOSITORY_URL, site_html)
+        self.assertIn(CANONICAL_REPOSITORY_URL, audit_guide)
+        self.assertIn(DOWNLOAD_PAGE_URL, audit_guide)
+        self.assertIn(DOWNLOAD_PAGE_URL, robots)
+        self.assertNotIn("powertruesystems.com/aixray", robots)
+        self.assertIn(
+            f'<link rel="canonical" href="{DOWNLOAD_PAGE_URL}">',
+            site_html,
+        )
+        self.assertIn(
+            f'<meta property="og:url" content="{DOWNLOAD_PAGE_URL}">',
+            site_html,
+        )
+        for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
+            with self.subTest(metadata=label):
+                self.assertEqual("PTxray", metadata.get("name"))
+                self.assertEqual(DOWNLOAD_PAGE_URL, metadata.get("url"))
+                self.assertEqual(
+                    f"{DOWNLOAD_PAGE_URL}#software",
+                    metadata.get("@id"),
+                )
+                self.assertEqual(
+                    CANONICAL_REPOSITORY_URL,
+                    metadata.get("codeRepository"),
+                )
+                self.assertNotIn("downloadUrl", metadata)
+
+        for surface, text in (
+            ("README.md", readme),
+            ("llms.txt", llms),
+            ("site/index.html", site_html),
+            ("docs/auditing-aix.md", audit_guide),
+            ("ptxray.jsonld", JSONLD.read_text(encoding="utf-8")),
+            ("AGENTS.md", agent_instructions),
+        ):
+            with self.subTest(surface=surface, contract="no legacy site identity"):
+                self.assertNotIn("powertruesystems.com/aixray", text)
+            with self.subTest(surface=surface, contract="no legacy repo identity"):
+                self.assertNotIn("PowerTrueSYS/aixray-public", text)
+
+    def test_published_15_boundary_is_precise(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        security = SECURITY_POLICY.read_text(encoding="utf-8")
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
+        site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        agent_instructions = AGENT_INSTRUCTIONS.read_text(encoding="utf-8")
+        root_jsonld = json.loads(JSONLD.read_text(encoding="utf-8"))
+        site_jsonld = inline_jsonld(site_html)
+
+        prerequisites = readme.split("## Prerequisites", 1)[1].split("## ", 1)[0]
+        self.assertRegex(prerequisites, r"(?i)AIX[^\n.]{0,80}requires? root")
+        self.assertRegex(prerequisites, r"(?i)IBM i[^\n.]{0,80}requires?[^\n.]{0,40}QSECOFR")
+
+        release_sections = []
+        for text, heading in (
+            (readme, "## PTxray 1.5 release"),
+            (security, "## PTxray 1.5 release boundary"),
+            (llms, "## PTxray 1.5 release"),
+            (agent_instructions, "## Published 1.5 release boundary"),
+        ):
+            with self.subTest(heading=heading):
+                self.assertIn(heading, text)
+                if heading in text:
+                    release = text.split(heading, 1)[1].split("\n## ", 1)[0]
+                    release_normalized = " ".join(release.split())
+                    release_sections.append(release)
+                    self.assertRegex(release_normalized, r"(?i)published release")
+                    self.assertRegex(
+                        release_normalized,
+                        r"(?i)AIX[^.]{0,100}\brequires? root\b",
+                    )
+                    self.assertRegex(
+                        release_normalized,
+                        r"(?i)IBM i[^.]{0,100}\brequires?[^.]{0,80}QSECOFR\b",
+                    )
+                    self.assertRegex(
+                        release_normalized,
+                        r"(?i)runner[^.]{0,180}(?:invokes?|calls?)"
+                        r"[^.]{0,120}(?:separate )?(?:adjacent )?"
+                        r"`?ptxray-defs\.sh`?",
+                    )
+
+        self.assertIn(
+            'data-release-status="published-1.5"',
+            site_html,
+        )
+        site_release = site_html.split(
+            'data-release-status="published-1.5"', 1
+        )[1].split("</section>", 1)[0]
+        self.assertRegex(site_release, r"(?i)published release")
+        self.assertRegex(site_release, r"(?i)AIX[^<.]{0,100}\brequires? root\b")
+        self.assertRegex(site_release, r"(?i)IBM i[^<.]{0,100}\brequires? QSECOFR\b")
+        self.assertRegex(site_release, r"(?i)VIOS lane remains disabled")
+        self.assertNotIn(
+            "<li>No network calls or telemetry during the assessment</li>",
+            site_html,
+        )
+
+        for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
+            with self.subTest(metadata=label):
+                self.assertEqual("1.5.0", metadata.get("softwareVersion"))
+                self.assertNotIn("releaseStatus", metadata)
+                self.assertRegex(
+                    str(metadata.get("description", "")),
+                    r"(?i)PTxray 1\.5(?:\.0)? (?:published )?release",
+                )
+                requirements = str(metadata.get("softwareRequirements", ""))
+                self.assertRegex(requirements, r"AIX requires? root")
+                self.assertRegex(requirements, r"IBM i requires? QSECOFR")
+                self.assertRegex(requirements, r"VIOS lane is disabled")
+
+        combined = "\n".join(
+            (readme, security, llms, site_html, json.dumps(root_jsonld))
+        )
+        self.assertNotIn("neither assessment will invoke", combined.casefold())
+        self.assertNotIn("not invoked by either assessment", combined.casefold())
+        self.assertRegex(
+            combined,
+            r"(?i)default[^\n.]{0,120}(?:download|update|acquire)"
+            r"[^\n.]{0,100}(?:latest|current) signed definitions",
+        )
+        self.assertRegex(
+            combined,
+            r"(?i)`?--offline`?[^\n.]{0,120}(?:signed )?cache",
+        )
+        self.assertRegex(
+            combined,
+            r"(?i)`?--definitions-bundle`?[^\n.]{0,120}local signed",
+        )
+        self.assertRegex(combined, r"(?i)(?:digest-bound|release-bound)")
+        self.assertRegex(combined, r"(?i)(?:age|stale)[^\n.]{0,100}warn")
+        self.assertRegex(
+            combined,
+            r"(?i)definitions cache[^\n.]{0,140}(?:write|writes|written)",
+        )
+        self.assertRegex(combined, r"(?i)air-gapped (?:assessment|execution|run)")
+        self.assertRegex(
+            combined,
+            r"(?i)assessment[^\n.]{0,100}(?:makes|opens|performs|has) no "
+            r"(?:network calls|network connections|network egress)",
+        )
+        self.assertRegex(
+            combined,
+            r"(?i)no assessment data[^\n.]{0,100}(?:leaves|is sent|is uploaded)",
+        )
+        self.assertRegex(combined, r"(?i)(?:do(?:es)? not|no) remediate")
+        self.assertRegex(
+            combined,
+            r"(?i)(?:changes no|does not change) (?:system )?configuration",
+        )
+
+        for unsafe in (
+            "The tool has zero egress",
+            "read-only, zero egress",
+            "one inspectable ksh88 file with zero egress",
+            "One inspectable ksh88 file.",
+        ):
+            with self.subTest(contract="no whole-product zero-egress", unsafe=unsafe):
+                self.assertNotIn(unsafe.casefold(), combined.casefold())
+
+    def test_security_reporting_channel_is_private_and_honest(self) -> None:
+        security = SECURITY_POLICY.read_text(encoding="utf-8")
+        lower = security.casefold()
+        advisory_url = (
+            "https://github.com/PowerTrueSYS/ptxray-public/security/advisories/new"
+        )
+
+        self.assertIn("review@powertruesystems.com", security)
+        self.assertIn(advisory_url, security)
+        self.assertRegex(
+            lower,
+            r"github private vulnerability\s+reporting is enabled",
+        )
+        self.assertRegex(lower, r"do not (?:open|use)[^\n.]{0,80}public issue")
+        self.assertRegex(
+            lower,
+            r"(?:safe triage|safe to do so|triage safely)[^\n.]{0,160}acknowledg",
+        )
+        self.assertRegex(lower, r"no (?:fixed |guaranteed )?(?:response )?sla")
+
+    def test_release_notes_mark_15_published_and_redirects_active(self) -> None:
+        notes = RELEASE_NOTES.read_text(encoding="utf-8")
+        prefix = notes.split("## v1.4.0", 1)[0]
+        self.assertEqual(1, notes.count("<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->"))
+        self.assertIn("## v1.5.0", prefix)
+        self.assertRegex(prefix, r"(?is)1\.5\.0.{0,80}published release")
+        self.assertIn("https://powertruesystems.com/ptxray/", prefix)
+        self.assertIn("https://github.com/PowerTrueSYS/ptxray-public", prefix)
+        self.assertIn("https://powertruesystems.com/aixray/", prefix)
+        self.assertIn("https://github.com/PowerTrueSYS/aixray-public", prefix)
+        self.assertRegex(
+            prefix.casefold(),
+            r"(?s)legacy site.{0,180}(?:active|returns).{0,80}308",
+        )
+        self.assertRegex(
+            prefix.casefold(),
+            r"(?s)legacy (?:github )?repository.{0,180}(?:active|returns).{0,80}301",
+        )
+        self.assertIn(
+            "sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd",
+            prefix,
+        )
+
+    def test_ibmi_15_published_download_is_named_and_verifiable(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
+        site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        self.assertIn(RELEASE_ASSET_URL_IBMI, readme)
+        self.assertRegex(readme, r"(?is)published release.{0,100}1\.5\.0")
+        self.assertIn(RELEASE_ASSET_URL_IBMI, site_html)
+        published_panel = site_html.split(
+            "Current published download: PTxray 1.5", 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn(RELEASE_ASSET_URL_IBMI, published_panel)
+        self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
+        llms_ibmi_download = next(
+            line for line in llms.splitlines() if RELEASE_ASSET_URL_IBMI in line
+        )
+        self.assertRegex(
+            llms_ibmi_download,
+            r"(?i)releases/latest[^.]{0,120}published PTxray 1\.5",
+        )
         for surface, text in (("README.md", readme), ("site/index.html", site_html)):
-            with self.subTest(surface=surface, contract="ibmi download link"):
-                self.assertIn(RELEASE_ASSET_URL_IBMI, text)
             with self.subTest(surface=surface, contract="ibmi hash verification"):
                 self.assertIn("SHA256SUMS", text)
             with self.subTest(surface=surface, contract="ibmi scanner named"):
@@ -624,7 +866,7 @@ class PublicFunnelTests(unittest.TestCase):
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
-        jsonld = (ROOT / "aixray.jsonld").read_text(encoding="utf-8")
+        jsonld = JSONLD.read_text(encoding="utf-8")
         # The exact CIS Level 1 coverage counts are computed by the scanner at
         # run time from the registry, not embedded as literals, so they are
         # pinned here as registry-sourced constants (as_of 2026-08-19) and
@@ -633,7 +875,7 @@ class PublicFunnelTests(unittest.TestCase):
         for surface, text in (
             ("README.md", readme),
             ("llms.txt", llms),
-            ("aixray.jsonld", jsonld),
+            ("ptxray.jsonld", jsonld),
         ):
             for fragment in (
                 "CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0",
@@ -678,7 +920,7 @@ class PublicFunnelTests(unittest.TestCase):
         for path in (
             ROOT / "README.md",
             ROOT / "llms.txt",
-            ROOT / "aixray.jsonld",
+            JSONLD,
             ROOT / "catalog.json",
             SITE / "index.html",
         ):
@@ -824,7 +1066,7 @@ class PublicFunnelTests(unittest.TestCase):
         for path in (
             ROOT / "README.md",
             SITE / "index.html",
-            ROOT / "aixray.jsonld",
+            JSONLD,
             ROOT / "llms.txt",
         ):
             text = path.read_text(encoding="utf-8")
@@ -834,7 +1076,7 @@ class PublicFunnelTests(unittest.TestCase):
             with self.subTest(path=path.name, contract="all claims are current"):
                 self.assertEqual({declared_count}, claims)
 
-        root_jsonld = json.loads((ROOT / "aixray.jsonld").read_text())
+        root_jsonld = json.loads(JSONLD.read_text())
         site_jsonld = inline_jsonld((SITE / "index.html").read_text(encoding="utf-8"))
         for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
             count_values = [
@@ -857,13 +1099,13 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertEqual(0, current.returncode, current.stdout + current.stderr)
 
         with tempfile.TemporaryDirectory(
-            prefix="aixray-release-shape-sync-"
+            prefix="ptxray-release-shape-sync-"
         ) as temporary:
             candidate = Path(temporary)
             for relative in (
                 "README.md",
                 "catalog.json",
-                "aixray.jsonld",
+                "ptxray.jsonld",
                 "llms.txt",
                 "site/index.html",
             ):
@@ -893,7 +1135,7 @@ class PublicFunnelTests(unittest.TestCase):
             )
             for relative in (
                 "README.md",
-                "aixray.jsonld",
+                "ptxray.jsonld",
                 "llms.txt",
                 "site/index.html",
             ):
@@ -907,7 +1149,7 @@ class PublicFunnelTests(unittest.TestCase):
                     self.assertEqual({declared_count}, claims)
 
             root_jsonld = json.loads(
-                (candidate / "aixray.jsonld").read_text(encoding="utf-8")
+                (candidate / "ptxray.jsonld").read_text(encoding="utf-8")
             )
             site_jsonld = inline_jsonld(
                 (candidate / "site/index.html").read_text(encoding="utf-8")
@@ -927,22 +1169,22 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIsInstance(declared_version, str)
         if not isinstance(declared_version, str):
             return
-        version_claim = re.compile(
-            r"\bversion(?:\s*:\s*|\s+)`?"
+        published_version_claim = re.compile(
+            r"\bpublished version(?:\s*:\s*|\s+)`?"
             r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
             r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
             re.IGNORECASE,
         )
-        for path, expected_claims in (
-            (ROOT / "README.md", 3),
-            (SITE / "index.html", 3),
-            (ROOT / "llms.txt", 3),
-        ):
-            claims = version_claim.findall(path.read_text(encoding="utf-8"))
-            with self.subTest(path=path.name, contract="all claims are current"):
-                self.assertEqual([declared_version] * expected_claims, claims)
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
+        self.assertEqual([declared_version], published_version_claim.findall(llms))
 
-        root_jsonld = json.loads((ROOT / "aixray.jsonld").read_text())
+        site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        published_panel = site_html.split(
+            "Current published download: PTxray 1.5", 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn(f"Version {declared_version}", published_panel)
+
+        root_jsonld = json.loads(JSONLD.read_text())
         site_jsonld = inline_jsonld((SITE / "index.html").read_text(encoding="utf-8"))
         for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
             with self.subTest(metadata=label, contract="current version"):
@@ -950,13 +1192,13 @@ class PublicFunnelTests(unittest.TestCase):
 
     def test_customer_version_copy_is_generated_from_catalog(self) -> None:
         with tempfile.TemporaryDirectory(
-            prefix="aixray-release-version-sync-"
+            prefix="ptxray-release-version-sync-"
         ) as temporary:
             candidate = Path(temporary)
             for relative in (
                 "README.md",
                 "catalog.json",
-                "aixray.jsonld",
+                "ptxray.jsonld",
                 "llms.txt",
                 "site/index.html",
             ):
@@ -972,7 +1214,6 @@ class PublicFunnelTests(unittest.TestCase):
                 json.dumps(catalog, indent=2) + "\n",
                 encoding="utf-8",
             )
-
             stale = self.run_release_shape_sync(candidate, check=True)
             self.assertNotEqual(0, stale.returncode, stale.stdout + stale.stderr)
             updated = self.run_release_shape_sync(candidate, check=False)
@@ -980,25 +1221,30 @@ class PublicFunnelTests(unittest.TestCase):
             verified = self.run_release_shape_sync(candidate, check=True)
             self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
 
-            version_claim = re.compile(
-                r"\bversion(?:\s*:\s*|\s+)`?"
+            published_version_claim = re.compile(
+                r"\bpublished version(?:\s*:\s*|\s+)`?"
                 r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
                 r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
                 re.IGNORECASE,
             )
-            for relative, expected_claims in (
-                ("README.md", 3),
-                ("llms.txt", 3),
-                ("site/index.html", 3),
-            ):
-                claims = version_claim.findall(
-                    (candidate / relative).read_text(encoding="utf-8")
-                )
-                with self.subTest(relative=relative, contract="rendered version"):
-                    self.assertEqual([declared_version] * expected_claims, claims)
+            llms = (candidate / "llms.txt").read_text(encoding="utf-8")
+            self.assertEqual(
+                [declared_version],
+                published_version_claim.findall(llms),
+            )
+            self.assertIn(
+                f"Version: {declared_version}",
+                (candidate / "README.md").read_text(encoding="utf-8"),
+            )
+            rendered_published_panel = (candidate / "site/index.html").read_text(
+                encoding="utf-8"
+            ).split("Current published download: PTxray 1.5", 1)[1].split(
+                "</section>", 1
+            )[0]
+            self.assertIn(f"Version {declared_version}", rendered_published_panel)
 
             root_jsonld = json.loads(
-                (candidate / "aixray.jsonld").read_text(encoding="utf-8")
+                (candidate / "ptxray.jsonld").read_text(encoding="utf-8")
             )
             site_jsonld = inline_jsonld(
                 (candidate / "site/index.html").read_text(encoding="utf-8")
@@ -1024,7 +1270,7 @@ class PublicFunnelTests(unittest.TestCase):
                 with self.subTest(path=path.relative_to(ROOT), term=pattern.pattern):
                     self.assertIsNone(pattern.search(text))
 
-    def test_readme_leads_a_new_customer_through_the_easy_run(self) -> None:
+    def test_readme_leads_a_new_customer_through_the_15_candidate_run(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         lower = readme.lower()
         self.assertRegex(readme, r"(?m)^## Prerequisites[ \t]*$")
@@ -1040,26 +1286,25 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIn("VIOS", prerequisites)
         self.assertIn("/bin/sh", prerequisites)
         self.assertRegex(prerequisites_lower, r"standard aix userland")
-        self.assertRegex(prerequisites_lower, r"root (is )?recommended")
-        self.assertRegex(prerequisites_lower, r"unprivileged|without root|non-root")
-        self.assertRegex(prerequisites, r"NOT_ASSESSED|unavailable")
+        self.assertRegex(prerequisites_lower, r"aix[^\n.]{0,80}requires? root")
+        self.assertRegex(prerequisites_lower, r"ibm i[^\n.]{0,80}requires?[^\n.]{0,40}qsecofr")
         self.assertRegex(prerequisites_lower, r"several minutes")
         self.assertRegex(prerequisites_lower, r"runtime varies|varies by")
         self.assertRegex(prerequisites_lower, r"system size")
         self.assertRegex(prerequisites_lower, r"flrtvc")
-        self.assertRegex(prerequisites_lower, r"nothing (is )?installed|installs nothing")
+        self.assertRegex(prerequisites_lower, r"no package or agent is installed")
         self.assertRegex(readme, r"(?m)^## Verify what you run\s*$")
 
-        bare = re.search(r"(?m)^\./aixray-aix\.sh\s*$", readme)
-        html_mode = re.search(r"(?m)^\./aixray-aix\.sh --html\b", readme)
-        json_mode = re.search(r"(?m)^\./aixray-aix\.sh --json\b", readme)
+        bare = re.search(r"(?m)^\./ptxray-aix\.sh\s*$", readme)
+        html_mode = re.search(r"(?m)^\./ptxray-aix\.sh --html\b", readme)
+        json_mode = re.search(r"(?m)^\./ptxray-aix\.sh --json\b", readme)
         self.assertIsNotNone(bare, "quickstart has no bare easy run")
         self.assertIsNotNone(html_mode, "advanced HTML stdout mode is missing")
         self.assertIsNotNone(json_mode, "advanced JSON stdout mode is missing")
         if bare is not None and html_mode is not None:
             self.assertLess(bare.start(), html_mode.start())
         self.assertIn("Report ready:", readme)
-        self.assertRegex(readme, r"aixray-<hostname>-<date>\.html")
+        self.assertRegex(readme, r"ptxray-<hostname>-<date>\.html")
 
         scanner_hash = sha256(SCANNER)
         catalog = json.loads((ROOT / "catalog.json").read_text())
@@ -1073,8 +1318,8 @@ class PublicFunnelTests(unittest.TestCase):
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         normalized = " ".join(readme.lower().split())
         self.assertIn("ptxray-review-pack.sh", readme)
-        self.assertIn("aixray-review-", readme)
-        self.assertIn("aixray-local-key-", readme)
+        self.assertIn("ptxray-review-", readme)
+        self.assertIn("ptxray-local-key-", readme)
         self.assertIn("never leaves this machine", normalized)
         self.assertIn("pseudonymized, not anonymized", normalized)
         self.assertIn("undiscovered pure-alphabetic barewords", normalized)
@@ -1090,6 +1335,51 @@ class PublicFunnelTests(unittest.TestCase):
             self.assertTrue((ROOT / "ptxray-review-validate.awk").is_file())
             self.assertTrue((ROOT / "SHA256SUMS").is_file())
             self.assertNotRegex(readme, r"\b[0-9A-Fa-f]{64}\b")
+
+    def test_candidate_output_names_and_legacy_allowlist_are_narrow(self) -> None:
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        verify = VERIFY_GUIDE.read_text(encoding="utf-8")
+        audit_guide = (ROOT / "docs" / "auditing-aix.md").read_text(
+            encoding="utf-8"
+        )
+        site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        for surface, text in (
+            ("README.md", readme),
+            ("docs/VERIFY.md", verify),
+            ("docs/auditing-aix.md", audit_guide),
+        ):
+            with self.subTest(surface=surface, output="report"):
+                self.assertIn("ptxray-<hostname>-<date>.html", text)
+        self.assertIn("ptxray-review-*.html", readme)
+        self.assertIn("ptxray-local-key-*.map", readme)
+        self.assertIn("ptxray-review-*.html", verify)
+        self.assertIn("ptxray-local-key-*.map", verify)
+        self.assertIn("ptxray-&lt;hostname&gt;-&lt;date&gt;.html", site_html)
+
+        current_surfaces = "\n".join((readme, verify, audit_guide, site_html, (ROOT / "llms.txt").read_text(encoding="utf-8")))
+        for retired in (
+            "aixray-<hostname>-<date>.html",
+            "aixray-&lt;hostname&gt;-&lt;date&gt;.html",
+            "aixray-review-*.html",
+            "aixray-local-key-*.map",
+        ):
+            with self.subTest(retired=retired):
+                self.assertNotIn(retired, current_surfaces)
+
+        allowlist = LEGACY_NAME_ALLOWLIST.read_text(encoding="utf-8")
+        self.assertIn("aixray-aix.sh", allowlist)
+        self.assertIn("byte-identical", allowlist)
+        self.assertIn("data-aixray-*", allowlist)
+        self.assertIn("AIXRAY_*", allowlist)
+        self.assertIn("docs/RELEASE-NOTES.md", allowlist)
+        self.assertTrue((ROOT / "aixray-aix.sh").is_file())
+        for retired_path in (
+            ROOT / "aixray-review-pack.sh",
+            ROOT / "aixray-review-validate.awk",
+            SITE / "aixray-aix.sh",
+        ):
+            with self.subTest(retired_path=retired_path):
+                self.assertFalse(retired_path.exists())
 
     def test_v010_release_note_records_exact_tag_asset_discrepancy(self) -> None:
         self.assertTrue(RELEASE_NOTES.is_file())
@@ -1333,7 +1623,7 @@ class PublicFunnelTests(unittest.TestCase):
 
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
-        jsonld = (ROOT / "aixray.jsonld").read_text(encoding="utf-8")
+        jsonld = JSONLD.read_text(encoding="utf-8")
         stig_claim = (
             "DISA STIG for IBM AIX 7.x coverage is partial: "
             f"{len(stig_ids)} distinct rule V-IDs receive an engine verdict"
@@ -1345,7 +1635,7 @@ class PublicFunnelTests(unittest.TestCase):
         for artifact, text in (
             ("README.md", readme),
             ("llms.txt", llms),
-            ("aixray.jsonld", jsonld),
+            ("ptxray.jsonld", jsonld),
         ):
             with self.subTest(artifact=artifact):
                 for claim in claim_fragments:
@@ -1682,7 +1972,7 @@ START_HERE_ITEMS=""
             with self.subTest(shell="ksh", artifact=artifact.name):
                 self.assertEqual(0, result.returncode, result.stderr)
         json.loads((ROOT / "catalog.json").read_text())
-        json.loads((ROOT / "aixray.jsonld").read_text())
+        json.loads(JSONLD.read_text())
         inline_jsonld((SITE / "index.html").read_text(encoding="utf-8"))
 
     def test_public_ci_runs_all_release_guards(self) -> None:
@@ -1706,12 +1996,24 @@ START_HERE_ITEMS=""
             r"(?m)^\s+types:\s*\[published, edited, released\]\s*$",
         )
         self.assertIn("fetch-depth: 0", workflow)
+        self.assertEqual(
+            2,
+            workflow.count(
+                "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+            ),
+        )
+        self.assertNotIn("actions/checkout@v", workflow)
+        self.assertGreaterEqual(workflow.count("persist-credentials: false"), 2)
         self.assertIn("sudo apt-get install -y ksh", workflow)
         self.assertIn("python3 tools/sync-release-shape.py --check", workflow)
         self.assertIn("sh tests/run-tests.sh", workflow)
         self.assertIn(
             "set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh "
             "checks/*/*.ksh",
+            workflow,
+        )
+        self.assertIn(
+            "ptxray-defs.sh is intentionally excluded",
             workflow,
         )
         self.assertIn("if [ -f ptxray-review-validate.awk ]; then", workflow)
@@ -1725,6 +2027,7 @@ START_HERE_ITEMS=""
             'python3 tools/verify-release-integrity.py --tag "$RELEASE_TAG"',
             workflow,
         )
+        self.assertIn("openssl version", workflow)
         self.assertIn('gh release download "$RELEASE_TAG"', workflow)
         self.assertIn(
             '--assets-dir "$RUNNER_TEMP/release-assets"',
@@ -1742,6 +2045,48 @@ START_HERE_ITEMS=""
         self.assertIn(
             '--assets-dir release-assets',
             verify_guide,
+        )
+
+    def test_verify_guide_prepares_signature_first_with_release_fingerprint(self) -> None:
+        guide = VERIFY_GUIDE.read_text(encoding="utf-8")
+        signature_heading = "## Verify the signed manifest first"
+        self.assertIn(signature_heading, guide)
+        self.assertLess(guide.index(signature_heading), guide.index("## Pin the public revision"))
+        signature_section = guide.split(signature_heading, 1)[1].split("## ", 1)[0]
+
+        for artifact in (
+            "ptxray-aix.sh",
+            "ptxray-ibmi.sh",
+            "ptxray-defs.sh",
+            "ptxray-review-pack.sh",
+            "ptxray-review-validate.awk",
+            "aixray-aix.sh",
+            "SHA256SUMS",
+            "SHA256SUMS.sig",
+            "POWERTRUE-RELEASE-PUBLIC.pem",
+        ):
+            with self.subTest(artifact=artifact):
+                self.assertIn(artifact, signature_section)
+        self.assertIn(
+            "openssl pkey -pubin -in POWERTRUE-RELEASE-PUBLIC.pem -outform DER",
+            signature_section,
+        )
+        self.assertIn(
+            "openssl dgst -sha256 -verify POWERTRUE-RELEASE-PUBLIC.pem "
+            "-signature SHA256SUMS.sig SHA256SUMS",
+            signature_section,
+        )
+        self.assertRegex(signature_section, r"(?s)RSA-3072.*SHA-256.*PKCS#1 v1\.5")
+        self.assertIn("independent", signature_section.casefold())
+        self.assertIn("fingerprint", signature_section.casefold())
+        self.assertIn(RELEASE_KEY_TRUST_URL, signature_section)
+        self.assertIn(
+            RELEASE_KEY_TRUST_URL,
+            SECURITY_POLICY.read_text(encoding="utf-8"),
+        )
+        self.assertIn(
+            "sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd",
+            signature_section,
         )
 
     def test_scanner_has_no_egress_command_primitive(self) -> None:

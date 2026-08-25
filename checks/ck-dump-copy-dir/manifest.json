@@ -6,7 +6,7 @@
     "dump_copy_dir"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "sysdumpdev -l",

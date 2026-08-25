@@ -6,7 +6,7 @@
     "snmp_community"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^community[ \t]+(public|private)' /etc/snmpd.conf /etc/snmpdv3.conf"

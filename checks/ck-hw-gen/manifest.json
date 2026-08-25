@@ -6,7 +6,7 @@
     "hw_gen"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "prtconf",

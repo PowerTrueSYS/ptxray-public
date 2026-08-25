@@ -6,7 +6,7 @@
     "trustchk_untrusted_scan"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "whence trustchk",
