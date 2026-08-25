@@ -42,6 +42,7 @@ PACKAGE_LOCK = ROOT / "package-lock.json"
 AGENT_INSTRUCTIONS = ROOT / "AGENTS.md"
 LEGACY_NAME_ALLOWLIST = ROOT / "docs" / "LEGACY-NAME-ALLOWLIST.md"
 DOWNLOAD_PAGE_URL = "https://powertruesystems.com/ptxray/"
+RELEASE_KEY_TRUST_URL = "https://powertruesystems.com/security/ptxray-release-key/"
 CANONICAL_REPOSITORY_URL = "https://github.com/PowerTrueSYS/ptxray-public"
 RELEASE_ASSET_URL = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh"
@@ -2078,6 +2079,11 @@ START_HERE_ITEMS=""
         self.assertRegex(signature_section, r"(?s)RSA-3072.*SHA-256.*PKCS#1 v1\.5")
         self.assertIn("independent", signature_section.casefold())
         self.assertIn("fingerprint", signature_section.casefold())
+        self.assertIn(RELEASE_KEY_TRUST_URL, signature_section)
+        self.assertIn(
+            RELEASE_KEY_TRUST_URL,
+            SECURITY_POLICY.read_text(encoding="utf-8"),
+        )
         self.assertIn(
             "sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd",
             signature_section,

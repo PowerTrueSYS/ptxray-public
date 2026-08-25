@@ -161,8 +161,9 @@ The authoritative release-key fingerprint is:
 sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
 ```
 
-Confirm that value through the independently controlled PowerTrue security
-page before trusting the public key downloaded with a release.
+Confirm that value through the independently controlled
+[PowerTrue PTxray release-key trust page](https://powertruesystems.com/security/ptxray-release-key/)
+before trusting the public key downloaded with a release.
 
 ## IBM FLRTVC delivery data
 

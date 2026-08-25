@@ -16,8 +16,9 @@ Do not run it first on a production AIX target.
 ## Verify the signed manifest first
 
 This is the verification order for the published PTxray 1.5.0 release. Obtain
-the release-key fingerprint through the independently controlled PowerTrue
-security page before trusting a public key downloaded beside the payloads.
+the release-key fingerprint through the independently controlled
+[PowerTrue PTxray release-key trust page](https://powertruesystems.com/security/ptxray-release-key/)
+before trusting a public key downloaded beside the payloads.
 
 The designed release asset set is exactly:
 
@@ -47,9 +48,10 @@ openssl pkey -pubin -in POWERTRUE-RELEASE-PUBLIC.pem -outform DER \
   | openssl dgst -sha256
 ```
 
-Compare that value with the authoritative fingerprint obtained through the
-independent channel. Do not compare it only with another file or page from the
-same download location. The expected fingerprint is:
+Compare that value with the authoritative fingerprint on the independent
+[PowerTrue trust page](https://powertruesystems.com/security/ptxray-release-key/).
+Do not compare it only with another file or page from the same download
+location. The expected fingerprint is:
 
 ```text
 sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
