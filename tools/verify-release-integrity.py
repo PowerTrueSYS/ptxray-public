@@ -103,6 +103,76 @@ def release_asset_aliases_for_version(version: str | None) -> dict[str, str]:
     return dict(CURRENT_RELEASE_ASSET_ALIASES)
 
 
+def remove_shell_line_continuations(shell_text: str) -> str:
+    """Apply the shell's pre-tokenization backslash-newline removal."""
+    output = []
+    quote = ""
+    comment = False
+    word_started = False
+    index = 0
+    while index < len(shell_text):
+        character = shell_text[index]
+        following = shell_text[index + 1] if index + 1 < len(shell_text) else ""
+
+        if comment:
+            if character == "\\" and following == "\n":
+                index += 2
+                continue
+            output.append(character)
+            index += 1
+            if character == "\n":
+                comment = False
+                word_started = False
+            continue
+
+        if quote == "'":
+            output.append(character)
+            index += 1
+            if character == "'":
+                quote = ""
+            continue
+
+        if quote == '"':
+            if character == "\\" and following == "\n":
+                index += 2
+                continue
+            output.append(character)
+            index += 1
+            if character == "\\" and following:
+                output.append(following)
+                index += 1
+            elif character == '"':
+                quote = ""
+            continue
+
+        if character == "\\" and following == "\n":
+            index += 2
+            continue
+        if character == "\\" and following:
+            output.extend((character, following))
+            index += 2
+            word_started = True
+            continue
+        if character in "'\"":
+            quote = character
+            output.append(character)
+            index += 1
+            word_started = True
+            continue
+        if character == "#" and not word_started:
+            comment = True
+            output.append(character)
+            index += 1
+            continue
+        output.append(character)
+        index += 1
+        if character.isspace() or character in ";&|()<>":
+            word_started = False
+        else:
+            word_started = True
+    return "".join(output)
+
+
 class Validator:
     """Collect every actionable release-integrity error in one run."""
 
@@ -532,6 +602,7 @@ class Validator:
             except UnicodeDecodeError as exc:
                 self.fail(f"{relative} is not valid UTF-8: {exc}")
                 continue
+            source = remove_shell_line_continuations(source)
             quoted = re.findall(
                 rf"(?m)^{re.escape(variable)}=[\"']([^\"']+)[\"'][ \t]*$",
                 source,

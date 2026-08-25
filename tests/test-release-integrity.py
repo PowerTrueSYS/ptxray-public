@@ -470,6 +470,26 @@ class ReleaseIntegrityTests(unittest.TestCase):
         self.assertIn("version declaration missing or ambiguous", combined)
 
     @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_continued_line_version_override(self) -> None:
+        self.configure_signed_v150_candidate()
+        scanner_path = self.tree / "ptxray-aix.sh"
+        scanner = scanner_path.read_text(encoding="utf-8")
+        payload = scanner + ":; VERSION\\\n=9.9.9\n"
+        scanner_path.write_text(payload, encoding="utf-8")
+        (self.tree / "site" / "ptxray-aix.sh").write_text(
+            payload, encoding="utf-8"
+        )
+        (self.tree / "aixray-aix.sh").write_text(
+            payload, encoding="utf-8"
+        )
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("version declaration missing or ambiguous", combined)
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
     def test_v150_rejects_a_tampered_manifest_signature(self) -> None:
         self.configure_signed_v150_candidate()
         (self.tree / "SHA256SUMS.sig").write_bytes(b"not a signature\n")

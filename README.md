@@ -226,7 +226,9 @@ python3 tools/sync-release-shape.py --check
 find checks -name manifest.json | wc -l
 jq -e 'all(.checks[]; .read_only == true and .license == "Apache-2.0")' catalog.json
 version=$(jq -r '.tool_version' catalog.json)
-rg -n -F -e "VERSION=\"${version}\"" -e "AIXRAY_REVIEW_PACK_VERSION=\"${version}\"" -e "AIXRAY_STANDALONE_VERSION=\"${version}\"" ptxray-aix.sh ptxray-review-pack.sh checks --glob '*.ksh'
+set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh
+[ ! -f ptxray-defs.sh ] || set -- "$@" ptxray-defs.sh
+rg -n -F -e "VERSION=\"${version}\"" -e "PTXRAY_DEFS_VERSION=\"${version}\"" -e "PTXRAY_VERSION=${version}" -e "AIXRAY_REVIEW_PACK_VERSION=\"${version}\"" -e "AIXRAY_STANDALONE_VERSION=\"${version}\"" "$@" checks --glob '*.ksh'
 rg -n 'NOT_ASSESSED' ptxray-aix.sh
 cmp ptxray-aix.sh site/ptxray-aix.sh
 set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh checks/*/*.ksh
