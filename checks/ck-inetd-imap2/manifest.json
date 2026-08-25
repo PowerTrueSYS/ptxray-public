@@ -6,7 +6,7 @@
     "inetd_imap2"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*imap2[\t ]' /etc/inetd.conf"

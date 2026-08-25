@@ -7,7 +7,7 @@
     "account_inventory_delta"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "awk -F: '$3==0 {print $1}' /etc/passwd",

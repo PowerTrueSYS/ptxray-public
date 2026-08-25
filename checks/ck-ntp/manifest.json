@@ -6,7 +6,7 @@
     "ntp"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lssrc -s xntpd",

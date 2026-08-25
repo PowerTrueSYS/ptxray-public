@@ -1,14 +1,666 @@
 #!/QOpenSys/usr/bin/ksh
 # PTxray IBM i edition. Read-only; assembled into one inspectable PASE script.
 set -u
-PATH=/QOpenSys/usr/bin:/usr/bin:/QOpenSys/pkgs/bin:${PATH:-}
+# The interpreter is already running, but no privileged child tool has run.
+# Do not let inherited OpenSSL configuration/provider paths or dynamic-loader
+# paths reach the fixed-path verifier used to authenticate the adjacent
+# definitions downloader.
+unset SSL_CERT_DIR SSL_CERT_FILE SSLKEYLOGFILE
+unset OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+unset OPENSSL_TRACE OPENSSL_MALLOC_FD OPENSSL_MALLOC_FAILURES
+unset OPENSSL_MALLOC_SEED CTLOG_FILE RANDFILE
+unset LIBPATH LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT SHLIB_PATH
+unset LDR_PRELOAD LDR_PRELOAD64
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+PATH=/QOpenSys/usr/bin:/usr/bin:/bin:/QOpenSys/pkgs/bin
 export PATH
 LC_ALL=C
 export LC_ALL
+PTXRAY_SELF=$0
+PTXRAY_DEFS_INTEGRATION=1
+PTXRAY_DEFS_DOWNLOADER_SHA256='8720efb8c04366da97c4b8f187ef6dcfb924d17fc38d1898900da813694822af'
+# Shared post-identity-gate selector for the adjacent signed-data downloader.
+# This module contains no transport implementation and no endpoint. Assemblers
+# bind the exact same-release downloader digest above it.
+PTXRAY_DEFS_SELECTED=0
+PTXRAY_DEFS_SELECTED_MODE=none
+PTXRAY_DEFS_SEQUENCE=unknown
+PTXRAY_DEFS_CREATED_AT=unknown
+PTXRAY_DEFS_AGE_DAYS=unknown
+PTXRAY_DEFS_FRESHNESS=unavailable
+PTXRAY_DEFS_KEV_VERSION=unknown
+PTXRAY_DEFS_KEV_ASOF=unknown
+PTXRAY_DEFS_KEV_SHA256=unknown
+PTXRAY_DEFS_APAR_VERSION=unknown
+PTXRAY_DEFS_APAR_ASOF=unknown
+PTXRAY_DEFS_APAR_SHA256=unknown
+PTXRAY_DEFS_GENERATION=none
+PTXRAY_DEFS_UPDATE_ERROR=none
+PTXRAY_DEFS_OUTCOME=not-requested
+PTXRAY_DEFS_PATH=
+PTXRAY_DEFS_SNAPSHOT_DIR=
+PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+PTXRAY_DEFS_SNAPSHOT_KEV=
+PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES=
+PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+PTXRAY_DEFS_SNAPSHOT_APAR=
+PTXRAY_DEFS_SNAPSHOT_APAR_ID=
 
-PTXRAY_VERSION=1.4.0
+function ptxray_defs_self_dir {
+  typeset resolved
+  case "$PTXRAY_SELF" in
+    */*) (CDPATH= cd -- "$(dirname "$PTXRAY_SELF")" 2>/dev/null \
+            && (pwd -P 2>/dev/null || pwd));;
+    *)
+      resolved=$(whence -p "$PTXRAY_SELF" 2>/dev/null) || return 1
+      case "$resolved" in
+        */*) (CDPATH= cd -- "$(dirname "$resolved")" 2>/dev/null \
+                && (pwd -P 2>/dev/null || pwd));;
+        *) return 1;;
+      esac
+      ;;
+  esac
+}
+
+function ptxray_defs_directory_safe {
+  typeset directory listing mode owner me group_write other_write sticky
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ld "$directory" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = d ] || return 1
+  [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+    || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ] || return 1
+  group_write=$(printf '%s' "$mode" | cut -c6)
+  other_write=$(printf '%s' "$mode" | cut -c9)
+  sticky=$(printf '%s' "$mode" | cut -c10)
+  if [ "$group_write" = w ] || [ "$other_write" = w ]; then
+    case "$sticky" in t|T) ;; *) return 1;; esac
+  fi
+  return 0
+}
+
+function ptxray_defs_ancestry_safe {
+  typeset directory parent
+  directory=$1
+  case "$directory" in /*) ;; *) return 1;; esac
+  while :; do
+    ptxray_defs_directory_safe "$directory" || return 1
+    [ "$directory" = / ] && return 0
+    parent=${directory%/*}; [ -n "$parent" ] || parent=/
+    [ "$parent" != "$directory" ] || return 1
+    directory=$parent
+  done
+}
+
+function ptxray_defs_select_openssl {
+  typeset candidate listing mode owner links me directory
+  for candidate in \
+      /usr/bin/openssl \
+      /opt/freeware/bin/openssl \
+      /QOpenSys/pkgs/bin/openssl
+  do
+    [ -x "$candidate" ] && [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || continue
+    listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || continue
+    mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+    links=$(printf '%s\n' "$listing" | awk '{print $2}')
+    owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+    me=$(id -un 2>/dev/null) || return 1
+    [ "$(printf '%s' "$mode" | cut -c1)" = - ] && [ "$links" = 1 ] \
+      && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+           || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ]; } \
+      && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+      && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || continue
+    directory=$(CDPATH= cd -- "$(dirname "$candidate")" 2>/dev/null \
+      && (pwd -P 2>/dev/null || pwd)) || continue
+    ptxray_defs_ancestry_safe "$directory" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+function ptxray_defs_sha256_file {
+  typeset verifier digest
+  verifier=$(ptxray_defs_select_openssl) || return 1
+  digest=$("$verifier" dgst -sha256 -r "$1" 2>/dev/null | awk '{print $1}') \
+    || return 1
+  printf '%s\n' "$digest" | awk '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    hex64($0){print;ok=1}END{exit ok?0:1}'
+}
+
+function ptxray_defs_private_dir_identity {
+  typeset directory listing inode mode owner me
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$directory" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode" in ''|*[!0-9]*) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = 'drwx------' ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s\n' "$inode" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_private_file_identity {
+  typeset path listing inode mode links owner size me
+  path=$1
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$path" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  links=$(printf '%s\n' "$listing" | awk '{print $3}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  size=$(printf '%s\n' "$listing" | awk '{print $6}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode:$links:$size" in *[!0-9:]*|::*|*:|:) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = '-rw-------' ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s|%s\n' "$inode" "$size" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_cleanup_snapshot {
+  typeset directory directory_id
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  directory=$PTXRAY_DEFS_SNAPSHOT_DIR
+  directory_id=$PTXRAY_DEFS_SNAPSHOT_DIR_ID
+  PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+  PTXRAY_DEFS_SNAPSHOT_DIR=
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+  [ -n "$directory" ] \
+    && [ "$directory_id" = "$(ptxray_defs_private_dir_identity \
+      "$directory" 2>/dev/null)" ] || return 1
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_KEV" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_KEV" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_KEV" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_CVES" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_CVES" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_CVES" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_APAR" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_APAR" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_APAR" 2>/dev/null || :
+  fi
+  PTXRAY_DEFS_SNAPSHOT_KEV=
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES=
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+  PTXRAY_DEFS_SNAPSHOT_APAR=
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=
+  rmdir "$directory" 2>/dev/null || return 1
+  return 0
+}
+
+function ptxray_defs_arm_snapshot_cleanup {
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  trap 'ptxray_defs_cleanup_snapshot' EXIT
+  trap 'ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+}
+
+function ptxray_defs_snapshot_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' \
+    -v generation="$PTXRAY_DEFS_GENERATION" \
+    -v kev="$PTXRAY_DEFS_KEV_SHA256" \
+    -v apar="$PTXRAY_DEFS_APAR_SHA256" '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=7||$1!="PTXRAY-DEFS"||$2!="1"||$3!="snapshot")bad=1
+      if($4!="generation=" generation)bad=1
+      if($5!="kev_sha256=" kev)bad=1
+      if($6!~/^cves_sha256=/||!hex64(substr($6,13)))bad=1
+      if($7!="apar_sha256=" apar)bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_prepare_snapshot {
+  typeset base physical try candidate output rc p1 p2 p3 generation kev cves apar
+  typeset actual
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  [ -n "$PTXRAY_DEFS_PATH" ] || return 1
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  try=0
+  while [ "$try" -lt 20 ]; do
+    candidate=$physical/.ptxray-definitions.$$.$try
+    if mkdir -m 700 "$candidate" 2>/dev/null; then
+      PTXRAY_DEFS_SNAPSHOT_DIR=$candidate
+      PTXRAY_DEFS_SNAPSHOT_ACTIVE=1
+      break
+    fi
+    try=$((try+1))
+  done
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 1
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=$(ptxray_defs_private_dir_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_DIR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  ptxray_defs_arm_snapshot_cleanup
+  output=$("$PTXRAY_DEFS_PATH" --snapshot "$PTXRAY_DEFS_GENERATION" \
+    "$candidate"); rc=$?
+  [ "$rc" -eq 0 ] && ptxray_defs_snapshot_protocol_valid "$output" \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  IFS='|' read p1 p2 p3 generation kev cves apar <<PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+$output
+PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=${cves#cves_sha256=}
+  PTXRAY_DEFS_SNAPSHOT_KEV=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev.json
+  PTXRAY_DEFS_SNAPSHOT_CVES=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev-cves.txt
+  PTXRAY_DEFS_SNAPSHOT_APAR=$PTXRAY_DEFS_SNAPSHOT_DIR/ibm-apar.csv
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_KEV") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_KEV") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_KEV_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_KEV")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_CVES") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_CVES") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_CVES")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_APAR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_APAR") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_APAR_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_APAR")" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_DIR_ID" = "$(ptxray_defs_private_dir_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_DIR")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  return 0
+}
+
+function ptxray_defs_resolve {
+  typeset selfdir candidate listing mode owner links me actual
+  PTXRAY_DEFS_PATH=
+  selfdir=$(ptxray_defs_self_dir) || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unavailable
+    echo 'ptxray: cannot resolve the adjacent definitions downloader directory' >&2
+    return 1
+  }
+  ptxray_defs_ancestry_safe "$selfdir" || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unsafe
+    echo 'ptxray: adjacent definitions downloader directory ancestry is unsafe' >&2
+    return 1
+  }
+  candidate=$selfdir/ptxray-defs.sh
+  [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -x "$candidate" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-missing
+    echo 'ptxray: same-release adjacent ptxray-defs.sh is missing or unsafe' >&2
+    return 1
+  }
+  listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  links=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = - ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = "$me" ]; } \
+    && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+    && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || {
+      PTXRAY_DEFS_OUTCOME=downloader-file-unsafe
+      echo 'ptxray: same-release adjacent ptxray-defs.sh ownership or mode is unsafe' >&2
+      return 1
+    }
+  actual=$(ptxray_defs_sha256_file "$candidate") || {
+    PTXRAY_DEFS_OUTCOME=downloader-verifier-unavailable
+    echo 'ptxray: cannot verify the adjacent definitions downloader digest' >&2
+    return 1
+  }
+  [ "$actual" = "$PTXRAY_DEFS_DOWNLOADER_SHA256" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-integrity-mismatch
+    echo 'ptxray: adjacent ptxray-defs.sh does not match this runner release; it was not executed' >&2
+    return 1
+  }
+  PTXRAY_DEFS_PATH=$candidate
+  return 0
+}
+
+function ptxray_defs_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' '
+    function digits(s){return s~/^(0|[1-9][0-9]*)$/}
+    function positive(s){return s~/^[1-9][0-9]*$/&&length(s)<=18}
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function ymd(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/}
+    function dotted(s){return s~/^[0-9][0-9][0-9][0-9][.][0-9][0-9][.][0-9][0-9]$/}
+    function version(s){return length(s)>=1&&length(s)<=64&&s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/}
+    function created(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/}
+    function generation(s, a,n){n=split(s,a,"-");return n==3&&a[1]=="g"&&positive(a[2])&&hex64(a[3])}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=15&&NF!=16)bad=1
+      if($1!="PTXRAY-DEFS"||$2!="1"||$3!="ok")bad=1
+      if($4!="update"&&$4!="cache"&&$4!="local"&&$4!="cache-fallback")bad=1
+      if($5!~/^sequence=/||!positive(substr($5,10)))bad=1
+      if($6!~/^created_at=/||!created(substr($6,12)))bad=1
+      if($7!~/^age_days=/||!digits(substr($7,10)))bad=1
+      if($8!="freshness=current"&&$8!="freshness=stale")bad=1
+      if($9!~/^kev_version=/||!dotted(substr($9,13)))bad=1
+      if($10!~/^kev_as_of=/||!ymd(substr($10,11)))bad=1
+      if($11!~/^kev_sha256=/||!hex64(substr($11,12)))bad=1
+      if($12!~/^apar_version=/||!version(substr($12,14)))bad=1
+      if($13!~/^apar_as_of=/||!ymd(substr($13,12)))bad=1
+      if($14!~/^apar_sha256=/||!hex64(substr($14,13)))bad=1
+      if($15!~/^generation=/||!generation(substr($15,12)))bad=1
+      if(NF==16){
+        if($4!="cache-fallback"||$16!~/^error=(transport|size-limit|signature|rollback|malformed|unsafe-cache|lock-contention)$/)bad=1
+      } else if($4=="cache-fallback")bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_accept_protocol {
+  typeset line p1 p2 p3 mode sequence created age freshness kev_version kev_asof
+  typeset kev_sha apar_version apar_asof apar_sha generation error
+  line=$1
+  ptxray_defs_protocol_valid "$line" || return 1
+  IFS='|' read p1 p2 p3 mode sequence created age freshness kev_version kev_asof \
+    kev_sha apar_version apar_asof apar_sha generation error <<PTXRAY_DEFS_PROTOCOL
+$line
+PTXRAY_DEFS_PROTOCOL
+  PTXRAY_DEFS_SELECTED=1
+  PTXRAY_DEFS_SELECTED_MODE=$mode
+  PTXRAY_DEFS_SEQUENCE=${sequence#sequence=}
+  PTXRAY_DEFS_CREATED_AT=${created#created_at=}
+  PTXRAY_DEFS_AGE_DAYS=${age#age_days=}
+  PTXRAY_DEFS_FRESHNESS=${freshness#freshness=}
+  PTXRAY_DEFS_KEV_VERSION=${kev_version#kev_version=}
+  PTXRAY_DEFS_KEV_ASOF=${kev_asof#kev_as_of=}
+  PTXRAY_DEFS_KEV_SHA256=${kev_sha#kev_sha256=}
+  PTXRAY_DEFS_APAR_VERSION=${apar_version#apar_version=}
+  PTXRAY_DEFS_APAR_ASOF=${apar_asof#apar_as_of=}
+  PTXRAY_DEFS_APAR_SHA256=${apar_sha#apar_sha256=}
+  PTXRAY_DEFS_GENERATION=${generation#generation=}
+  case "$error" in error=*) PTXRAY_DEFS_UPDATE_ERROR=${error#error=};; *) PTXRAY_DEFS_UPDATE_ERROR=none;; esac
+  PTXRAY_DEFS_OUTCOME=verified
+  return 0
+}
+
+function ptxray_defs_attempt {
+  typeset requested argument explicit output rc
+  requested=$1; argument=${2:-}; explicit=${3:-0}
+  if ! ptxray_defs_resolve; then
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if [ "$requested" = --local ]; then
+    output=$("$PTXRAY_DEFS_PATH" --local "$argument"); rc=$?
+  else
+    output=$("$PTXRAY_DEFS_PATH" "$requested"); rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    PTXRAY_DEFS_OUTCOME=downloader-refused
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if ! ptxray_defs_accept_protocol "$output"; then
+    PTXRAY_DEFS_OUTCOME=downloader-protocol-invalid
+    echo 'ptxray: adjacent definitions downloader returned an invalid status protocol' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  if ! ptxray_defs_prepare_snapshot; then
+    PTXRAY_DEFS_SELECTED=0
+    PTXRAY_DEFS_OUTCOME=snapshot-refused
+    echo 'ptxray: verified definitions could not be exported to a private run snapshot' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  return 0
+}
+
+function ptxray_defs_read_payload {
+  typeset source path expected actual before
+  source=$1
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  case "$source" in
+    cisa-kev)
+      path=$PTXRAY_DEFS_SNAPSHOT_KEV
+      expected=$PTXRAY_DEFS_KEV_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_KEV_ID
+      ;;
+    cisa-kev-cves)
+      path=$PTXRAY_DEFS_SNAPSHOT_CVES
+      expected=$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_CVES_ID
+      ;;
+    ibm-apar-csv)
+      path=$PTXRAY_DEFS_SNAPSHOT_APAR
+      expected=$PTXRAY_DEFS_APAR_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_APAR_ID
+      ;;
+    *) return 1;;
+  esac
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ] || return 1
+  actual=$(ptxray_defs_sha256_file "$path") || return 1
+  [ "$actual" = "$expected" ] || return 1
+  cat "$path" || return 1
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ]
+}
+
+function ptxray_defs_copy_payload {
+  typeset source destination expected actual
+  source=$1; destination=$2
+  case "$source" in
+    cisa-kev) expected=$PTXRAY_DEFS_KEV_SHA256;;
+    ibm-apar-csv) expected=$PTXRAY_DEFS_APAR_SHA256;;
+    *) return 1;;
+  esac
+  [ ! -e "$destination" ] && [ ! -L "$destination" ] || return 1
+  (set -C; umask 077; : >"$destination") 2>/dev/null || return 1
+  if ! ptxray_defs_read_payload "$source" >"$destination"; then
+    rm -f "$destination"
+    return 1
+  fi
+  chmod 600 "$destination" 2>/dev/null || { rm -f "$destination"; return 1; }
+  actual=$(ptxray_defs_sha256_file "$destination") || {
+    rm -f "$destination"; return 1
+  }
+  [ "$actual" = "$expected" ] || { rm -f "$destination"; return 1; }
+  return 0
+}
+
+function ptxray_defs_show_verified_age {
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 0
+  printf 'PTxray signed definitions verified: %s days old (%s), mode %s.\n' \
+    "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+    "$PTXRAY_DEFS_SELECTED_MODE" >&2
+}
+
+# ksh88 has no portable `read -t`, and some implementations restart a read
+# after a trapped signal.  A background reader writes into a mode-700 directory
+# created atomically under a trusted temporary parent; the foreground polls for
+# at most 30 seconds. EOF and timeout share the fail-closed cancellation path.
+function ptxray_defs_tty_read {
+  typeset base physical try prompt_dir reader elapsed limit read_rc
+  PTXRAY_DEFS_TTY_VALUE=
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  prompt_dir=
+  try=0
+  while [ "$try" -lt 20 ]; do
+    if mkdir -m 700 "$physical/.ptxray-prompt.$$.$try" 2>/dev/null; then
+      prompt_dir=$physical/.ptxray-prompt.$$.$try
+      break
+    fi
+    try=$((try+1))
+  done
+  [ -n "$prompt_dir" ] || return 1
+  umask 077
+  awk 'NR==1{print;exit}' <&3 >"$prompt_dir/value" &
+  reader=$!
+  limit=30
+  if [ "${PTXRAY_PRIVATE_TEST_BUILD:-0}" -eq 1 ] \
+      && [ "${PTXRAY_TEST_DEFS_FAST_TIMEOUT:-0}" = 1 ]; then
+    limit=1
+  fi
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ] \
+      && kill -0 "$reader" >/dev/null 2>&1; do
+    sleep 1
+    elapsed=$((elapsed+1))
+  done
+  if kill -0 "$reader" >/dev/null 2>&1; then
+    kill -9 "$reader" >/dev/null 2>&1 || :
+    wait "$reader" 2>/dev/null || :
+    rm -f "$prompt_dir/value" 2>/dev/null || :
+    rmdir "$prompt_dir" 2>/dev/null || :
+    return 1
+  fi
+  wait "$reader" 2>/dev/null
+  read_rc=$?
+  [ "$read_rc" -eq 0 ] \
+    && [ "$(wc -c <"$prompt_dir/value" 2>/dev/null | tr -d ' ')" -gt 0 ] \
+    || read_rc=1
+  PTXRAY_DEFS_TTY_VALUE=$(awk 'NR==1{print;exit}' "$prompt_dir/value" 2>/dev/null) \
+    || read_rc=1
+  rm -f "$prompt_dir/value" 2>/dev/null || read_rc=1
+  rmdir "$prompt_dir" 2>/dev/null || read_rc=1
+  [ "$read_rc" -eq 0 ]
+}
+
+function ptxray_defs_select_for_run {
+  typeset offline local_bundle answer local_path rc
+  offline=$1; local_bundle=$2
+  [ "$PTXRAY_DEFS_INTEGRATION" -eq 1 ] || return 0
+  if [ -n "$local_bundle" ]; then
+    ptxray_defs_attempt --local "$local_bundle" 1; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ "$offline" -eq 1 ]; then
+    ptxray_defs_attempt --cache '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if (: <> /dev/tty) 2>/dev/null; then
+    exec 3<> /dev/tty
+  else
+    ptxray_defs_attempt --update '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ -t 3 ]; then
+    while :; do
+      printf '%s\n' \
+        'PTxray signed definitions' \
+        '  Cache age: verified after selection' \
+        '  1. Update signed definitions now (default)' \
+        '  2. Use the last valid signed cache' \
+        '  3. Use a local signed definitions bundle' \
+        '  4. Continue without definitions' >&3
+      printf '%s' 'Selection [1] (30 seconds): ' >&3
+      if ! ptxray_defs_tty_read; then
+        exec 3>&-
+        PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+        echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+        return 130
+      fi
+      answer=$PTXRAY_DEFS_TTY_VALUE
+      [ -n "$answer" ] || answer=1
+      case "$answer" in
+        1)
+          exec 3>&-
+          ptxray_defs_attempt --update '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        2)
+          exec 3>&-
+          ptxray_defs_attempt --cache '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        3)
+          printf '%s' 'Local signed bundle path (30 seconds): ' >&3
+          if ! ptxray_defs_tty_read; then
+            exec 3>&-
+            PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+            echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+            return 130
+          fi
+          local_path=$PTXRAY_DEFS_TTY_VALUE
+          [ -n "$local_path" ] \
+            || { echo 'ptxray: a local signed bundle path is required' >&3; continue; }
+          exec 3>&-
+          ptxray_defs_attempt --local "$local_path" 1
+          rc=$?
+          ptxray_defs_show_verified_age
+          return "$rc"
+          ;;
+        4)
+          exec 3>&-
+          PTXRAY_DEFS_OUTCOME=operator-continued-without-definitions
+          return 0
+          ;;
+        *) echo 'ptxray: choose 1, 2, 3, or 4' >&3;;
+      esac
+    done
+  fi
+  exec 3>&-
+  ptxray_defs_attempt --update '' 0
+  ptxray_defs_show_verified_age
+  return 0
+}
+
+function ptxray_defs_summary {
+  if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ]; then
+    printf 'mode=%s; sequence=%s; signed=%s; age=%s days; freshness=%s; CISA KEV=%s (%s); IBM APAR=%s (%s); fallback_error=%s' \
+      "$PTXRAY_DEFS_SELECTED_MODE" "$PTXRAY_DEFS_SEQUENCE" "$PTXRAY_DEFS_CREATED_AT" \
+      "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+      "$PTXRAY_DEFS_KEV_VERSION" "$PTXRAY_DEFS_KEV_ASOF" \
+      "$PTXRAY_DEFS_APAR_VERSION" "$PTXRAY_DEFS_APAR_ASOF" \
+      "$PTXRAY_DEFS_UPDATE_ERROR"
+  else
+    printf 'mode=none; outcome=%s' "$PTXRAY_DEFS_OUTCOME"
+  fi
+}
+
+PTXRAY_VERSION=1.5.0
 FORMAT=text
 COMPLIANCE=cis-l1
+DEFINITIONS_OFFLINE=0
+DEFINITIONS_BUNDLE=""
+DEFINITIONS_OFFLINE_SEEN=0
+DEFINITIONS_BUNDLE_SEEN=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --text) FORMAT=text ;;
@@ -19,17 +671,36 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -gt 0 ] || { echo "ptxray-ibmi.sh: --compliance requires cis-l1 or cis-l2" >&2; exit 2; }
       case "$1" in cis-l1|cis-l2) COMPLIANCE=$1 ;; *) echo "ptxray-ibmi.sh: unsupported compliance profile: $1" >&2; exit 2;; esac
       ;;
+    --offline)
+      [ "$DEFINITIONS_OFFLINE_SEEN" -eq 0 ] \
+        || { echo 'ptxray-ibmi.sh: duplicate --offline' >&2; exit 2; }
+      DEFINITIONS_OFFLINE_SEEN=1
+      DEFINITIONS_OFFLINE=1
+      ;;
+    --definitions-bundle)
+      [ "$DEFINITIONS_BUNDLE_SEEN" -eq 0 ] \
+        || { echo 'ptxray-ibmi.sh: duplicate --definitions-bundle' >&2; exit 2; }
+      DEFINITIONS_BUNDLE_SEEN=1
+      shift
+      [ "$#" -gt 0 ] \
+        || { echo 'ptxray-ibmi.sh: --definitions-bundle requires a signed bundle path' >&2; exit 2; }
+      DEFINITIONS_BUNDLE=$1
+      ;;
     --help|-h)
-      echo "usage: ptxray-ibmi.sh [--text|--json|--html] [--compliance cis-l1|cis-l2]"
+      echo "usage: ptxray-ibmi.sh [--text|--json|--html] [--compliance cis-l1|cis-l2] [--offline | --definitions-bundle SIGNED_FILE]"
       exit 0
       ;;
     *) echo "ptxray-ibmi.sh: unknown option: $1" >&2; exit 2 ;;
   esac
   shift
 done
+if [ "$DEFINITIONS_OFFLINE" -eq 1 ] && [ -n "$DEFINITIONS_BUNDLE" ]; then
+  echo 'ptxray-ibmi.sh: --offline conflicts with --definitions-bundle' >&2
+  exit 2
+fi
 
 function jesc {
-  awk 'BEGIN{ORS=""} {gsub(/\\/,"\\\\");gsub(/"/,"\\\"");gsub(/\t/,"\\t");gsub(/\r/,"\\r");if(NR>1)printf "\\n";print}'
+  awk 'BEGIN{ORS=""} {gsub(/\\/,"\\\\");gsub(/"/,"\\\"");gsub(/\t/,"\\t");gsub(/\r/,"\\r");gsub(/[\001-\010\013\014\016-\037]/,"");if(NR>1)printf "\\n";print}'
 }
 function hesc {
   awk 'BEGIN{ORS=""} {gsub(/&/,"\\&amp;");gsub(/</,"\\&lt;");gsub(/>/,"\\&gt;");gsub(/"/,"\\&quot;");if(NR>1)print "&#10;";print}'
@@ -63,10 +734,6 @@ function add {
   NFIND=$((NFIND + 1))
 }
 
-TODAY=${AIXRAY_TODAY:-$(date +%Y-%m-%d 2>/dev/null)}
-valid_ymd "$TODAY" || { echo "ptxray-ibmi.sh: invalid assessment date" >&2; exit 2; }
-TODAY_J=$(d2j "$TODAY")
-
 # IBM i probe verbs. Checks never call qsh/db2/system directly.
 IBMI_PROBES=1
 # Fixture hook matches aix(): AIXRAY_FIXTURES/<key>.out + optional .rc.
@@ -88,6 +755,10 @@ function ibmi_sql {
   typeset key rc out
   key=$1
   shift
+  if [ "${PTXRAY_PRIVATE_TEST_BUILD:-0}" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -97,7 +768,7 @@ function ibmi_sql {
     fi
     return 127
   fi
-  out=$(/QOpenSys/usr/bin/qsh -c "db2 \"$*\"" 2>/dev/null)
+  out=$(/QOpenSys/usr/bin/qsh -c "/usr/bin/db2 \"$*\"" 2>/dev/null)
   rc=$?
   printf '%s\n' "$out" | awk '/\|/ && $0 !~ /RECORD/ { gsub(/[ \t]+$/, ""); print }'
   return $rc
@@ -137,9 +808,21 @@ function ibmi_require_qsecofr {
       row=$0
       sub(/^[ \t]+/, "", row)
       sub(/[ \t]+$/, "", row)
-      if (row != "") { count++; value=row }
+      if (row == "") next
+      count++
+      fields=split(row, value, "[|]")
+      if (fields != 2) { malformed=1; next }
+      sub(/^[ \t]+/, "", value[1])
+      sub(/[ \t]+$/, "", value[1])
+      sub(/^[ \t]+/, "", value[2])
+      sub(/[ \t]+$/, "", value[2])
+      session=toupper(value[1])
+      system_user=toupper(value[2])
     }
-    END { exit !(count == 1 && value == "QSECOFR|QSECOFR") }
+    END {
+      exit !(count == 1 && !malformed \
+        && session == "QSECOFR" && system_user == "QSECOFR")
+    }
   ' >/dev/null 2>&1 || return 2
   return 0
 }
@@ -151,6 +834,10 @@ function ibmi_cl {
   typeset key rc
   key=$1
   shift
+  if [ "${PTXRAY_PRIVATE_TEST_BUILD:-0}" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -160,13 +847,27 @@ function ibmi_cl {
     fi
     return 127
   fi
-  system "$*" 2>/dev/null
+  /QOpenSys/usr/bin/system "$*" 2>/dev/null
 }
 
 if ! ibmi_require_qsecofr; then
   echo 'PTxray IBM i requires SESSION_USER=QSECOFR and SYSTEM_USER=QSECOFR; no scan was run.' >&2
   exit 2
 fi
+
+# Definitions are selected only after the normalized QSECOFR identity gate and
+# before any assessment probe. No SYSTOOLS or network-backed SQL source is used
+# as a substitute for the adjacent signed-data downloader.
+ptxray_defs_select_for_run "$DEFINITIONS_OFFLINE" "$DEFINITIONS_BUNDLE"
+PTXRAY_DEFS_SELECT_RC=$?
+[ "$PTXRAY_DEFS_SELECT_RC" -eq 0 ] || exit "$PTXRAY_DEFS_SELECT_RC"
+PTXRAY_DEFS_REPORT=$(ptxray_defs_summary)
+PTXRAY_DEFS_IBM_I_NOTE='CISA KEV and IBM APAR host matching are NOT_ASSESSED in this IBM i edition; no SYSTOOLS or network-backed SQL source is substituted.'
+
+TODAY=${AIXRAY_TODAY:-$(date +%Y-%m-%d 2>/dev/null)}
+valid_ymd "$TODAY" || { echo "ptxray-ibmi.sh: invalid assessment date" >&2; exit 2; }
+TODAY_J=$(d2j "$TODAY")
+
 # Shared SECURITY_INFO capture. Empty or refused is D-i6 evidence.
 
 function capture_cap_security_info {
@@ -224,107 +925,23 @@ function capture_cap_user_info {
 capture_cap_system_values
 capture_cap_security_info
 capture_cap_user_info
-  # cur_firmware — IBM i SYSTOOLS.FIRMWARE_CURRENCY
-  # Edition decision: docs/ibmi-systools-currency-exception.md
-  # (D-i8). This IBM-shipped SYSTOOLS view may reach IBM FLRT;
-  # offline degrades.
-  # Phase 5 currency, not CIS 5.5.1 (that is
-  # ck-cur-ptf-groups / GROUP_PTF_CURRENCY).
-  # INSTALLED LEVEL IS CURRENT is PASS.
-  # UPGRADE AVAILABLE is WARN med.
-  # UPDATE AVAILABLE / UPDATE AND UPGRADE
-  # AVAILABLE is WARN high (general currency;
-  # security-group FAIL is the sibling).
-  # rc 1 + empty is NOT_APPLICABLE (zero-row
-  # SELECT). rc 0 + empty is swallowed
-  # mid-fetch NOT_ASSESSED.
-  # One finding. Calls ibmi_sql only.
-  # Does not call ibmi_cl / DSPFMWSTS /
-  # DSPHDWRSC. Does not SELECT MTM or UAK.
-  # Does not COUNT(*) (that would HTTP twice).
-  FW_RAW=$(ibmi_sql fw_currency "SELECT 'FW' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_CURRENCY, '-')), 28) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_CURRENTFIXPACK, '-')), 20) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_RECOMMENDED_UPDATE, '-')), 20) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_RECOMMENDED_UPGRADE, '-')), 20) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_UPDATE_POLICY, '-')), 5) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(FW_IPL_REQUIRED, '-')), 3) FROM SYSTOOLS.FIRMWARE_CURRENCY")
-  FW_RC=$?
-  if [ "$FW_RC" -eq 1 ] && [ -z "$FW_RAW" ]; then
-    add lifecycle cur_firmware "IBM i firmware currency" NOT_APPLICABLE low \
-        "firmware row empty (zero-row SELECT)" \
-        "SYSTOOLS.FIRMWARE_CURRENCY returned no row for this partition, so no IBM FLRT firmware-currency grade is available from this partition." \
-        "review firmware on the HMC or the provider control plane. This scanner never changes firmware."
-  elif [ "$FW_RC" -ne 0 ]; then
-    add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
-        "not assessed — capture failed (rc=$FW_RC)" \
-        "The firmware-currency probe did not yield a readable FIRMWARE_CURRENCY dump, so firmware currency cannot be graded. The view reaches IBM FLRT when it runs." \
-        "compare the firmware level from DSPFMWSTS or the HMC or provider control plane against IBM FLRT or Fix Central, confirm job CCSID is not 65535 and Java is present, then re-run when the partition can reach the FLRT feed. This scanner never changes firmware."
-  elif [ -z "$FW_RAW" ]; then
-    add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
-        "not assessed — capture empty (rc=0)" \
-        "The firmware-currency probe returned no pipe row after a successful rc, so the FLRT fetch may have failed mid-query and firmware currency cannot be graded." \
-        "compare the firmware level from DSPFMWSTS or the HMC or provider control plane against IBM FLRT or Fix Central, then re-run when the partition can reach the FLRT feed. This scanner never changes firmware."
-  else
-    FW_PARSE=$(printf '%s\n' "$FW_RAW" | awk -F'|' '
-      function fxok(s) {
-        return (s ~ /^[A-Za-z0-9._-]{1,20}$/ && s != "-")
-      }
-      function recok(s) {
-        return (s == "-" || fxok(s))
-      }
-      $1=="FW" {
-        tok=$2; sub(/[ \t]+$/, "", tok)
-        cur=$3; sub(/[ \t]+$/, "", cur)
-        upd=$4; sub(/[ \t]+$/, "", upd)
-        upg=$5; sub(/[ \t]+$/, "", upg)
-        pol=$6; sub(/[ \t]+$/, "", pol)
-        ipl=$7; sub(/[ \t]+$/, "", ipl)
-        if (tok != "INSTALLED LEVEL IS CURRENT" && tok != "UPDATE AVAILABLE" && tok != "UPGRADE AVAILABLE" && tok != "UPDATE AND UPGRADE AVAILABLE") { junk=1; next }
-        if (!fxok(cur)) { junk=1; next }
-        if (!recok(upd)) { junk=1; next }
-        if (!recok(upg)) { junk=1; next }
-        if (pol != "HMC" && pol != "OPSYS" && pol != "-") { junk=1; next }
-        if (ipl != "YES" && ipl != "NO" && ipl != "-") { junk=1; next }
-        got = tok "|" cur "|" upd "|" upg "|" pol "|" ipl
-        if (seen) {
-          if (attr != got) junk=1
-          next
-        }
-        seen=1
-        attr=got
-        n++
-        next
-      }
-      END {
-        if (junk) { print "JUNK"; exit }
-        if (n != 1) { print "JUNK"; exit }
-        print "OK " attr
-      }')
-    if [ "$FW_PARSE" = "JUNK" ]; then
-      add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
-          "not assessed — FIRMWARE_CURRENCY value unreadable" \
-          "The firmware-currency dump was readable, but a row carried a currency token, fixpack, or update-policy value that could not be graded." \
-          "inspect SYSTOOLS.FIRMWARE_CURRENCY FW_CURRENCY, FW_CURRENTFIXPACK, FW_RECOMMENDED_UPDATE, FW_RECOMMENDED_UPGRADE, and FW_UPDATE_POLICY."
-    else
-      FW_TOK=$(printf '%s\n' "$FW_PARSE" | awk -F'|' '{ print $1 }' | awk '{ print substr($0,4) }')
-      FW_CUR=$(printf '%s\n' "$FW_PARSE" | awk -F'|' '{ print $2 }')
-      FW_UPD=$(printf '%s\n' "$FW_PARSE" | awk -F'|' '{ print $3 }')
-      FW_UPG=$(printf '%s\n' "$FW_PARSE" | awk -F'|' '{ print $4 }')
-      FW_POL=$(printf '%s\n' "$FW_PARSE" | awk -F'|' '{ print $5 }')
-      if [ "$FW_TOK" = "INSTALLED LEVEL IS CURRENT" ]; then
-        add lifecycle cur_firmware "IBM i firmware currency" PASS low \
-            "current=$FW_CUR policy=$FW_POL" \
-            "The installed firmware fix level matches the current IBM FLRT recommendation, so this partition is not behind on server firmware." \
-            "n/a"
-      elif [ "$FW_TOK" = "UPGRADE AVAILABLE" ]; then
-        add lifecycle cur_firmware "IBM i firmware currency" WARN med \
-            "current=$FW_CUR upgrade=$FW_UPG policy=$FW_POL" \
-            "A newer firmware family is available from IBM. The installed stream is not reported behind, but the upgrade path should be planned." \
-            "plan the firmware family upgrade on the HMC or provider control plane (policy HMC) or with PTFs for the firmware product (policy OPSYS). This scanner never changes firmware."
-      else
-        add lifecycle cur_firmware "IBM i firmware currency" WARN high \
-            "current=$FW_CUR available=$FW_UPD upgrade=$FW_UPG policy=$FW_POL" \
-            "IBM FLRT reports a firmware update is available, so this partition is behind on server firmware and newly published firmware fixes are not installed here." \
-            "apply the recommended firmware update from the HMC or provider control plane (policy HMC) or with PTFs for the firmware product (policy OPSYS). This scanner never changes firmware."
-      fi
-    fi
-  fi
 
+# The standalone atoms remain available for an operator who deliberately
+# permits IBM's network-backed SYSTOOLS currency views.  The public assessment
+# itself never runs those views, so their controls remain visible and honest.
+add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+    "not assessed — network-backed IBM FLRT query is disabled" \
+    "The public assessment makes no SYSTOOLS.FIRMWARE_CURRENCY request, because that view may contact IBM." \
+    "compare the observed firmware level against IBM FLRT or Fix Central outside this assessment."
+add patch cur_ptf_groups "PTF group currency" NOT_ASSESSED low \
+    "not assessed — network-backed IBM PSP query is disabled" \
+    "The public assessment makes no SYSTOOLS.GROUP_PTF_CURRENCY request, because that view may contact IBM PSP." \
+    "compare WRKPTFGRP installed levels against IBM Preventive Service Planning outside this assessment." \
+    "cis-l1"
+add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSED low \
+    "not assessed — network-backed IBM PSP query is disabled" \
+    "The public assessment makes no SYSTOOLS.GROUP_PTF_CURRENCY request, because that view may contact IBM PSP." \
+    "compare the installed Security and HIPER groups against IBM Preventive Service Planning outside this assessment."
   # cur_os_lifecycle — IBM i OS release vs embedded EOS table.
   # Authority: IBM Release life cycle as of DATA_VINTAGE.
   # Not a CIS rec. One finding. Calls ibmi_sql for
@@ -403,110 +1020,6 @@ capture_cap_user_info
                 "This IBM i release is in active support." "n/a"
           fi
         fi
-      fi
-    fi
-  fi
-
-  # cur_ptf_groups — IBM i PTF group currency
-  # (SYSTOOLS.GROUP_PTF_CURRENCY).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.5.1 (L1).
-  # No L2 rec. One finding. Calls ibmi_sql for compact
-  # GRP rows. Does not call ibmi_cl / WRKPTFGRP / DSPPTF.
-  # Does not query GROUP_PTF_INFO (would guess staleness).
-  # Does not hardcode SF-numbers. Title class from the
-  # view: SEC JAVA HTTP HIP OTH. CAST integer levels.
-  # All current plus four classes is PASS. Behind,
-  # pending IPL, not installed, or missing class is WARN.
-  # PSP INFORMATION NOT AVAILABLE is NOT_ASSESSED (D-i8).
-  PTF_RAW=$(ibmi_sql grpptfcur "SELECT 'GRP' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_ID, '')),7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_CURRENCY, '')),46) CONCAT '|' CONCAT COALESCE(CAST(PTF_GROUP_LEVEL_INSTALLED AS VARCHAR(10)), '-') CONCAT '|' CONCAT COALESCE(CAST(PTF_GROUP_LEVEL_AVAILABLE AS VARCHAR(10)), '-') CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_STATUS_ON_SYSTEM, '')),20) CONCAT '|' CONCAT CAST(CASE WHEN POSSTR(COALESCE(PTF_GROUP_TITLE, ''), 'Group Security') > 0 THEN 'SEC' WHEN POSSTR(COALESCE(PTF_GROUP_TITLE, ''), 'Group Hiper') > 0 THEN 'HIP' WHEN POSSTR(COALESCE(PTF_GROUP_TITLE, ''), 'HIPER') > 0 THEN 'HIP' WHEN POSSTR(COALESCE(PTF_GROUP_TITLE, ''), 'HTTP Server') > 0 THEN 'HTTP' WHEN POSSTR(COALESCE(PTF_GROUP_TITLE, ''), 'Java') > 0 THEN 'JAVA' ELSE 'OTH' END AS VARCHAR(4)) FROM SYSTOOLS.GROUP_PTF_CURRENCY")
-  PTF_RC=$?
-  if [ "$PTF_RC" -eq 0 ] && [ -z "$PTF_RAW" ]; then
-    add patch cur_ptf_groups "PTF group currency" NOT_ASSESSED low \
-        "not assessed — capture empty (rc=0)" \
-        "The PTF group currency probe returned no pipe row, so PTF group currency cannot be graded." \
-        "re-run the scan as the scan profile and confirm SYSTOOLS.GROUP_PTF_CURRENCY returns PTF_GROUP_CURRENCY rows. This scanner never applies PTFs." \
-        "cis-l1"
-  elif [ "$PTF_RC" -eq 1 ] && [ -z "$PTF_RAW" ]; then
-    add patch cur_ptf_groups "PTF group currency" WARN med \
-        "groups=0 current=0 behind=0 pending=0 missing=4" \
-        "No PTF group currency rows were returned, so the security, HIPER, Java, and HTTP Server groups are not current on this partition." \
-        "install the IBM i PTF groups and re-run. This scanner never applies PTFs." \
-        "cis-l1"
-  elif [ "$PTF_RC" -ne 0 ]; then
-    add patch cur_ptf_groups "PTF group currency" NOT_ASSESSED low \
-        "not assessed — capture failed (rc=$PTF_RC)" \
-        "The PTF group currency probe did not yield a readable GROUP_PTF_CURRENCY dump, so PTF group currency cannot be graded." \
-        "re-run the scan as the scan profile and confirm SYSTOOLS.GROUP_PTF_CURRENCY returns PTF_GROUP_CURRENCY rows. Job CCSID must not be 65535. This scanner never applies PTFs." \
-        "cis-l1"
-  else
-    PTF_PARSE=$(printf '%s\n' "$PTF_RAW" | awk -F'|' '
-      $1=="GRP" {
-        id=$2; sub(/[ \t]+$/, "", id); sub(/^[ \t]+/, "", id)
-        cur=$3; sub(/[ \t]+$/, "", cur); sub(/^[ \t]+/, "", cur)
-        inst=$4; sub(/[ \t]+$/, "", inst); sub(/^[ \t]+/, "", inst)
-        avail=$5; sub(/[ \t]+$/, "", avail); sub(/^[ \t]+/, "", avail)
-        sts=$6; sub(/[ \t]+$/, "", sts); sub(/^[ \t]+/, "", sts)
-        cls=$7; sub(/[ \t]+$/, "", cls); sub(/^[ \t]+/, "", cls)
-        if (id !~ /^[A-Z][A-Z0-9]{6}$/) { junk=1; next }
-        if (inst != "-" && inst !~ /^[0-9]+$/) { junk=1; next }
-        if (avail != "-" && avail !~ /^[0-9]+$/) { junk=1; next }
-        if (sts != "INSTALLED" && sts != "NOT INSTALLED") { junk=1; next }
-        if (cls != "SEC" && cls != "JAVA" && cls != "HTTP" && cls != "HIP" && cls != "OTH") { junk=1; next }
-        if (cur != "INSTALLED LEVEL IS CURRENT" && cur != "CURRENT AT THE NEXT IPL" && cur != "UPDATE AVAILABLE" && cur != "PSP INFORMATION NOT AVAILABLE") { junk=1; next }
-        key=id
-        val=cur "|" sts "|" cls
-        if (seen[key] && seen[key] != val) { junk=1; next }
-        if (seen[key]) next
-        seen[key]=val
-        n++
-        if (cur == "PSP INFORMATION NOT AVAILABLE") psp=1
-        else if (cur == "UPDATE AVAILABLE") b++
-        else if (cur == "CURRENT AT THE NEXT IPL") p++
-        else if (sts == "NOT INSTALLED") p++
-        else c++
-        if (cls=="SEC") has_sec=1
-        if (cls=="JAVA") has_java=1
-        if (cls=="HTTP") has_http=1
-        if (cls=="HIP") has_hip=1
-        next
-      }
-      END {
-        if (junk) { print "JUNK"; exit }
-        if (n+0 == 0) { print "JUNK"; exit }
-        if (psp) { print "PSP"; exit }
-        m = (has_sec?0:1)+(has_java?0:1)+(has_http?0:1)+(has_hip?0:1)
-        printf "OK %d %d %d %d %d\n", n+0, c+0, b+0, p+0, m+0
-      }')
-    if [ "$PTF_PARSE" = "JUNK" ]; then
-      add patch cur_ptf_groups "PTF group currency" NOT_ASSESSED low \
-          "not assessed — GROUP_PTF_CURRENCY value unreadable" \
-          "The PTF group currency dump was readable, but a row carried a group id, currency token, status, or title class that could not be graded." \
-          "inspect SYSTOOLS.GROUP_PTF_CURRENCY PTF_GROUP_ID, PTF_GROUP_CURRENCY, PTF_GROUP_STATUS_ON_SYSTEM, and PTF_GROUP_TITLE." \
-          "cis-l1"
-    elif [ "$PTF_PARSE" = "PSP" ]; then
-      add patch cur_ptf_groups "PTF group currency" NOT_ASSESSED low \
-          "not assessed — PSP information not available" \
-          "The PTF group currency probe could not reach IBM Preventive Service Planning, so PTF group currency cannot be graded." \
-          "compare WRKPTFGRP installed levels against the IBM Preventive Service Planning group PTF page. This scanner never applies PTFs." \
-          "cis-l1"
-    else
-      PTF_N=$(printf '%s\n' "$PTF_PARSE" | awk '{ print $2 }')
-      PTF_C=$(printf '%s\n' "$PTF_PARSE" | awk '{ print $3 }')
-      PTF_B=$(printf '%s\n' "$PTF_PARSE" | awk '{ print $4 }')
-      PTF_P=$(printf '%s\n' "$PTF_PARSE" | awk '{ print $5 }')
-      PTF_M=$(printf '%s\n' "$PTF_PARSE" | awk '{ print $6 }')
-      if [ "$PTF_B" -eq 0 ] && [ "$PTF_P" -eq 0 ] && [ "$PTF_M" -eq 0 ]; then
-        add patch cur_ptf_groups "PTF group currency" PASS low \
-            "groups=$PTF_N current=$PTF_C behind=0 pending=0 missing=0" \
-            "Every IBM i PTF group on this partition matches the IBM Preventive Service Planning level, including the security, HIPER, Java, and HTTP Server groups." \
-            "n/a" \
-            "cis-l1"
-      else
-        add patch cur_ptf_groups "PTF group currency" WARN med \
-            "groups=$PTF_N current=$PTF_C behind=$PTF_B pending=$PTF_P missing=$PTF_M" \
-            "One or more IBM i PTF groups are behind the IBM Preventive Service Planning level, pending the next IPL, not fully applied, or the security, HIPER, Java, or HTTP Server group is not present." \
-            "download and apply the current PTF group levels. This scanner never applies PTFs." \
-            "cis-l1"
       fi
     fi
   fi
@@ -1488,136 +2001,6 @@ fi
         add patch sec_bulletin_vintage "IBM i security-data vintage" PASS low \
             "as_of=$SEC_BULLETIN_VINTAGE today=$TODAY age=$BV_AGE threshold=$SEC_BULLETIN_THRESHOLD" \
             "The scanner build/release date is within the 30-day freshness window. This scanner does not enumerate IBM i CVEs from a bulletin feed." \
-            "n/a"
-      fi
-    fi
-  fi
-
-  # sec_group_currency — IBM i Security and HIPER
-  # rows of SYSTOOLS.GROUP_PTF_CURRENCY vs IBM PSP
-  # (D-i8 network exception).
-  # Phase 6 security-fixes, not CIS 5.5.1 (that is
-  # ck-cur-ptf-groups / WARN on every group).
-  # INSTALLED LEVEL IS CURRENT + INSTALLED on
-  # both Security and HIPER titles is PASS.
-  # UPDATE AVAILABLE / CURRENT AT THE NEXT IPL /
-  # NOT INSTALLED / missing title is FAIL high.
-  # PSP INFORMATION NOT AVAILABLE is
-  # NOT_ASSESSED unless a FAIL class is also
-  # present. rc 1 + empty is FAIL missing
-  # (not firmware N/A). rc 0 + empty is
-  # swallowed mid-fetch NOT_ASSESSED.
-  # Identify groups by title substring
-  # " Group Security" / " Group Hiper".
-  # Never hardcode SF-numbers.
-  # One finding. Calls ibmi_sql only.
-  # Does not call ibmi_cl / WRKPTFGRP / DSPPTF.
-  # Does not SELECT * / COUNT(*) (second HTTP).
-  # Does not WHERE title LIKE (0-row rc 1 trap).
-  SC_RAW=$(ibmi_sql sec_grp_currency "SELECT 'GRP' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_ID, '-')), 7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_TITLE, '-')), 80) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_CURRENCY, '-')), 46) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(PTF_GROUP_LEVEL_INSTALLED), '-'), 11) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(PTF_GROUP_LEVEL_AVAILABLE), '-'), 11) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_STATUS_ON_SYSTEM, '-')), 20) FROM SYSTOOLS.GROUP_PTF_CURRENCY")
-  SC_RC=$?
-  if [ "$SC_RC" -eq 1 ] && [ -z "$SC_RAW" ]; then
-    add patch sec_group_currency "Security and HIPER group PTF currency" FAIL high \
-        "sec=missing hiper=missing" \
-        "No group-PTF currency rows are visible, so the IBM i Security and HIPER group PTFs are not present to grade as current." \
-        "install the current IBM i Security and HIPER group PTFs from IBM Fix Central or the PSP page, then IPL if required. Offline, compare WRKPTFGRP levels to the IBM PSP page. This scanner never applies PTFs."
-  elif [ "$SC_RC" -ne 0 ]; then
-    add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSED low \
-        "not assessed — capture failed (rc=$SC_RC)" \
-        "The group-PTF currency probe did not yield a readable GROUP_PTF_CURRENCY dump, so Security and HIPER group currency cannot be graded. The view reaches IBM PSP when it runs." \
-        "compare WRKPTFGRP Security and HIPER group levels to the IBM PSP page, confirm job CCSID is not 65535 and Java is present, then re-run when the partition can reach the IBM PSP feed. This scanner never applies PTFs."
-  elif [ -z "$SC_RAW" ]; then
-    add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSED low \
-        "not assessed — capture empty (rc=0)" \
-        "The group-PTF currency probe returned no pipe row after a successful rc, so the PSP fetch may have failed mid-query and Security and HIPER group currency cannot be graded." \
-        "compare WRKPTFGRP Security and HIPER group levels to the IBM PSP page, then re-run when the partition can reach the IBM PSP feed. This scanner never applies PTFs."
-  else
-    SC_PARSE=$(printf '%s\n' "$SC_RAW" | awk -F'|' '
-      function trim(s) {
-        sub(/^[ \t]+/, "", s)
-        sub(/[ \t]+$/, "", s)
-        return s
-      }
-      function rank(c) {
-        if (c == "behind") return 5
-        if (c == "pending-ipl") return 4
-        if (c == "not-applied") return 3
-        if (c == "psp-unavailable") return 2
-        if (c == "current") return 1
-        return 0
-      }
-      function setkind(kind, c, inst, avail) {
-        obs = c
-        if (c == "behind" || c == "current" || c == "pending-ipl" || c == "not-applied")
-          obs = c ":" inst "/" avail
-        if (kind == "sec") {
-          if (rank(c) > rank(sec_c)) { sec_c = c; sec_obs = obs }
-          sec_n++
-        } else {
-          if (rank(c) > rank(hip_c)) { hip_c = c; hip_obs = obs }
-          hip_n++
-        }
-      }
-      $1 == "GRP" {
-        title = trim($3)
-        cur = trim($4)
-        inst = trim($5)
-        avail = trim($6)
-        sts = trim($7)
-        is_sec = (index(title, " Group Security") > 0)
-        is_hip = (index(title, " Group Hiper") > 0)
-        if (is_sec && is_hip) { junk = 1; next }
-        if (!is_sec && !is_hip) next
-        if (cur == "UPDATE AVAILABLE") c = "behind"
-        else if (cur == "CURRENT AT THE NEXT IPL") c = "pending-ipl"
-        else if (cur == "PSP INFORMATION NOT AVAILABLE") c = "psp-unavailable"
-        else if (cur == "INSTALLED LEVEL IS CURRENT") {
-          if (sts == "INSTALLED") c = "current"
-          else if (sts == "NOT INSTALLED") c = "not-applied"
-          else { junk = 1; next }
-        } else { junk = 1; next }
-        if (inst == "") inst = "-"
-        if (avail == "") avail = "-"
-        if (is_sec) setkind("sec", c, inst, avail)
-        else setkind("hiper", c, inst, avail)
-        next
-      }
-      END {
-        if (junk) { print "JUNK"; exit }
-        if (sec_n == 0) { sec_c = "missing"; sec_obs = "missing" }
-        if (hip_n == 0) { hip_c = "missing"; hip_obs = "missing" }
-        fail = 0
-        psp = 0
-        if (sec_c == "behind" || sec_c == "pending-ipl" || sec_c == "not-applied" || sec_c == "missing") fail = 1
-        if (hip_c == "behind" || hip_c == "pending-ipl" || hip_c == "not-applied" || hip_c == "missing") fail = 1
-        if (sec_c == "psp-unavailable" || hip_c == "psp-unavailable") psp = 1
-        if (fail) print "OK|FAIL|" sec_obs "|" hip_obs
-        else if (psp) print "OK|NOT_ASSESSED|" sec_obs "|" hip_obs
-        else print "OK|PASS|" sec_obs "|" hip_obs
-      }')
-    if [ "$SC_PARSE" = "JUNK" ]; then
-      add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSED low \
-          "not assessed — GROUP_PTF_CURRENCY value unreadable" \
-          "The group-PTF currency dump was readable, but a Security or HIPER row carried a currency or status token that could not be graded." \
-          "inspect SYSTOOLS.GROUP_PTF_CURRENCY PTF_GROUP_TITLE, PTF_GROUP_CURRENCY, and PTF_GROUP_STATUS_ON_SYSTEM for the Security and HIPER groups."
-    else
-      SC_KIND=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $2 }')
-      SC_SEC=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $3 }')
-      SC_HIP=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $4 }')
-      if [ "$SC_KIND" = "FAIL" ]; then
-        add patch sec_group_currency "Security and HIPER group PTF currency" FAIL high \
-            "sec=$SC_SEC hiper=$SC_HIP" \
-            "The IBM i Security or HIPER group PTF is behind IBM PSP, pending the next IPL, not fully applied, or not present, so published HIPER or security fixes are not active on this partition." \
-            "apply the current IBM i Security and HIPER group PTFs from IBM Fix Central or the PSP page, then IPL if required. Offline, compare WRKPTFGRP levels to the IBM PSP page. This scanner never applies PTFs."
-      elif [ "$SC_KIND" = "NOT_ASSESSED" ]; then
-        add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSED low \
-            "not assessed — sec=$SC_SEC hiper=$SC_HIP" \
-            "The Security or HIPER group PTF row could not reach IBM PSP, so Security and HIPER group currency cannot be graded." \
-            "compare WRKPTFGRP Security and HIPER group levels to the IBM PSP page, then re-run when the partition can reach the IBM PSP feed. This scanner never applies PTFs."
-      else
-        add patch sec_group_currency "Security and HIPER group PTF currency" PASS low \
-            "sec=$SC_SEC hiper=$SC_HIP" \
-            "The IBM i Security and HIPER group PTFs are installed at the current IBM PSP level, so published HIPER and security fixes in those groups are on this partition." \
             "n/a"
       fi
     fi
@@ -2740,7 +3123,7 @@ fi
         add security sv_qalwobjrst "Allow restoration of security-sensitive objects" NOT_ASSESSED low \
             "not assessed — QALWOBJRST=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QALWOBJRST — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QALWOBJRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ "$QAL_TOK" = PASS ]; then
         if [ "$QAL_VAL" = "*NONE" ]; then
@@ -2822,7 +3205,7 @@ fi
         add security sv_qalwusrdmn "Allow user domain objects in libraries" NOT_ASSESSED low \
             "not assessed — QALWUSRDMN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QALWUSRDMN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QALWUSRDMN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l2"
       elif [ "$QUD_TOK" = PASS ]; then
         add security sv_qalwusrdmn "Allow user domain objects in libraries" PASS low \
@@ -2879,7 +3262,7 @@ fi
         add security sv_qatnpgm "Attention program" NOT_ASSESSED low \
             "not assessed — QATNPGM=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QATNPGM — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QATNPGM and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QATN_RAW" ]; then
         add security sv_qatnpgm "Attention program" NOT_ASSESSED low \
@@ -3067,7 +3450,7 @@ fi
         add security sv_qaudfrclvl "Auditing force level" NOT_ASSESSED low \
             "not assessed — QAUDFRCLVL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QAUDFRCLVL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QAUDFRCLVL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QFRC_RAW" ]; then
         add security sv_qaudfrclvl "Auditing force level" NOT_ASSESSED low \
@@ -3264,7 +3647,7 @@ fi
         add security sv_qautocfg "Automatic device configuration" NOT_ASSESSED low \
             "not assessed — QAUTOCFG=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QAUTOCFG — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QAUTOCFG and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QAC_RAW" ]; then
         add security sv_qautocfg "Automatic device configuration" NOT_ASSESSED low \
@@ -3321,7 +3704,7 @@ fi
         add security sv_qautormt "Automatic remote controller configuration" NOT_ASSESSED low \
             "not assessed — QAUTORMT=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QAUTORMT — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QAUTORMT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QARM_VAL" ]; then
         add security sv_qautormt "Automatic remote controller configuration" NOT_ASSESSED low \
@@ -3385,7 +3768,7 @@ fi
         add security sv_qautovrt "Automatic virtual device creation" NOT_ASSESSED low \
             "not assessed — QAUTOVRT=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QAUTOVRT — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QAUTOVRT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ "$QAV_RAW" = "*NOMAX" ]; then
         add security sv_qautovrt "Automatic virtual device creation" FAIL high \
@@ -3446,7 +3829,7 @@ fi
         add security sv_qcrtaut "Create authority" NOT_ASSESSED low \
             "not assessed — QCRTAUT=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QCRTAUT — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QCRTAUT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QCRT_RAW" ]; then
         add security sv_qcrtaut "Create authority" NOT_ASSESSED low \
@@ -3503,7 +3886,7 @@ fi
         add security sv_qcrtobjaud "Create object audit level" NOT_ASSESSED low \
             "not assessed — QCRTOBJAUD=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QCRTOBJAUD — the scan profile lacks *AUDIT or *ALLOBJ, so the value is not graded." \
-            "grant the scan profile *AUDIT (or *ALLOBJ) and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l2"
       elif [ -z "$QCOA_VAL" ]; then
         add security sv_qcrtobjaud "Create object audit level" NOT_ASSESSED low \
@@ -3568,7 +3951,7 @@ fi
         add security sv_qdscjobitv "Disconnect-job interval" NOT_ASSESSED low \
             "not assessed — QDSCJOBITV=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QDSCJOBITV — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QDSCJOBITV and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QDSC_RAW" = "*NONE" ]; then
         add security sv_qdscjobitv "Disconnect-job interval" FAIL high \
@@ -3628,7 +4011,7 @@ fi
         add security sv_qdspsgninf "Display user sign-on information" NOT_ASSESSED low \
             "not assessed — QDSPSGNINF=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QDSPSGNINF — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QDSPSGNINF and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QDSP_VAL" ]; then
         add security sv_qdspsgninf "Display user sign-on information" NOT_ASSESSED low \
@@ -3692,7 +4075,7 @@ fi
         add security sv_qfrccvnrst "Force conversion on restore" NOT_ASSESSED low \
             "not assessed — QFRCCVNRST=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QFRCCVNRST — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QFRCCVNRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       else
         QFRN=$(printf '%s\n' "$QFRC_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
@@ -3758,7 +4141,7 @@ fi
         add security sv_qinactitv "Inactivity time-out interval" NOT_ASSESSED low \
             "not assessed — QINACTITV=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QINACTITV — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QINACTITV and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QIN_RAW" = "*NONE" ]; then
         add security sv_qinactitv "Inactivity time-out interval" FAIL high \
@@ -3818,7 +4201,7 @@ fi
         add security sv_qinactmsgq "Inactivity message queue" NOT_ASSESSED low \
             "not assessed — QINACTMSGQ=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QINACTMSGQ — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QINACTMSGQ and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QIM_RAW" ]; then
         add security sv_qinactmsgq "Inactivity message queue" NOT_ASSESSED low \
@@ -3875,7 +4258,7 @@ fi
         add security sv_qlmtdevssn "Limit device sessions" NOT_ASSESSED low \
             "not assessed — QLMTDEVSSN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QLMTDEVSSN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QLMTDEVSSN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QLMT_VAL" ]; then
         add security sv_qlmtdevssn "Limit device sessions" NOT_ASSESSED low \
@@ -3943,7 +4326,7 @@ fi
         add security sv_qlmtsecofr "Limit security officer access to workstations" NOT_ASSESSED low \
             "not assessed — QLMTSECOFR=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QLMTSECOFR — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QLMTSECOFR and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QLS_VAL" ]; then
         add security sv_qlmtsecofr "Limit security officer access to workstations" NOT_ASSESSED low \
@@ -4001,7 +4384,7 @@ fi
         add security sv_qmaxsgnacn "Maximum sign-on action" NOT_ASSESSED low \
             "not assessed — QMAXSGNACN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QMAXSGNACN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QMAXSGNACN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QACN_VAL" ]; then
         add security sv_qmaxsgnacn "Maximum sign-on action" NOT_ASSESSED low \
@@ -4063,7 +4446,7 @@ fi
         add security sv_qmaxsign "Maximum sign-on attempts" NOT_ASSESSED low \
             "not assessed — QMAXSIGN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QMAXSIGN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QMAXSIGN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QMAX_RAW" = "*NOMAX" ]; then
         add security sv_qmaxsign "Maximum sign-on attempts" FAIL high \
@@ -4131,7 +4514,7 @@ fi
         add security sv_qpwdexpitv "Password expiration interval" NOT_ASSESSED low \
             "not assessed — QPWDEXPITV=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QPWDEXPITV — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QPWDEXPITV and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ "$QPWD_RAW" = "*NOMAX" ]; then
         add security sv_qpwdexpitv "Password expiration interval" FAIL high \
@@ -4192,7 +4575,7 @@ fi
         add security sv_qpwdexpwrn "Password expiration warning" NOT_ASSESSED low \
             "not assessed — QPWDEXPWRN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QPWDEXPWRN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QPWDEXPWRN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QWRN_VAL" ]; then
         add security sv_qpwdexpwrn "Password expiration warning" NOT_ASSESSED low \
@@ -4325,7 +4708,7 @@ fi
         add security sv_qpwdrqddif "Required difference in passwords" NOT_ASSESSED low \
             "not assessed — QPWDRQDDIF=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QPWDRQDDIF — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QPWDRQDDIF and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QDIF_VAL" ]; then
         add security sv_qpwdrqddif "Required difference in passwords" NOT_ASSESSED low \
@@ -4444,7 +4827,7 @@ fi
           add security sv_qpwdrules "Password rules" NOT_ASSESSED low \
               "not assessed — QPWDRULES=*NOTAVL (scan profile cannot read this system value)" \
               "The catalog returned *NOTAVL for QPWDRULES — the scan profile lacks authority to read this system value, so the value is not graded." \
-              "grant the scan profile read access to QPWDRULES and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+              "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
               "cis-l1 cis-l2"
         elif [ "$QPWD_TOK" = PASS ]; then
           add security sv_qpwdrules "Password rules" PASS low \
@@ -4525,7 +4908,7 @@ fi
         add security sv_qpwdvldpgm "Password validation program" NOT_ASSESSED low \
             "not assessed — QPWDVLDPGM=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QPWDVLDPGM — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QPWDVLDPGM and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l2"
       elif [ "$QVLD_TOK" = PASS ]; then
         add security sv_qpwdvldpgm "Password validation program" PASS low \
@@ -4576,7 +4959,7 @@ fi
         add security sv_qretsvrsec "Retain server security" NOT_ASSESSED low \
             "not assessed — QRETSVRSEC=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QRETSVRSEC — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QRETSVRSEC and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QRS_VAL" ]; then
         add security sv_qretsvrsec "Retain server security" NOT_ASSESSED low \
@@ -4633,7 +5016,7 @@ fi
         add security sv_qrmtipl "Remote IPL" NOT_ASSESSED low \
             "not assessed — QRMTIPL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QRMTIPL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QRMTIPL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QRIP_VAL" ]; then
         add security sv_qrmtipl "Remote IPL" NOT_ASSESSED low \
@@ -4695,7 +5078,7 @@ fi
         add security sv_qrmtsign "Remote sign-on value" NOT_ASSESSED low \
             "not assessed — QRMTSIGN=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QRMTSIGN — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QRMTSIGN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       elif [ -z "$QRM_VAL" ]; then
         add security sv_qrmtsign "Remote sign-on value" NOT_ASSESSED low \
@@ -4746,7 +5129,7 @@ fi
         add security sv_qrmtsrvatr "Remote service attribute" NOT_ASSESSED low \
             "not assessed — QRMTSRVATR=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QRMTSRVATR — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QRMTSRVATR and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QRSA_VAL" ]; then
         add security sv_qrmtsrvatr "Remote service attribute" NOT_ASSESSED low \
@@ -4803,7 +5186,7 @@ fi
         add security sv_qscanfs "Scan file systems" NOT_ASSESSED low \
             "not assessed — QSCANFS=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSCANFS — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSCANFS and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QSF_VAL" ]; then
         add security sv_qscanfs "Scan file systems" NOT_ASSESSED low \
@@ -4882,7 +5265,7 @@ fi
         add security sv_qscanfsctl "Scan file system control" NOT_ASSESSED low \
             "not assessed — QSCANFSCTL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSCANFSCTL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSCANFSCTL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QSFC_TOK" = PASS ]; then
         add security sv_qscanfsctl "Scan file system control" PASS low \
@@ -4991,7 +5374,7 @@ fi
         add security sv_qshrmemctl "Shared memory control" NOT_ASSESSED low \
             "not assessed — QSHRMEMCTL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSHRMEMCTL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSHRMEMCTL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QSHM_VAL" ]; then
         add security sv_qshrmemctl "Shared memory control" NOT_ASSESSED low \
@@ -5080,7 +5463,7 @@ fi
         add security sv_qsslcsl "SSL cipher specification list" NOT_ASSESSED low \
             "not assessed — QSSLCSL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSSLCSL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSSLCSL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QCSL_TOK" = PASS ]; then
         add security sv_qsslcsl "SSL cipher specification list" PASS low \
@@ -5132,7 +5515,7 @@ fi
         add security sv_qsslcslctl "SSL cipher control" NOT_ASSESSED low \
             "not assessed — QSSLCSLCTL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSSLCSLCTL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSSLCSLCTL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ -z "$QCLC_VAL" ]; then
         add security sv_qsslcslctl "SSL cipher control" NOT_ASSESSED low \
@@ -5213,7 +5596,7 @@ fi
         add security sv_qsslpcl "SSL security protocols" NOT_ASSESSED low \
             "not assessed — QSSLPCL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSSLPCL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSSLPCL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QPCL_TOK" = PASS ]; then
         add security sv_qsslpcl "SSL security protocols" PASS low \
@@ -5291,7 +5674,7 @@ fi
         add security sv_qsyslibl "System library list" NOT_ASSESSED low \
             "not assessed — QSYSLIBL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QSYSLIBL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QSYSLIBL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QSL_TOK" = PASS ]; then
         add security sv_qsyslibl "System library list" PASS low \
@@ -5350,7 +5733,7 @@ fi
         add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
             "not assessed — QUSEADPAUT=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QUSEADPAUT — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QUSEADPAUT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$QADP_TOK" = PASS ]; then
         add security sv_quseadpaut "Use adopted authority" PASS low \
@@ -5409,7 +5792,7 @@ fi
         add security sv_qvfyobjrst "Verify object on restore" NOT_ASSESSED low \
             "not assessed — QVFYOBJRST=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QVFYOBJRST — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "grant the scan profile read access to QVFYOBJRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1 cis-l2"
       else
         QVFN=$(printf '%s\n' "$QVFY_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
@@ -5554,13 +5937,13 @@ fi
       add security usr_action_auditing "User profile action auditing" NOT_ASSESSED low \
           "not assessed — QSECOFR missing from USER_INFO listing" \
           "The profile listing does not include QSECOFR, so command auditing on administrative profiles cannot be graded." \
-          "grant the scan profile catalog listing of user profiles including QSECOFR and re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     elif [ "$AA_PARSE" = "NOGRP" ]; then
       add security usr_action_auditing "User profile action auditing" NOT_ASSESSED low \
           "not assessed — group profile missing from USER_INFO listing" \
           "A user profile names a group or supplemental group that is not in the dump, so cumulative special authorities cannot be graded." \
-          "grant the scan profile catalog listing of group profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     elif [ "$AA_PARSE" = "NOTAVL" ]; then
       add security usr_action_auditing "User profile action auditing" NOT_ASSESSED low \
@@ -5578,13 +5961,13 @@ fi
         add security usr_action_auditing "User profile action auditing" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so command auditing on administrative profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$AA_ROWS" -ne "$AA_CNT" ]; then
         add security usr_action_auditing "User profile action auditing" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so command auditing on administrative profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$AA_MISS" -eq 0 ]; then
         add security usr_action_auditing "User profile action auditing" PASS low \
@@ -5691,7 +6074,7 @@ fi
       add security usr_command_line_access "User profile command line access" NOT_ASSESSED low \
           "not assessed — QSECOFR missing from USER_INFO listing" \
           "The profile listing does not include QSECOFR, so limit capabilities cannot be graded." \
-          "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile including QSECOFR, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     else
       CL_CNT=$(printf '%s\n' "$CL_PARSE" | awk '{ print $2 }')
@@ -5703,13 +6086,13 @@ fi
         add security usr_command_line_access "User profile command line access" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so limit capabilities cannot be graded." \
-            "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$CL_ROWS" -ne "$CL_CNT" ]; then
         add security usr_command_line_access "User profile command line access" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so limit capabilities cannot be graded." \
-            "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$CL_OPEN" -eq 0 ]; then
         add security usr_command_line_access "User profile command line access" PASS low \
@@ -5805,13 +6188,13 @@ fi
       add security usr_default_passwords "User profile default passwords" NOT_ASSESSED low \
           "not assessed — QSECOFR missing from USER_INFO listing" \
           "The profile listing does not include QSECOFR, so default passwords cannot be graded." \
-          "grant the scan profile catalog listing of user profiles including QSECOFR and re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     elif [ "$DP_PARSE" = "NOTAVL" ]; then
       add security usr_default_passwords "User profile default passwords" NOT_ASSESSED low \
           "not assessed — USER_DEFAULT_PASSWORD is null (scan profile lacks *ALLOBJ *SECADM)" \
           "The scan profile cannot read USER_DEFAULT_PASSWORD. IBM returns null for that column unless the job has *ALLOBJ and *SECADM. That is not a configured value and is not a clean result." \
-          "grant the scan profile catalog authority to read USER_DEFAULT_PASSWORD and re-run. This scanner never grants *ALLOBJ and never changes passwords. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     else
       DP_CNT=$(printf '%s\n' "$DP_PARSE" | awk '{ print $2 }')
@@ -5822,13 +6205,13 @@ fi
         add security usr_default_passwords "User profile default passwords" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so default passwords cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$DP_N" -ne "$DP_CNT" ]; then
         add security usr_default_passwords "User profile default passwords" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so default passwords cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$DP_YES" -eq 0 ]; then
         add security usr_default_passwords "User profile default passwords" PASS low \
@@ -6121,7 +6504,7 @@ fi
       add security usr_ibm_supplied_profiles "IBM supplied user profiles" NOT_ASSESSED low \
           "not assessed — QSECOFR missing from USER_INFO listing" \
           "The profile listing does not include QSECOFR, so IBM-supplied profile attributes cannot be graded." \
-          "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile including QSECOFR, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     else
       IB_CNT=$(printf '%s\n' "$IB_PARSE" | awk '{ print $2 }')
@@ -6133,13 +6516,13 @@ fi
         add security usr_ibm_supplied_profiles "IBM supplied user profiles" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so IBM-supplied profile attributes cannot be graded." \
-            "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$IB_ROWS" -ne "$IB_CNT" ]; then
         add security usr_ibm_supplied_profiles "IBM supplied user profiles" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so IBM-supplied profile attributes cannot be graded." \
-            "grant the scan profile *ALLOBJ (CHGUSRPRF SPCAUT(*ALLOBJ)) so QSYS2.USER_INFO lists every user profile, then re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$IB_BAD" -eq 0 ] && [ "$IB_G" -eq 0 ]; then
         add security usr_ibm_supplied_profiles "IBM supplied user profiles" PASS low \
@@ -6254,13 +6637,13 @@ fi
         add security usr_inactive_profiles "Inactive user profiles" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so dormant enabled profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$IN_ROWS" -ne "$IN_CNT" ]; then
         add security usr_inactive_profiles "Inactive user profiles" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so dormant enabled profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$IN_BAD" -eq 0 ]; then
         add security usr_inactive_profiles "Inactive user profiles" PASS low \
@@ -6357,7 +6740,7 @@ fi
       add security usr_nonexpiring_passwords "User profile non-expiring passwords" NOT_ASSESSED low \
           "not assessed — QSECOFR missing from USER_INFO listing" \
           "The profile listing does not include QSECOFR, so password expiration intervals cannot be graded." \
-          "grant the scan profile catalog listing of user profiles including QSECOFR and re-run. Do not run this check as QSECOFR to paper over the gap." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
           "cis-l1"
     else
       NX_CNT=$(printf '%s\n' "$NX_PARSE" | awk '{ print $2 }')
@@ -6369,13 +6752,13 @@ fi
         add security usr_nonexpiring_passwords "User profile non-expiring passwords" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so password expiration intervals cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$NX_ROWS" -ne "$NX_CNT" ]; then
         add security usr_nonexpiring_passwords "User profile non-expiring passwords" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so password expiration intervals cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$NX_NOM" -eq 0 ]; then
         add security usr_nonexpiring_passwords "User profile non-expiring passwords" PASS low \
@@ -6471,13 +6854,13 @@ fi
         add security usr_ownership "User profile object ownership" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so object ownership of user profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles (OBJECT_PRIVILEGES *OBJMGT or QIBM_DB_SECADM and QIBM_LIST_ALL_OBJS_SQL) and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$OW_N" -ne "$OW_CNT" ]; then
         add security usr_ownership "User profile object ownership" NOT_ASSESSED low \
             "not assessed — OBJECT_PRIVILEGES *PUBLIC listing incomplete" \
             "The profile count and the *PUBLIC *USRPRF listing do not match, so object ownership of user profiles cannot be graded." \
-            "grant the scan profile catalog listing of *PUBLIC owner rows on *USRPRF objects and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$OW_BAD" -eq 0 ]; then
         add security usr_ownership "User profile object ownership" PASS low \
@@ -6604,13 +6987,13 @@ fi
         add security usr_private_authority "User profile private authority" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so private authority on user profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles (OBJECT_PRIVILEGES *OBJMGT or QIBM_DB_SECADM and QIBM_LIST_ALL_OBJS_SQL) and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$PV_N" -ne "$PV_CNT" ]; then
         add security usr_private_authority "User profile private authority" NOT_ASSESSED low \
             "not assessed — OBJECT_PRIVILEGES *PUBLIC listing incomplete" \
             "The profile count and the *PUBLIC *USRPRF listing do not match, so private authority on user profiles cannot be graded." \
-            "grant the scan profile catalog listing of *PUBLIC authority on *USRPRF objects and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$PV_P" -eq 0 ] && [ "$PV_X" -eq 0 ]; then
         add security usr_private_authority "User profile private authority" PASS low \
@@ -6706,13 +7089,13 @@ fi
         add security usr_public_authority "User profile public authority" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so *PUBLIC authority on user profiles cannot be graded." \
-            "grant the scan profile catalog listing of user profiles (OBJECT_PRIVILEGES *OBJMGT or QIBM_DB_SECADM and QIBM_LIST_ALL_OBJS_SQL) and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$PA_N" -ne "$PA_CNT" ]; then
         add security usr_public_authority "User profile public authority" NOT_ASSESSED low \
             "not assessed — OBJECT_PRIVILEGES *PUBLIC listing incomplete" \
             "The profile count and the *PUBLIC *USRPRF listing do not match, so *PUBLIC authority on user profiles cannot be graded." \
-            "grant the scan profile catalog listing of *PUBLIC authority on *USRPRF objects and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$PA_OTH" -eq 0 ]; then
         add security usr_public_authority "User profile public authority" PASS low \
@@ -7042,13 +7425,13 @@ fi
         add security usr_special_authorities "User profile special authorities" NOT_ASSESSED low \
             "not assessed — USER_INFO count too small to be a complete estate" \
             "The profile count is smaller than a supported IBM i ships, so special authorities cannot be graded." \
-            "grant the scan profile *OBJOPR and *READ on user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$SA_N" -ne "$SA_CNT" ]; then
         add security usr_special_authorities "User profile special authorities" NOT_ASSESSED low \
             "not assessed — USER_INFO listing incomplete" \
             "The profile count and the USER_INFO listing do not match, so special authorities cannot be graded." \
-            "grant the scan profile catalog listing of user profiles and re-run. Do not run this check as QSECOFR to paper over the gap." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
       elif [ "$SA_UA" -eq 0 ]; then
         add security usr_special_authorities "User profile special authorities" PASS low \
@@ -7432,6 +7815,8 @@ if [ "$FORMAT" = json ]; then
   printf '{\n  "product": "PTxray", "edition": "IBM i", "version": "%s",\n' "$PTXRAY_VERSION"
   printf '  "scan_label": "%s", "release": "%s", "compliance": "%s",\n' "$(printf '%s' "$SCAN_LABEL"|jesc)" "$(printf '%s' "$RELEASE"|jesc)" "$COMPLIANCE"
   printf '  "cis_crosswalk": {"status":"%s","release":%s},\n' "$CROSSWALK_STATUS" "$crosswalk_release_json"
+  printf '  "definitions": {"summary":"%s","cisa_kev":"NOT_ASSESSED","ibm_apar":"NOT_ASSESSED","note":"%s"},\n' \
+    "$(printf '%s' "$PTXRAY_DEFS_REPORT"|jesc)" "$(printf '%s' "$PTXRAY_DEFS_IBM_I_NOTE"|jesc)"
   printf '  "summary": {"pass": %d, "warn": %d, "fail": %d, "not_assessed": %d, "not_applicable": %d, "assessed": %d, "total": %d, "score_pct": %s},\n' "$PASS_N" "$WARN_N" "$FAIL_N" "$NA_N" "$NAPP_N" "$MEASURED_ASSESSED" "$MEASURED_TOTAL" "$score_json"
   printf '  "pillars": {"security":{"pass":%d,"assessed":%d,"total":%d},"currency":{"pass":%d,"assessed":%d,"total":%d}},\n' "$SEC_PASS" "$SEC_ASSESSED" "$SEC_TOTAL" "$CUR_PASS" "$CUR_ASSESSED" "$CUR_TOTAL"
   printf '  "findings": [\n'
@@ -7462,13 +7847,14 @@ elif [ "$FORMAT" = html ]; then
   if [ "$SCOREABLE" -eq 1 ]; then score_html="${SCORE}%"; else score_html="NOT SCORED"; fi
   printf '%s\n' '<!doctype html><html><head><meta charset="utf-8">'
   printf '<title>PTxray %s — IBM i assessment</title><style>body{font:15px system-ui;margin:2rem;color:#17202a}table{border-collapse:collapse;width:100%%}th,td{border-bottom:1px solid #ccd1d1;padding:.45rem;text-align:left}.score{font-size:2rem;font-weight:700}.na{color:#566573}</style></head><body>\n' "$PTXRAY_VERSION"
-  printf '<h1>PTxray %s — %s</h1><p>%s</p><p class="score">%s</p><p>Coverage: %d of %d assessed.</p><table><thead><tr><th>Status</th><th>Check</th><th>Observed</th></tr></thead><tbody>\n' "$PTXRAY_VERSION" "$(printf '%s' "$SCAN_LABEL"|hesc)" "$(printf '%s' "$CROSSWALK_NOTE"|hesc)" "$score_html" "$MEASURED_ASSESSED" "$MEASURED_TOTAL"
+  printf '<h1>PTxray %s — %s</h1><p>%s</p><section><h2>Signed definitions</h2><p>%s</p><p>%s</p></section><p class="score">%s</p><p>Coverage: %d of %d assessed.</p><table><thead><tr><th>Status</th><th>Check</th><th>Observed</th></tr></thead><tbody>\n' "$PTXRAY_VERSION" "$(printf '%s' "$SCAN_LABEL"|hesc)" "$(printf '%s' "$CROSSWALK_NOTE"|hesc)" "$(printf '%s' "$PTXRAY_DEFS_REPORT"|hesc)" "$(printf '%s' "$PTXRAY_DEFS_IBM_I_NOTE"|hesc)" "$score_html" "$MEASURED_ASSESSED" "$MEASURED_TOTAL"
   i=0; while [ "$i" -lt "$NFIND" ]; do printf '<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n' "${F_ST[$i]}" "$(printf '%s' "${F_LABEL[$i]}"|hesc)" "$(printf '%s' "${F_OBS[$i]}"|hesc)"; i=$((i+1)); done
   printf '</tbody></table><h2>Requires human attestation</h2><pre>%s</pre></body></html>\n' "$(printf '%s' "$MANUAL_DISPLAY"|hesc)"
 else
   printf 'PTxray %s — IBM i assessment\n' "$PTXRAY_VERSION"
   printf '%s\n' "$SCAN_LABEL"
   printf '%s\n' "$CROSSWALK_NOTE"
+  printf 'Signed definitions: %s\n%s\n' "$PTXRAY_DEFS_REPORT" "$PTXRAY_DEFS_IBM_I_NOTE"
   printf 'Coverage: %d of %d assessed' "$MEASURED_ASSESSED" "$MEASURED_TOTAL"
   if [ "$SCOREABLE" -eq 1 ]; then printf ' — score %d%%\n' "$SCORE"; else printf ' — NOT SCORED\n'; fi
   i=0; while [ "$i" -lt "$NFIND" ]; do printf '%-15s %-30s %s\n' "${F_ST[$i]}" "${F_ID[$i]}" "${F_OBS[$i]}"; i=$((i+1)); done

@@ -6,7 +6,7 @@
     "fileperm_sendmailcf"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -l /etc/mail/sendmail.cf"

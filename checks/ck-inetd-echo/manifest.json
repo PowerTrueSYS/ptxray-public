@@ -6,7 +6,7 @@
     "inetd_echo"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*echo[\t ]' /etc/inetd.conf"

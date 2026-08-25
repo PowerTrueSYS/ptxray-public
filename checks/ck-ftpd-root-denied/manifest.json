@@ -6,7 +6,7 @@
     "ftpd_root_denied"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep '^root$' /etc/ftpusers"

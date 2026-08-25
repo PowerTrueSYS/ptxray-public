@@ -6,7 +6,7 @@
     "os_tl_sp"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "oslevel -s",

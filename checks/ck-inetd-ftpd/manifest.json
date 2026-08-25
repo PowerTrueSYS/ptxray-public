@@ -6,7 +6,7 @@
     "inetd_ftpd"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[[:space:]]*(telnet|telnetd|ftp|ftpd|shell|login|exec|rsh|rlogin)[[:space:]]' /etc/inetd.conf"

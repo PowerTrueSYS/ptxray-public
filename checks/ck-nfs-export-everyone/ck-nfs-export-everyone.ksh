@@ -3,19 +3,30 @@
 # remediation, service control, network access, or durable target-host writes.
 set -u
 
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
 # Match the monolith's guarded AIX command search path and parsing locale.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.4.0"
+AIXRAY_STANDALONE_VERSION="1.5.0"
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
   typeset key rc
   key=$1
   shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
   if [ -n "${AIXRAY_FIXTURES:-}" ]; then
     if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
       cat "$AIXRAY_FIXTURES/$key.out"
@@ -281,8 +292,6 @@ function standalone_initialize {
   TODAY_J=$(d2j "$TODAY") || return 1
   C7=$(errpt_cutoff 7) || return 1
   C30=$(errpt_cutoff 30) || return 1
-  MYUID=$(aix id_u id -u)
-  [ -n "$MYUID" ] || MYUID=1
   if [ "$today_overridden" -eq 1 ]; then
     NOW=$TODAY
   else
@@ -319,13 +328,35 @@ function standalone_emit {
 }
 
 function standalone_main {
-  typeset i assessed initialize_rc run_rc
+  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
   fi
-  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-    echo "$AIXRAY_TOOL: this standalone check runs on AIX/VIOS" >&2
+  if [ -z "${AIXRAY_FIXTURES:-}" ] \
+      && [ "$(/usr/bin/uname -s 2>/dev/null)" != "AIX" ]; then
+    echo "$AIXRAY_TOOL: this standalone check runs on AIX" >&2
+    return 2
+  fi
+  MYUID=$(aix id_u /usr/bin/id -u)
+  uid_rc=$?
+  if [ "$uid_rc" -ne 0 ] || [ "$MYUID" != 0 ]; then
+    echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
+    return 2
+  fi
+  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
+  # runner's local marker gate before date initialization or any check probe.
+  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+  vios_rc=$?
+  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  vios_match=${vios_rows%%:*}
+  vios_nonempty=${vios_rows#*:}
+  if [ "$vios_rc" -eq 0 ] \
+      && [ "$vios_match" -eq 1 ] \
+      && [ "$vios_nonempty" -eq 1 ] \
+      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
+    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
     return 2
   fi
   standalone_initialize
@@ -350,58 +381,22 @@ AIXRAY_TOOL=ck-nfs-export-everyone
 
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
-  # nfs_export_everyone — active NFS exports accessible to unauthenticated clients.
-  # All reads are fixture-routed and side-effect free. showmount -e lists the
-  # local NFS server's currently exported directories with their access lists;
-  # an export line listing (everyone) imposes no client restriction.
-  #
-  # showmount -e is an RPC query to the local mount daemon, and on a host that
-  # exports nothing it exits non-zero with empty stdout — the state captured on
-  # both lab boxes on 2026-08-06 (showmount_e.out empty, showmount_e.rc 1).
-  # Refusing there would leave this check able only to refuse, which is not
-  # coverage. A non-zero rc is therefore resolved against two local, non-RPC
-  # probes that ck-nfs-exports already uses: the no-argument exportfs listing
-  # (/etc/xtab — the active export table) and /etc/exports (the definition
-  # file). The empty conclusion is drawn only when BOTH independently show an
-  # empty export set; a failed exportfs, an inconclusive listing, or an
-  # unestablished /etc/exports state still refuses, so an rc=1 that actually
-  # means "mountd unreachable" can never be laundered into a clean verdict.
-  typeset SHOWMOUNT SHOWMOUNT_RC NEE_EVERYONE NEE_ROWS
-  typeset NEE_LIVE NEE_LIVE_RC NEE_LIVE_NONE
+  # nfs_export_everyone — active NFS exports without an access allow list.
+  # The no-argument exportfs form reads AIX's local active export table
+  # (/etc/xtab). /etc/exports is a second local read used only to corroborate
+  # an empty active table. No RPC or other network probe is permitted here.
+  typeset NEE_LIVE NEE_LIVE_RC NEE_STATE NEE_DETAIL NEE_RESULT
   typeset NEE_CONF NEE_CONF_RC NEE_CONF_EXISTS_OUT NEE_CONF_EXISTS_RC
-  typeset NEE_CONF_NONE NEE_WHY
+  typeset NEE_CONF_NONE NEE_TAB
 
-  SHOWMOUNT=$(aix showmount_e showmount -e); SHOWMOUNT_RC=$?
   NEE_LIVE=$(aix exportfs exportfs); NEE_LIVE_RC=$?
   NEE_CONF_EXISTS_OUT=$(aix etc_exports_exists test -e /etc/exports)
   NEE_CONF_EXISTS_RC=$?
   NEE_CONF=$(aix etc_exports cat /etc/exports); NEE_CONF_RC=$?
 
-  # Corroborator 1 — the active export table. rc is settled before any parsing.
-  # AIX prints the no-export sentinel with or without its message number.
-  NEE_LIVE_NONE=0
-  if [ "$NEE_LIVE_RC" -eq 0 ] && [ -n "$NEE_LIVE" ]; then
-    case "$NEE_LIVE" in
-      "exportfs: nothing exported") NEE_LIVE_NONE=1 ;;
-      "exportfs: "[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]" nothing exported")
-        NEE_LIVE_NONE=1 ;;
-      *)
-        NEE_LIVE_NONE=$(printf '%s\n' "$NEE_LIVE" | awk '
-          {
-            text=$0
-            sub(/^[ \t]+/, "", text)
-            if (text == "") next
-            nonblank=1
-            if (text !~ /^#/) rows=1
-          }
-          END {print (nonblank && !rows) ? 1 : 0}
-        ')
-        ;;
-    esac
-  fi
-
-  # Corroborator 2 — the definition file. A read failure only settles anything
-  # when the existence probe reports the file as genuinely absent.
+  # The definition file cannot prove that an export is active. It is used only
+  # to keep the no-export PASS fail-closed when the local definitions disagree
+  # with an otherwise empty active table.
   NEE_CONF_NONE=0
   if [ "$NEE_CONF_RC" -eq 0 ]; then
     NEE_CONF_NONE=$(printf '%s\n' "$NEE_CONF" | awk '
@@ -416,64 +411,90 @@ _AIXRAY_SESSION_KEYS=""
     NEE_CONF_NONE=1
   fi
 
-  # showmount evidence is parsed only after its rc is known to be 0. OBSERVED is
-  # capped at 120 characters so the finding stays one bounded TSV field.
-  NEE_EVERYONE=""
-  NEE_ROWS=0
-  if [ "$SHOWMOUNT_RC" -eq 0 ] && [ -n "$SHOWMOUNT" ]; then
-    NEE_EVERYONE=$(printf '%s\n' "$SHOWMOUNT" | awk '
-      index($0, "(everyone)") > 0 {
-        n++
-        if (n <= 3) list = (list == "" ? $1 : list " " $1)
+  NEE_STATE=UNKNOWN
+  NEE_DETAIL="local active export table could not be classified"
+  if [ "$NEE_LIVE_RC" -eq 0 ]; then
+    NEE_RESULT=$(printf '%s\n' "$NEE_LIVE" | awk '
+      {
+        text=$0
+        sub(/^[ \t]+/, "", text)
+        sub(/[ \t]+$/, "", text)
+        if (text == "" || text ~ /^#/) next
+        if (text == "exportfs: nothing exported" ||
+            text ~ /^exportfs: [0-9][0-9][0-9][0-9]-[0-9][0-9][0-9] nothing exported$/) {
+          none++
+          next
+        }
+        if (substr(text, 1, 1) != "/") {
+          malformed++
+          next
+        }
+        rows++
+        split(text, field, /[ \t]+/)
+        path=field[1]
+        if (text !~ /(^|[, \t])access=/) {
+          unrestricted++
+          if (unrestricted <= 3)
+            list=(list == "" ? path : list " " path)
+        }
       }
       END {
-        if (n == 0) exit 0
-        text = n " export(s) shared with everyone: " list
-        if (n > 3) text = text " (+" (n - 3) " more)"
-        if (substr(text, 118, 1) != "") text = substr(text, 1, 117) "..."
-        print text
+        if (malformed || (none && rows)) {
+          print "UNKNOWN\tlocal active export table contained unrecognized or contradictory rows"
+        } else if (unrestricted) {
+          detail=unrestricted " active export(s) have no access allow list: " list
+          if (unrestricted > 3) detail=detail " (+" (unrestricted - 3) " more)"
+          if (substr(detail, 118, 1) != "") detail=substr(detail, 1, 117) "..."
+          print "UNRESTRICTED\t" detail
+        } else if (rows) {
+          print "RESTRICTED\t" rows " active export(s); every export has an explicit access allow list"
+        } else {
+          print "NONE\tlocal active export table lists no exported directory"
+        }
       }
     ')
-    NEE_ROWS=$(printf '%s\n' "$SHOWMOUNT" | awk '$1 ~ /^\// {n++} END {print n+0}')
+    NEE_TAB=$(printf '\t')
+    NEE_STATE=${NEE_RESULT%%"$NEE_TAB"*}
+    NEE_DETAIL=${NEE_RESULT#*"$NEE_TAB"}
+    [ "$NEE_DETAIL" != "$NEE_RESULT" ] \
+      || { NEE_STATE=UNKNOWN; NEE_DETAIL="local active export table parser returned malformed evidence"; }
+  else
+    NEE_DETAIL="exportfs failed while reading the local active export table (rc=$NEE_LIVE_RC)"
   fi
 
-  if [ "$SHOWMOUNT_RC" -eq 0 ]; then
-    NEE_WHY="showmount -e listed no export (rc=0)"
-  else
-    NEE_WHY="showmount -e failed (rc=$SHOWMOUNT_RC)"
-  fi
-
-  if [ -n "$NEE_EVERYONE" ]; then
-    add security nfs_export_everyone "NFS export access" FAIL high \
-        "$NEE_EVERYONE" \
-        "At least one currently exported directory is accessible to unauthenticated clients; the NFS server imposes no client restriction on it." \
-        "remove (everyone) from the access list of each affected export and re-export through the approved change process." "cis-l2"
-  elif [ "$SHOWMOUNT_RC" -eq 0 ] && [ "$NEE_ROWS" -gt 0 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "$NEE_ROWS active export(s); every export lists explicit clients" \
-        "Every currently exported directory has a client restriction; showmount -e listed no (everyone) access target." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -eq 1 ] && [ "$NEE_CONF_NONE" -eq 1 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "no NFS export is active; exportfs and /etc/exports both list none" \
-        "This host exports nothing: the active export table reports no exported directory and /etc/exports defines none, so no export is shared with unauthenticated clients." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_RC" -ne 0 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY and exportfs failed (rc=$NEE_LIVE_RC)" \
-        "Neither the advertised export list nor the local active export table could be read, so no claim about world-accessible exports is possible." \
-        "restore access to the local NFS mount daemon and the no-argument exportfs listing, then rerun PTxray." "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -ne 1 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; exportfs did not confirm an empty export set" \
-        "The advertised export list was unavailable and the local active export table neither proved an empty export set nor could be read for (everyone) access targets." \
-        "restore access to the local NFS mount daemon, verify the complete no-argument exportfs listing, then rerun PTxray." "cis-l2"
-  else
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; /etc/exports state not established (rc=$NEE_CONF_RC)" \
-        "The active export table reported nothing exported, but /etc/exports could not be read or shows definitions, so the empty export set is not corroborated." \
-        "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
-  fi
+  case "$NEE_STATE" in
+    UNRESTRICTED)
+      add security nfs_export_everyone "NFS export access" FAIL high \
+          "$NEE_DETAIL" \
+          "At least one currently exported directory has no access allow list, so the NFS server does not restrict it to approved clients." \
+          "add an explicit access allow list to each affected export and re-export it through the approved change process." "cis-l2"
+      ;;
+    RESTRICTED)
+      add security nfs_export_everyone "NFS export access" PASS high \
+          "$NEE_DETAIL" \
+          "Every directory in the local active export table has an explicit client access allow list." \
+          "n/a" "cis-l2"
+      ;;
+    NONE)
+      if [ "$NEE_CONF_NONE" -eq 1 ]; then
+        add security nfs_export_everyone "NFS export access" PASS high \
+            "no NFS export is active; exportfs and /etc/exports both list none" \
+            "The local active export table reports no exported directory and /etc/exports defines none, so no export is available without a client allow list." \
+            "n/a" "cis-l2"
+      else
+        add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+            "not assessed — local active export table is empty but /etc/exports state was not corroborated (rc=$NEE_CONF_RC)" \
+            "The active table reported no exports, but local definitions could not be read or still define exports, so the empty state is not independently corroborated." \
+            "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
+      fi
+      ;;
+    *)
+      add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+          "not assessed — $NEE_DETAIL" \
+          "The local active export table did not provide complete, trustworthy evidence about access allow lists." \
+          "restore access to the no-argument exportfs listing, verify the complete local active export table, then rerun PTxray." "cis-l2"
+      ;;
+  esac
 }
 
 function standalone_run {

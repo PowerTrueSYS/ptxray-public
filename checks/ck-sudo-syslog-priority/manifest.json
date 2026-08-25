@@ -6,7 +6,7 @@
     "sudo_syslog_priority"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -ld /etc/sudoers",

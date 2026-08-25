@@ -6,7 +6,7 @@
     "stig_fileperms"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -ldn /etc/inetd.conf /etc/ntp.conf /etc/group /etc/hosts /etc/syslog.conf"

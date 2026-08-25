@@ -6,7 +6,7 @@
     "rctcpip_mrouted"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "/usr/bin/grep \"start[[:blank:]]/usr/sbin/mrouted\" /etc/rc.tcpip",

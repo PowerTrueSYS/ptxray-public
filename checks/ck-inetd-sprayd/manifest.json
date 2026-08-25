@@ -6,7 +6,7 @@
     "inetd_sprayd"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*sprayd[\t ]' /etc/inetd.conf"

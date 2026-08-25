@@ -1,8 +1,11 @@
 #!/bin/sh
 #
-# AIXray (AIX/VIOS edition) — READ-ONLY posture snapshot of an IBM AIX or VIOS LPAR.
-# Inspects only. Changes nothing, installs nothing, restarts nothing. Makes no network
-# calls: lifecycle/security reference data and its source registry are embedded below.
+# PTxray AIX edition — READ-ONLY posture snapshot of an IBM AIX LPAR.
+# Assessment probes inspect only: they change no system configuration, install
+# and restart nothing, and upload no assessment data. The runner writes the
+# requested report and, before assessment, can invoke the separate adjacent
+# signed-data downloader to write its protected cache; use --offline for a
+# cache-only, air-gapped run.
 #
 # Audit map (repository paths):
 #   checks/ — standalone check scripts and adjacent command manifests
@@ -11,47 +14,65 @@
 #
 # Runs under AIX /bin/sh (ksh88). No bash, no python, no GNU tools required.
 #
-# Easy run: ./aixray-aix.sh
-# Stdout:   ./aixray-aix.sh [--html|--json] > report.html
-#   Best run as root — a few reads (emgr -l, sysdumpdev -l, bootlist) need it.
-#   Unprivileged runs degrade those checks to WARN or NOT_ASSESSED and say so.
+# Easy run: ./ptxray-aix.sh
+# Stdout:   ./ptxray-aix.sh [--html|--json] > report.html
+#   PTxray requires effective UID 0 and refuses assessment otherwise.
 # network-lint: allow-next=6 -- customer transfer documentation; never executed
-# Transfer in (workstation to AIX/VIOS):
-# scp aixray-aix.sh aixray-review-pack.sh aixray-review-validate.awk root@<aix-host>:/tmp/
-# Copy all three files from the same release; the helper enforces its validator contract.
-# Pseudonymize and inspect on AIX/VIOS before transfer out.
-# Transfer out only after inspection (AIX/VIOS to workstation):
-# scp root@<aix-host>:/tmp/aixray-review-<token>-<YYYY-MM-DD>.html .
+# Transfer in (workstation to AIX):
+# scp ptxray-aix.sh ptxray-defs.sh ptxray-review-pack.sh ptxray-review-validate.awk root@<aix-host>:/tmp/
+# Copy all four files from the same release; the runner binds the downloader digest and the helper enforces its validator contract.
+# Pseudonymize and inspect on AIX before transfer out.
+# Transfer out only after inspection (AIX to workstation):
+# scp root@<aix-host>:/tmp/ptxray-review-<token>-<YYYY-MM-DD>.html .
 #
-# Test hooks (used by tests/ on a dev box; harmless in production):
+# Private-build test hooks (never honored by a normal assembled artifact):
 #   AIXRAY_FIXTURES=<dir>   read command output from <dir>/<key>.out instead of executing
 #   AIXRAY_TODAY=YYYY-MM-DD freeze "today" for deterministic date math
 set -u
 
-# Predictable command resolution for root AND unprivileged runs: the AIX
-# default non-root PATH lacks /usr/sbin, where emgr, lsdev, sysdumpdev and
-# friends live — without this an unprivileged run silently skips checks.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+# The interpreter is already running, but no privileged child tool has run.
+# Do not let inherited OpenSSL configuration/provider paths or dynamic-loader
+# paths reach the fixed-path verifier used to authenticate the adjacent
+# definitions downloader.
+unset SSL_CERT_DIR SSL_CERT_FILE SSLKEYLOGFILE
+unset OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+unset OPENSSL_TRACE OPENSSL_MALLOC_FD OPENSSL_MALLOC_FAILURES
+unset OPENSSL_MALLOC_SEED CTLOG_FILE RANDFILE
+unset LIBPATH LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT SHLIB_PATH
+unset LDR_PRELOAD LDR_PRELOAD64
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
+
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture/capture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
+# Predictable command resolution for the required root run. Keep command lookup
+# independent of the invoking account's inherited environment.
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 # AIX lparstat prints comma decimals under a non-C LC_NUMERIC; all parsing here
 # is C-locale by contract, so pin the locale.
 LC_ALL=C; export LC_ALL
 
-VERSION="1.2.0"
+VERSION="1.5.0"
 DATA_VINTAGE="unknown"
 DATA_VINTAGE_H="unknown"
 
 # Fixed Plan destinations, pending labels, safe-send copy, and audited inline
 # QR vector are imported from pipeline/report_plan.py only while assembling.
 plan_copy_status='Next step'
-plan_link_url='https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided'
-plan_qr_url='https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided'
+plan_link_url='https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided'
+plan_qr_url='https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided'
 plan_fallback_label='powertruesystems.com/assessment/'
 plan_link_label='Send your results to PowerTrue and receive a Blueprint for mitigating the issues found.'
 plan_qr_title='QR code — send your results for a mitigation Blueprint'
 plan_qr_description='Alternate path to powertruesystems.com/assessment/'
 plan_qr_caption='Scan to send your results and get your Blueprint'
-plan_safe_send_warning='Your report contains your hostname, addresses, and configuration. To send a redacted copy instead, run: ./aixray-review-pack.sh <this-report> — it writes a review file and a separate local decoding key that never leaves this machine.'
+plan_safe_send_warning='Your report contains your hostname, addresses, and configuration. To send a redacted copy instead, run: ./ptxray-review-pack.sh <this-report> — it writes a review file and a separate local decoding key that never leaves this machine.'
 plan_inspect_before_send='Inspect the review file in your browser before sending it.'
 plan_review_mailbox='review@powertruesystems.com'
 plan_review_mailbox_label='Send your review file to review@powertruesystems.com — we’ll return your mitigation Blueprint.'
@@ -60,53 +81,53 @@ plan_qr_svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 57 57" width="
   <desc id="plan-qr-description">Alternate path to powertruesystems.com/assessment/</desc>
   <rect x="0" y="0" width="57" height="57" fill="#fff"/>
   <path fill="#000" d="M4 4h7v1h-7z M16 4h2v1h-2z M23 4h1v1h-1z M27 4h1v1h-1z M34 4h2v1h-2z M37 4h1v1h-1z M39 4h3v1h-3z M44 4h1v1h-1z M46 4h7v1h-7z"/>
-  <path fill="#000" d="M4 5h1v1h-1z M10 5h1v1h-1z M15 5h4v1h-4z M20 5h2v1h-2z M24 5h3v1h-3z M28 5h2v1h-2z M31 5h1v1h-1z M33 5h2v1h-2z M40 5h5v1h-5z M46 5h1v1h-1z M52 5h1v1h-1z"/>
-  <path fill="#000" d="M4 6h1v1h-1z M6 6h3v1h-3z M10 6h1v1h-1z M12 6h3v1h-3z M16 6h1v1h-1z M18 6h1v1h-1z M21 6h3v1h-3z M26 6h5v1h-5z M32 6h3v1h-3z M36 6h1v1h-1z M43 6h2v1h-2z M46 6h1v1h-1z M48 6h3v1h-3z M52 6h1v1h-1z"/>
-  <path fill="#000" d="M4 7h1v1h-1z M6 7h3v1h-3z M10 7h1v1h-1z M12 7h2v1h-2z M16 7h1v1h-1z M18 7h1v1h-1z M21 7h3v1h-3z M28 7h2v1h-2z M33 7h3v1h-3z M39 7h3v1h-3z M43 7h1v1h-1z M46 7h1v1h-1z M48 7h3v1h-3z M52 7h1v1h-1z"/>
-  <path fill="#000" d="M4 8h1v1h-1z M6 8h3v1h-3z M10 8h1v1h-1z M12 8h2v1h-2z M15 8h4v1h-4z M25 8h11v1h-11z M40 8h2v1h-2z M46 8h1v1h-1z M48 8h3v1h-3z M52 8h1v1h-1z"/>
+  <path fill="#000" d="M4 5h1v1h-1z M10 5h1v1h-1z M13 5h1v1h-1z M15 5h3v1h-3z M20 5h1v1h-1z M24 5h3v1h-3z M28 5h2v1h-2z M31 5h1v1h-1z M33 5h2v1h-2z M40 5h5v1h-5z M46 5h1v1h-1z M52 5h1v1h-1z"/>
+  <path fill="#000" d="M4 6h1v1h-1z M6 6h3v1h-3z M10 6h1v1h-1z M12 6h2v1h-2z M16 6h1v1h-1z M18 6h1v1h-1z M21 6h1v1h-1z M23 6h1v1h-1z M26 6h5v1h-5z M32 6h3v1h-3z M36 6h1v1h-1z M43 6h2v1h-2z M46 6h1v1h-1z M48 6h3v1h-3z M52 6h1v1h-1z"/>
+  <path fill="#000" d="M4 7h1v1h-1z M6 7h3v1h-3z M10 7h1v1h-1z M12 7h3v1h-3z M16 7h1v1h-1z M18 7h1v1h-1z M22 7h2v1h-2z M28 7h2v1h-2z M33 7h3v1h-3z M39 7h3v1h-3z M43 7h1v1h-1z M46 7h1v1h-1z M48 7h3v1h-3z M52 7h1v1h-1z"/>
+  <path fill="#000" d="M4 8h1v1h-1z M6 8h3v1h-3z M10 8h1v1h-1z M12 8h2v1h-2z M15 8h4v1h-4z M21 8h1v1h-1z M25 8h11v1h-11z M40 8h2v1h-2z M46 8h1v1h-1z M48 8h3v1h-3z M52 8h1v1h-1z"/>
   <path fill="#000" d="M4 9h1v1h-1z M10 9h1v1h-1z M12 9h1v1h-1z M14 9h1v1h-1z M16 9h1v1h-1z M18 9h1v1h-1z M20 9h1v1h-1z M23 9h1v1h-1z M26 9h1v1h-1z M30 9h1v1h-1z M35 9h1v1h-1z M37 9h2v1h-2z M40 9h3v1h-3z M46 9h1v1h-1z M52 9h1v1h-1z"/>
   <path fill="#000" d="M4 10h7v1h-7z M12 10h1v1h-1z M14 10h1v1h-1z M16 10h1v1h-1z M18 10h1v1h-1z M20 10h1v1h-1z M22 10h1v1h-1z M24 10h1v1h-1z M26 10h1v1h-1z M28 10h1v1h-1z M30 10h1v1h-1z M32 10h1v1h-1z M34 10h1v1h-1z M36 10h1v1h-1z M38 10h1v1h-1z M40 10h1v1h-1z M42 10h1v1h-1z M44 10h1v1h-1z M46 10h7v1h-7z"/>
-  <path fill="#000" d="M12 11h2v1h-2z M17 11h1v1h-1z M19 11h1v1h-1z M21 11h1v1h-1z M26 11h1v1h-1z M30 11h9v1h-9z M41 11h1v1h-1z M44 11h1v1h-1z"/>
-  <path fill="#000" d="M4 12h1v1h-1z M6 12h5v1h-5z M15 12h2v1h-2z M18 12h3v1h-3z M23 12h2v1h-2z M26 12h5v1h-5z M33 12h3v1h-3z M39 12h3v1h-3z M43 12h1v1h-1z M46 12h5v1h-5z"/>
-  <path fill="#000" d="M4 13h3v1h-3z M8 13h1v1h-1z M11 13h1v1h-1z M13 13h1v1h-1z M15 13h1v1h-1z M17 13h2v1h-2z M20 13h4v1h-4z M25 13h1v1h-1z M27 13h2v1h-2z M33 13h2v1h-2z M36 13h1v1h-1z M39 13h3v1h-3z M43 13h1v1h-1z M45 13h3v1h-3z"/>
-  <path fill="#000" d="M4 14h1v1h-1z M7 14h2v1h-2z M10 14h1v1h-1z M14 14h1v1h-1z M18 14h1v1h-1z M22 14h1v1h-1z M24 14h1v1h-1z M26 14h1v1h-1z M28 14h1v1h-1z M30 14h1v1h-1z M33 14h1v1h-1z M35 14h1v1h-1z M38 14h1v1h-1z M40 14h4v1h-4z M47 14h1v1h-1z M49 14h2v1h-2z M52 14h1v1h-1z"/>
-  <path fill="#000" d="M9 15h1v1h-1z M11 15h1v1h-1z M15 15h1v1h-1z M17 15h1v1h-1z M19 15h2v1h-2z M23 15h2v1h-2z M29 15h1v1h-1z M31 15h4v1h-4z M36 15h1v1h-1z M38 15h2v1h-2z M48 15h1v1h-1z M52 15h1v1h-1z"/>
-  <path fill="#000" d="M8 16h1v1h-1z M10 16h2v1h-2z M14 16h1v1h-1z M16 16h1v1h-1z M19 16h4v1h-4z M25 16h4v1h-4z M33 16h3v1h-3z M37 16h1v1h-1z M39 16h3v1h-3z M43 16h2v1h-2z M47 16h1v1h-1z M50 16h3v1h-3z"/>
-  <path fill="#000" d="M9 17h1v1h-1z M12 17h3v1h-3z M16 17h1v1h-1z M18 17h7v1h-7z M26 17h2v1h-2z M29 17h1v1h-1z M32 17h3v1h-3z M41 17h1v1h-1z M46 17h4v1h-4z M51 17h1v1h-1z"/>
-  <path fill="#000" d="M5 18h2v1h-2z M8 18h1v1h-1z M10 18h3v1h-3z M14 18h1v1h-1z M18 18h3v1h-3z M22 18h1v1h-1z M24 18h4v1h-4z M30 18h1v1h-1z M32 18h1v1h-1z M35 18h1v1h-1z M37 18h2v1h-2z M40 18h1v1h-1z M42 18h2v1h-2z M47 18h2v1h-2z M51 18h2v1h-2z"/>
-  <path fill="#000" d="M8 19h2v1h-2z M13 19h4v1h-4z M20 19h5v1h-5z M26 19h2v1h-2z M29 19h1v1h-1z M31 19h1v1h-1z M33 19h1v1h-1z M38 19h1v1h-1z M40 19h4v1h-4z M45 19h1v1h-1z M48 19h1v1h-1z M52 19h1v1h-1z"/>
-  <path fill="#000" d="M4 20h2v1h-2z M9 20h2v1h-2z M14 20h2v1h-2z M18 20h2v1h-2z M21 20h2v1h-2z M24 20h2v1h-2z M28 20h2v1h-2z M32 20h1v1h-1z M35 20h5v1h-5z M42 20h1v1h-1z M44 20h4v1h-4z M50 20h1v1h-1z"/>
-  <path fill="#000" d="M4 21h2v1h-2z M7 21h3v1h-3z M13 21h1v1h-1z M20 21h4v1h-4z M27 21h3v1h-3z M31 21h3v1h-3z M36 21h1v1h-1z M38 21h1v1h-1z M41 21h2v1h-2z M45 21h2v1h-2z M51 21h1v1h-1z"/>
-  <path fill="#000" d="M6 22h12v1h-12z M21 22h3v1h-3z M27 22h1v1h-1z M29 22h2v1h-2z M32 22h1v1h-1z M34 22h4v1h-4z M39 22h1v1h-1z M44 22h4v1h-4z M49 22h1v1h-1z M51 22h2v1h-2z"/>
-  <path fill="#000" d="M5 23h2v1h-2z M8 23h1v1h-1z M11 23h1v1h-1z M13 23h2v1h-2z M17 23h2v1h-2z M20 23h2v1h-2z M23 23h1v1h-1z M27 23h1v1h-1z M29 23h5v1h-5z M36 23h1v1h-1z M39 23h1v1h-1z M41 23h1v1h-1z M44 23h1v1h-1z M46 23h3v1h-3z M51 23h2v1h-2z"/>
-  <path fill="#000" d="M7 24h2v1h-2z M10 24h1v1h-1z M12 24h3v1h-3z M16 24h2v1h-2z M19 24h2v1h-2z M23 24h2v1h-2z M26 24h3v1h-3z M30 24h2v1h-2z M33 24h3v1h-3z M39 24h7v1h-7z M50 24h2v1h-2z"/>
-  <path fill="#000" d="M4 25h2v1h-2z M8 25h2v1h-2z M11 25h1v1h-1z M13 25h2v1h-2z M16 25h1v1h-1z M19 25h2v1h-2z M22 25h2v1h-2z M25 25h1v1h-1z M27 25h1v1h-1z M29 25h2v1h-2z M33 25h2v1h-2z M36 25h1v1h-1z M39 25h3v1h-3z M45 25h4v1h-4z M50 25h1v1h-1z"/>
+  <path fill="#000" d="M12 11h2v1h-2z M17 11h1v1h-1z M19 11h1v1h-1z M21 11h1v1h-1z M26 11h1v1h-1z M30 11h7v1h-7z M39 11h1v1h-1z M41 11h1v1h-1z M44 11h1v1h-1z"/>
+  <path fill="#000" d="M4 12h1v1h-1z M6 12h5v1h-5z M15 12h2v1h-2z M18 12h3v1h-3z M23 12h2v1h-2z M26 12h5v1h-5z M33 12h3v1h-3z M37 12h1v1h-1z M39 12h3v1h-3z M43 12h1v1h-1z M46 12h5v1h-5z"/>
+  <path fill="#000" d="M4 13h3v1h-3z M8 13h1v1h-1z M11 13h1v1h-1z M13 13h1v1h-1z M15 13h1v1h-1z M17 13h2v1h-2z M20 13h4v1h-4z M25 13h1v1h-1z M27 13h2v1h-2z M33 13h2v1h-2z M36 13h1v1h-1z M40 13h2v1h-2z M43 13h1v1h-1z M45 13h3v1h-3z"/>
+  <path fill="#000" d="M5 14h1v1h-1z M7 14h2v1h-2z M10 14h1v1h-1z M14 14h1v1h-1z M18 14h1v1h-1z M22 14h1v1h-1z M24 14h1v1h-1z M26 14h1v1h-1z M28 14h1v1h-1z M30 14h1v1h-1z M33 14h1v1h-1z M35 14h1v1h-1z M38 14h1v1h-1z M40 14h4v1h-4z M47 14h1v1h-1z M49 14h2v1h-2z M52 14h1v1h-1z"/>
+  <path fill="#000" d="M4 15h1v1h-1z M9 15h1v1h-1z M11 15h1v1h-1z M15 15h1v1h-1z M17 15h1v1h-1z M19 15h2v1h-2z M23 15h2v1h-2z M29 15h1v1h-1z M31 15h4v1h-4z M36 15h1v1h-1z M38 15h2v1h-2z M48 15h1v1h-1z M52 15h1v1h-1z"/>
+  <path fill="#000" d="M4 16h1v1h-1z M8 16h1v1h-1z M10 16h2v1h-2z M14 16h1v1h-1z M21 16h2v1h-2z M25 16h4v1h-4z M33 16h3v1h-3z M37 16h1v1h-1z M39 16h3v1h-3z M43 16h2v1h-2z M47 16h1v1h-1z M50 16h3v1h-3z"/>
+  <path fill="#000" d="M5 17h1v1h-1z M9 17h1v1h-1z M12 17h3v1h-3z M16 17h1v1h-1z M18 17h1v1h-1z M21 17h4v1h-4z M26 17h2v1h-2z M29 17h1v1h-1z M32 17h3v1h-3z M41 17h1v1h-1z M46 17h4v1h-4z M51 17h1v1h-1z"/>
+  <path fill="#000" d="M5 18h2v1h-2z M8 18h1v1h-1z M10 18h3v1h-3z M14 18h1v1h-1z M16 18h1v1h-1z M18 18h1v1h-1z M22 18h1v1h-1z M24 18h4v1h-4z M30 18h1v1h-1z M32 18h1v1h-1z M35 18h1v1h-1z M37 18h2v1h-2z M40 18h1v1h-1z M42 18h2v1h-2z M47 18h2v1h-2z M51 18h2v1h-2z"/>
+  <path fill="#000" d="M11 19h1v1h-1z M13 19h3v1h-3z M20 19h5v1h-5z M26 19h2v1h-2z M29 19h1v1h-1z M31 19h1v1h-1z M33 19h1v1h-1z M38 19h1v1h-1z M40 19h4v1h-4z M45 19h1v1h-1z M48 19h1v1h-1z M52 19h1v1h-1z"/>
+  <path fill="#000" d="M4 20h2v1h-2z M9 20h2v1h-2z M12 20h1v1h-1z M14 20h2v1h-2z M18 20h2v1h-2z M21 20h2v1h-2z M24 20h2v1h-2z M28 20h2v1h-2z M32 20h1v1h-1z M35 20h5v1h-5z M42 20h1v1h-1z M44 20h4v1h-4z M50 20h1v1h-1z"/>
+  <path fill="#000" d="M4 21h2v1h-2z M7 21h2v1h-2z M12 21h2v1h-2z M20 21h4v1h-4z M27 21h3v1h-3z M31 21h3v1h-3z M36 21h1v1h-1z M38 21h1v1h-1z M41 21h2v1h-2z M45 21h2v1h-2z M51 21h1v1h-1z"/>
+  <path fill="#000" d="M6 22h5v1h-5z M14 22h3v1h-3z M18 22h1v1h-1z M22 22h2v1h-2z M27 22h1v1h-1z M29 22h2v1h-2z M32 22h1v1h-1z M34 22h4v1h-4z M39 22h1v1h-1z M44 22h4v1h-4z M49 22h1v1h-1z M51 22h2v1h-2z"/>
+  <path fill="#000" d="M5 23h2v1h-2z M8 23h1v1h-1z M11 23h1v1h-1z M14 23h1v1h-1z M17 23h1v1h-1z M20 23h2v1h-2z M23 23h1v1h-1z M27 23h1v1h-1z M29 23h5v1h-5z M36 23h1v1h-1z M39 23h1v1h-1z M41 23h1v1h-1z M44 23h1v1h-1z M46 23h3v1h-3z M51 23h2v1h-2z"/>
+  <path fill="#000" d="M7 24h2v1h-2z M10 24h1v1h-1z M12 24h3v1h-3z M16 24h6v1h-6z M23 24h2v1h-2z M26 24h3v1h-3z M30 24h2v1h-2z M33 24h3v1h-3z M39 24h7v1h-7z M50 24h2v1h-2z"/>
+  <path fill="#000" d="M4 25h2v1h-2z M7 25h3v1h-3z M11 25h1v1h-1z M13 25h2v1h-2z M16 25h2v1h-2z M19 25h3v1h-3z M23 25h1v1h-1z M25 25h1v1h-1z M27 25h1v1h-1z M29 25h2v1h-2z M33 25h2v1h-2z M36 25h1v1h-1z M39 25h3v1h-3z M45 25h4v1h-4z M50 25h1v1h-1z"/>
   <path fill="#000" d="M5 26h8v1h-8z M15 26h1v1h-1z M17 26h4v1h-4z M22 26h3v1h-3z M26 26h8v1h-8z M38 26h2v1h-2z M42 26h7v1h-7z M50 26h1v1h-1z M52 26h1v1h-1z"/>
-  <path fill="#000" d="M5 27h1v1h-1z M7 27h2v1h-2z M12 27h2v1h-2z M17 27h1v1h-1z M19 27h8v1h-8z M30 27h5v1h-5z M36 27h3v1h-3z M43 27h2v1h-2z M48 27h2v1h-2z M52 27h1v1h-1z"/>
+  <path fill="#000" d="M5 27h4v1h-4z M12 27h2v1h-2z M17 27h1v1h-1z M19 27h8v1h-8z M30 27h5v1h-5z M36 27h4v1h-4z M43 27h2v1h-2z M48 27h2v1h-2z M52 27h1v1h-1z"/>
   <path fill="#000" d="M4 28h3v1h-3z M8 28h1v1h-1z M10 28h1v1h-1z M12 28h1v1h-1z M16 28h4v1h-4z M24 28h3v1h-3z M28 28h1v1h-1z M30 28h1v1h-1z M34 28h1v1h-1z M37 28h1v1h-1z M39 28h2v1h-2z M42 28h3v1h-3z M46 28h1v1h-1z M48 28h1v1h-1z M50 28h3v1h-3z"/>
   <path fill="#000" d="M4 29h1v1h-1z M6 29h1v1h-1z M8 29h1v1h-1z M12 29h3v1h-3z M21 29h1v1h-1z M23 29h1v1h-1z M26 29h1v1h-1z M30 29h1v1h-1z M33 29h3v1h-3z M39 29h3v1h-3z M43 29h2v1h-2z M48 29h1v1h-1z M51 29h1v1h-1z"/>
-  <path fill="#000" d="M4 30h1v1h-1z M7 30h6v1h-6z M14 30h1v1h-1z M16 30h2v1h-2z M20 30h1v1h-1z M23 30h1v1h-1z M26 30h5v1h-5z M32 30h1v1h-1z M36 30h1v1h-1z M38 30h2v1h-2z M42 30h7v1h-7z M51 30h2v1h-2z"/>
-  <path fill="#000" d="M5 31h1v1h-1z M8 31h1v1h-1z M14 31h1v1h-1z M16 31h1v1h-1z M19 31h1v1h-1z M22 31h3v1h-3z M28 31h1v1h-1z M31 31h3v1h-3z M35 31h3v1h-3z M39 31h1v1h-1z M42 31h1v1h-1z M44 31h1v1h-1z"/>
-  <path fill="#000" d="M5 32h2v1h-2z M9 32h3v1h-3z M17 32h1v1h-1z M19 32h1v1h-1z M21 32h1v1h-1z M23 32h1v1h-1z M26 32h1v1h-1z M28 32h3v1h-3z M35 32h1v1h-1z M39 32h3v1h-3z M43 32h2v1h-2z M47 32h2v1h-2z M50 32h2v1h-2z"/>
-  <path fill="#000" d="M4 33h1v1h-1z M6 33h1v1h-1z M12 33h1v1h-1z M14 33h1v1h-1z M19 33h2v1h-2z M25 33h3v1h-3z M29 33h2v1h-2z M32 33h5v1h-5z M40 33h2v1h-2z M43 33h5v1h-5z M49 33h1v1h-1z"/>
-  <path fill="#000" d="M5 34h4v1h-4z M10 34h1v1h-1z M18 34h1v1h-1z M20 34h1v1h-1z M23 34h1v1h-1z M26 34h1v1h-1z M29 34h1v1h-1z M31 34h1v1h-1z M33 34h1v1h-1z M37 34h4v1h-4z M42 34h11v1h-11z"/>
-  <path fill="#000" d="M4 35h2v1h-2z M8 35h1v1h-1z M11 35h1v1h-1z M13 35h1v1h-1z M19 35h1v1h-1z M21 35h1v1h-1z M25 35h1v1h-1z M27 35h1v1h-1z M30 35h1v1h-1z M34 35h2v1h-2z M37 35h1v1h-1z M39 35h2v1h-2z M44 35h1v1h-1z M47 35h1v1h-1z M49 35h1v1h-1z M52 35h1v1h-1z"/>
+  <path fill="#000" d="M7 30h6v1h-6z M14 30h1v1h-1z M16 30h2v1h-2z M20 30h1v1h-1z M23 30h1v1h-1z M26 30h5v1h-5z M32 30h1v1h-1z M36 30h1v1h-1z M38 30h2v1h-2z M42 30h7v1h-7z M51 30h2v1h-2z"/>
+  <path fill="#000" d="M4 31h1v1h-1z M8 31h1v1h-1z M14 31h1v1h-1z M16 31h1v1h-1z M19 31h1v1h-1z M22 31h3v1h-3z M28 31h1v1h-1z M31 31h3v1h-3z M35 31h3v1h-3z M39 31h1v1h-1z M42 31h1v1h-1z M44 31h1v1h-1z"/>
+  <path fill="#000" d="M4 32h1v1h-1z M6 32h1v1h-1z M9 32h3v1h-3z M15 32h3v1h-3z M19 32h3v1h-3z M23 32h1v1h-1z M26 32h1v1h-1z M28 32h3v1h-3z M35 32h1v1h-1z M39 32h3v1h-3z M43 32h2v1h-2z M47 32h2v1h-2z M50 32h2v1h-2z"/>
+  <path fill="#000" d="M4 33h1v1h-1z M6 33h1v1h-1z M12 33h1v1h-1z M14 33h1v1h-1z M16 33h1v1h-1z M19 33h2v1h-2z M25 33h3v1h-3z M29 33h2v1h-2z M32 33h5v1h-5z M40 33h2v1h-2z M43 33h5v1h-5z M49 33h1v1h-1z"/>
+  <path fill="#000" d="M5 34h4v1h-4z M10 34h1v1h-1z M18 34h2v1h-2z M23 34h1v1h-1z M26 34h1v1h-1z M29 34h1v1h-1z M31 34h1v1h-1z M33 34h1v1h-1z M37 34h4v1h-4z M42 34h11v1h-11z"/>
+  <path fill="#000" d="M4 35h2v1h-2z M8 35h1v1h-1z M11 35h1v1h-1z M13 35h1v1h-1z M16 35h1v1h-1z M19 35h3v1h-3z M25 35h1v1h-1z M27 35h1v1h-1z M30 35h1v1h-1z M34 35h2v1h-2z M37 35h1v1h-1z M39 35h2v1h-2z M44 35h1v1h-1z M47 35h1v1h-1z M49 35h1v1h-1z M52 35h1v1h-1z"/>
   <path fill="#000" d="M6 36h1v1h-1z M8 36h3v1h-3z M15 36h2v1h-2z M19 36h1v1h-1z M22 36h1v1h-1z M24 36h2v1h-2z M27 36h2v1h-2z M30 36h2v1h-2z M33 36h2v1h-2z M40 36h2v1h-2z M43 36h3v1h-3z M47 36h1v1h-1z M49 36h3v1h-3z"/>
   <path fill="#000" d="M4 37h2v1h-2z M7 37h3v1h-3z M11 37h1v1h-1z M14 37h1v1h-1z M16 37h3v1h-3z M20 37h1v1h-1z M22 37h2v1h-2z M25 37h5v1h-5z M34 37h2v1h-2z M37 37h1v1h-1z M39 37h2v1h-2z M43 37h3v1h-3z M47 37h1v1h-1z M51 37h1v1h-1z"/>
-  <path fill="#000" d="M7 38h2v1h-2z M10 38h2v1h-2z M13 38h1v1h-1z M19 38h2v1h-2z M25 38h1v1h-1z M27 38h3v1h-3z M31 38h1v1h-1z M33 38h2v1h-2z M40 38h2v1h-2z M46 38h2v1h-2z M49 38h1v1h-1z M52 38h1v1h-1z"/>
-  <path fill="#000" d="M5 39h1v1h-1z M7 39h1v1h-1z M11 39h9v1h-9z M21 39h3v1h-3z M25 39h3v1h-3z M29 39h2v1h-2z M32 39h1v1h-1z M34 39h4v1h-4z M39 39h1v1h-1z M41 39h1v1h-1z M44 39h1v1h-1z M47 39h2v1h-2z M52 39h1v1h-1z"/>
-  <path fill="#000" d="M4 40h1v1h-1z M6 40h1v1h-1z M10 40h2v1h-2z M16 40h1v1h-1z M20 40h2v1h-2z M24 40h1v1h-1z M29 40h1v1h-1z M33 40h1v1h-1z M35 40h1v1h-1z M38 40h1v1h-1z M40 40h2v1h-2z M43 40h3v1h-3z M47 40h2v1h-2z M50 40h3v1h-3z"/>
-  <path fill="#000" d="M4 41h1v1h-1z M6 41h1v1h-1z M15 41h1v1h-1z M21 41h3v1h-3z M25 41h4v1h-4z M31 41h2v1h-2z M34 41h3v1h-3z M41 41h1v1h-1z M45 41h1v1h-1z M47 41h1v1h-1z M50 41h2v1h-2z"/>
-  <path fill="#000" d="M5 42h1v1h-1z M9 42h4v1h-4z M15 42h1v1h-1z M17 42h1v1h-1z M20 42h3v1h-3z M26 42h4v1h-4z M31 42h1v1h-1z M35 42h2v1h-2z M38 42h2v1h-2z M41 42h7v1h-7z M50 42h3v1h-3z"/>
+  <path fill="#000" d="M7 38h2v1h-2z M10 38h2v1h-2z M13 38h1v1h-1z M17 38h6v1h-6z M25 38h1v1h-1z M27 38h3v1h-3z M31 38h1v1h-1z M33 38h2v1h-2z M40 38h2v1h-2z M46 38h2v1h-2z M49 38h1v1h-1z M52 38h1v1h-1z"/>
+  <path fill="#000" d="M5 39h1v1h-1z M7 39h1v1h-1z M11 39h2v1h-2z M14 39h3v1h-3z M19 39h1v1h-1z M21 39h3v1h-3z M25 39h3v1h-3z M29 39h2v1h-2z M32 39h1v1h-1z M34 39h4v1h-4z M39 39h1v1h-1z M41 39h1v1h-1z M44 39h1v1h-1z M47 39h2v1h-2z M52 39h1v1h-1z"/>
+  <path fill="#000" d="M4 40h1v1h-1z M8 40h3v1h-3z M12 40h1v1h-1z M14 40h1v1h-1z M16 40h1v1h-1z M18 40h1v1h-1z M20 40h1v1h-1z M22 40h1v1h-1z M24 40h1v1h-1z M29 40h1v1h-1z M33 40h1v1h-1z M35 40h1v1h-1z M38 40h1v1h-1z M40 40h2v1h-2z M43 40h3v1h-3z M47 40h2v1h-2z M50 40h3v1h-3z"/>
+  <path fill="#000" d="M4 41h1v1h-1z M6 41h4v1h-4z M11 41h5v1h-5z M18 41h1v1h-1z M21 41h3v1h-3z M25 41h4v1h-4z M31 41h2v1h-2z M34 41h3v1h-3z M41 41h1v1h-1z M45 41h1v1h-1z M47 41h1v1h-1z M50 41h2v1h-2z"/>
+  <path fill="#000" d="M5 42h1v1h-1z M9 42h2v1h-2z M15 42h1v1h-1z M17 42h1v1h-1z M20 42h3v1h-3z M26 42h4v1h-4z M31 42h1v1h-1z M35 42h2v1h-2z M38 42h2v1h-2z M41 42h7v1h-7z M50 42h3v1h-3z"/>
   <path fill="#000" d="M5 43h3v1h-3z M13 43h2v1h-2z M16 43h2v1h-2z M19 43h1v1h-1z M21 43h2v1h-2z M25 43h4v1h-4z M30 43h4v1h-4z M35 43h3v1h-3z M39 43h1v1h-1z M44 43h2v1h-2z M47 43h1v1h-1z"/>
   <path fill="#000" d="M4 44h3v1h-3z M10 44h5v1h-5z M20 44h3v1h-3z M24 44h1v1h-1z M26 44h5v1h-5z M33 44h3v1h-3z M37 44h2v1h-2z M40 44h9v1h-9z M50 44h1v1h-1z M52 44h1v1h-1z"/>
   <path fill="#000" d="M12 45h1v1h-1z M15 45h2v1h-2z M19 45h1v1h-1z M22 45h2v1h-2z M25 45h2v1h-2z M30 45h1v1h-1z M32 45h4v1h-4z M39 45h3v1h-3z M44 45h1v1h-1z M48 45h1v1h-1z"/>
   <path fill="#000" d="M4 46h7v1h-7z M15 46h3v1h-3z M19 46h6v1h-6z M26 46h1v1h-1z M28 46h1v1h-1z M30 46h1v1h-1z M32 46h3v1h-3z M37 46h4v1h-4z M42 46h1v1h-1z M44 46h1v1h-1z M46 46h1v1h-1z M48 46h2v1h-2z M51 46h2v1h-2z"/>
   <path fill="#000" d="M4 47h1v1h-1z M10 47h1v1h-1z M12 47h1v1h-1z M16 47h1v1h-1z M19 47h2v1h-2z M25 47h2v1h-2z M30 47h7v1h-7z M38 47h2v1h-2z M41 47h1v1h-1z M44 47h1v1h-1z M48 47h1v1h-1z M51 47h2v1h-2z"/>
-  <path fill="#000" d="M4 48h1v1h-1z M6 48h3v1h-3z M10 48h1v1h-1z M12 48h1v1h-1z M14 48h1v1h-1z M17 48h2v1h-2z M21 48h1v1h-1z M26 48h5v1h-5z M34 48h2v1h-2z M37 48h6v1h-6z M44 48h9v1h-9z"/>
-  <path fill="#000" d="M4 49h1v1h-1z M6 49h3v1h-3z M10 49h1v1h-1z M12 49h2v1h-2z M15 49h1v1h-1z M17 49h1v1h-1z M19 49h1v1h-1z M21 49h1v1h-1z M23 49h2v1h-2z M26 49h2v1h-2z M31 49h5v1h-5z M41 49h1v1h-1z M43 49h2v1h-2z M46 49h4v1h-4z M51 49h1v1h-1z"/>
-  <path fill="#000" d="M4 50h1v1h-1z M6 50h3v1h-3z M10 50h1v1h-1z M12 50h2v1h-2z M17 50h1v1h-1z M22 50h1v1h-1z M24 50h1v1h-1z M26 50h4v1h-4z M32 50h2v1h-2z M36 50h1v1h-1z M40 50h1v1h-1z M42 50h1v1h-1z M45 50h3v1h-3z M50 50h3v1h-3z"/>
-  <path fill="#000" d="M4 51h1v1h-1z M10 51h1v1h-1z M14 51h1v1h-1z M16 51h1v1h-1z M18 51h1v1h-1z M20 51h1v1h-1z M23 51h6v1h-6z M31 51h1v1h-1z M33 51h1v1h-1z M38 51h1v1h-1z M40 51h4v1h-4z M45 51h2v1h-2z M52 51h1v1h-1z"/>
+  <path fill="#000" d="M4 48h1v1h-1z M6 48h3v1h-3z M10 48h1v1h-1z M12 48h1v1h-1z M14 48h1v1h-1z M16 48h4v1h-4z M21 48h1v1h-1z M26 48h5v1h-5z M34 48h2v1h-2z M37 48h6v1h-6z M44 48h9v1h-9z"/>
+  <path fill="#000" d="M4 49h1v1h-1z M6 49h3v1h-3z M10 49h1v1h-1z M12 49h2v1h-2z M17 49h1v1h-1z M19 49h3v1h-3z M23 49h2v1h-2z M26 49h2v1h-2z M31 49h5v1h-5z M41 49h1v1h-1z M43 49h2v1h-2z M46 49h4v1h-4z M51 49h1v1h-1z"/>
+  <path fill="#000" d="M4 50h1v1h-1z M6 50h3v1h-3z M10 50h1v1h-1z M12 50h2v1h-2z M16 50h2v1h-2z M19 50h1v1h-1z M22 50h1v1h-1z M24 50h1v1h-1z M26 50h4v1h-4z M32 50h2v1h-2z M36 50h1v1h-1z M40 50h1v1h-1z M42 50h1v1h-1z M45 50h3v1h-3z M50 50h3v1h-3z"/>
+  <path fill="#000" d="M4 51h1v1h-1z M10 51h1v1h-1z M14 51h2v1h-2z M18 51h2v1h-2z M23 51h6v1h-6z M31 51h1v1h-1z M33 51h1v1h-1z M38 51h1v1h-1z M40 51h4v1h-4z M45 51h2v1h-2z M52 51h1v1h-1z"/>
   <path fill="#000" d="M4 52h7v1h-7z M12 52h1v1h-1z M14 52h5v1h-5z M20 52h5v1h-5z M28 52h2v1h-2z M32 52h1v1h-1z M35 52h5v1h-5z M42 52h1v1h-1z M49 52h4v1h-4z"/>
 </svg>'
 
@@ -431,24 +452,24 @@ cis_l2_inventory='2.2
 
 # One checksum-bound source registry drives native and admin-side currency.
 # Assembly fails if any bound static table/file differs from this metadata.
-CURRENCY_REGISTRY_SCHEMA='aixray-source-registry/1'
+CURRENCY_REGISTRY_SCHEMA='ptxray-source-registry/1'
 CURRENCY_SOURCE_COUNT=8
 set -A CR_ID 'ibm-aix-lifecycle' 'ibm-security-advisories' 'cisa-kev' 'ibm-apar-csv' 'ibm-flrtvc' 'ibm-flrt-firmware' 'cis-ibm-aix' 'disa-stig-ibm-aix-7'
 set -A CR_LABEL 'IBM AIX lifecycle reference data' 'IBM security advisory seed' 'CISA Known Exploited Vulnerabilities catalog' 'IBM FLRT apar.csv' 'IBM FLRTVC engine' 'IBM FLRT firmware lifecycle response' 'CIS IBM AIX benchmark' 'DISA STIG for IBM AIX 7.x'
 set -A CR_CLASS 'advisory' 'advisory' 'cve' 'apar' 'flrt' 'flrt' 'benchmark' 'benchmark'
 set -A CR_REQUIRED '1' '1' '1' '1' '1' '1' '1' '1'
 set -A CR_LOADED '1' '1' '0' '0' '0' '0' '1' '1'
-set -A CR_VERSION 'sha256:ac3ee68c3f9369632bcd9c01241a9fa993ece950c133af7e3e5ada2a25a48d93' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
+set -A CR_VERSION 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
 set -A CR_VERSION_BASIS 'content-sha256' 'content-sha256' 'unknown' 'unknown' 'unknown' 'unknown' 'publisher-version' 'publisher-version'
-set -A CR_AS_OF '2026-08-18' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
+set -A CR_AS_OF '2026-08-15' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
 set -A CR_AS_OF_BASIS 'curator-verified' 'curator-review' 'unknown' 'unknown' 'unknown' 'unknown' 'curator-verified' 'publisher-benchmark-date'
-set -A CR_SHA256 'sha256:ac3ee68c3f9369632bcd9c01241a9fa993ece950c133af7e3e5ada2a25a48d93' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
-set -A CR_LOCATOR 'embedded lifecycle tables' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'operator-supplied local IBM FLRT fetch envelope' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
+set -A CR_SHA256 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
+set -A CR_LOCATOR 'https://www.ibm.com/support/pages/aix-standard-edition720 (no announced AIX 7.2 EOS shown; supported state is a curator inference from that absence); https://www.ibm.com/support/pages/aix-support-lifecycle-information (AIX 7.2 TL5 EoFS: To be determined)' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'operator-supplied local IBM FLRT fetch envelope' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
 set -A CR_THRESHOLD '30' '30' '30' '30' '30' '30' '180' '180'
 set -A CR_INTEGRITY 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
 set -A CR_PROVENANCE 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
 
-# AIXray owns and redistributes these OFL-licensed report fonts. The assembler
+# PTxray owns and redistributes these OFL-licensed report fonts. The assembler
 # reads only the committed assets/fonts copies and stores their base64 once in
 # this single-file artifact; each HTML renderer expands them into data: URLs.
 report_font_plex_sans_variable_b64="d09GMgABAAAAALKQABgAAAABgPQAALIPAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAGoZPG4KgchyEYj9IVkFShDM/TVZBUmIGYD9TVEFUgTInKgCEfCsiCCoJnwMvahEMCoG5GIGaWwuEHgAwgctGATYCJAOIOAQgBYhUB4htDIEoW/BtkUDYxm6DT0uK9BSTBOrrfMcXUTDdHLzcNqpH5LpZHig7SiDoDmCP9J7cZf////8vSCYyZndBk6QtpSAgMFTZ76GSGcyDUrBRMjbKJXqkiqQRkQfLmlqPEalMNGrN/aOh5zYvtKL0ERT87BJCS4kSm5FtcusUO0VUhGDpFiYY6UTJE0KwdUbW6SgwFweVVhV/VDrhJunycnYaj925acHEqz5C8psn7TxLBe/jdC8fKLY0O0IRYcLLhExVUHz9Yv+IGpgxv+g5i+0GdvNf2Rd+fGGxQIWTXxuegzTIk1yFnd8Vg3KZFmmQXVZRd3GRDTsPNLR1Pl//hOQwfDMiYMhOU4m9iudfRco8kE2jY1E7kQzVeiTEpWQqBCl0xMeitsMeDdtg+BbaslFFXqCw1Wy71sA6aOf/pKyqZLjU+YKTCdplJ6N15awdMj5saFAYHRTOPWlIPSx1efNWKWmnqp2DNdPh5DdaipJjHPEr2D0ex3jueGDGpSu5WGWV2z1MvfQn76538hDYgMuAIZmW9nElz5MvD9/z+5a/9rnP6HZovIGHSqCnZ2hUw1ATYsaIE6aRIUZ1xIg6P19sQsSJODEnU8SJE/GJ6P553k3/vMt7D7iiCDwQUJCKEH4UQUAyOnUHB+DMbmtNp2aYdGy7M4eaxiy7HLPTNbKIiGMCyl9pVudKeHq8yDeTn2ThQIteYDqyanUH+G32TsBCUaeooESktMALWsInCIpVm1Gr0nWcf38Rrdttu3TVV7Wqi0XPQJfl0p0TG0QOyc1uOey2a9ll0yV2iTe6fF/ywRuEQ9IVDhEJ4nujS8QuyUsQa3fw7bIiR24tX+Rql9zbJcUu\
@@ -616,6 +637,636 @@ KtIVrykLMk7BGVjEQnRmSEk2tnxS/W9YaBmNdXZUSw3/OR8rVY/liX9FtV9GzydN8er/IYeJIgLLMKMb
 # later dirname-$0 self-location done inside a function is silently wrong on one
 # of the two target shells. AIXRAY_SELF is the only self-path source used below.
 AIXRAY_SELF=$0
+PTXRAY_SELF=$AIXRAY_SELF
+PTXRAY_DEFS_INTEGRATION=1
+PTXRAY_DEFS_DOWNLOADER_SHA256='8720efb8c04366da97c4b8f187ef6dcfb924d17fc38d1898900da813694822af'
+# Shared post-identity-gate selector for the adjacent signed-data downloader.
+# This module contains no transport implementation and no endpoint. Assemblers
+# bind the exact same-release downloader digest above it.
+PTXRAY_DEFS_SELECTED=0
+PTXRAY_DEFS_SELECTED_MODE=none
+PTXRAY_DEFS_SEQUENCE=unknown
+PTXRAY_DEFS_CREATED_AT=unknown
+PTXRAY_DEFS_AGE_DAYS=unknown
+PTXRAY_DEFS_FRESHNESS=unavailable
+PTXRAY_DEFS_KEV_VERSION=unknown
+PTXRAY_DEFS_KEV_ASOF=unknown
+PTXRAY_DEFS_KEV_SHA256=unknown
+PTXRAY_DEFS_APAR_VERSION=unknown
+PTXRAY_DEFS_APAR_ASOF=unknown
+PTXRAY_DEFS_APAR_SHA256=unknown
+PTXRAY_DEFS_GENERATION=none
+PTXRAY_DEFS_UPDATE_ERROR=none
+PTXRAY_DEFS_OUTCOME=not-requested
+PTXRAY_DEFS_PATH=
+PTXRAY_DEFS_SNAPSHOT_DIR=
+PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+PTXRAY_DEFS_SNAPSHOT_KEV=
+PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES=
+PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+PTXRAY_DEFS_SNAPSHOT_APAR=
+PTXRAY_DEFS_SNAPSHOT_APAR_ID=
+
+function ptxray_defs_self_dir {
+  typeset resolved
+  case "$PTXRAY_SELF" in
+    */*) (CDPATH= cd -- "$(dirname "$PTXRAY_SELF")" 2>/dev/null \
+            && (pwd -P 2>/dev/null || pwd));;
+    *)
+      resolved=$(whence -p "$PTXRAY_SELF" 2>/dev/null) || return 1
+      case "$resolved" in
+        */*) (CDPATH= cd -- "$(dirname "$resolved")" 2>/dev/null \
+                && (pwd -P 2>/dev/null || pwd));;
+        *) return 1;;
+      esac
+      ;;
+  esac
+}
+
+function ptxray_defs_directory_safe {
+  typeset directory listing mode owner me group_write other_write sticky
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ld "$directory" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = d ] || return 1
+  [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+    || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ] || return 1
+  group_write=$(printf '%s' "$mode" | cut -c6)
+  other_write=$(printf '%s' "$mode" | cut -c9)
+  sticky=$(printf '%s' "$mode" | cut -c10)
+  if [ "$group_write" = w ] || [ "$other_write" = w ]; then
+    case "$sticky" in t|T) ;; *) return 1;; esac
+  fi
+  return 0
+}
+
+function ptxray_defs_ancestry_safe {
+  typeset directory parent
+  directory=$1
+  case "$directory" in /*) ;; *) return 1;; esac
+  while :; do
+    ptxray_defs_directory_safe "$directory" || return 1
+    [ "$directory" = / ] && return 0
+    parent=${directory%/*}; [ -n "$parent" ] || parent=/
+    [ "$parent" != "$directory" ] || return 1
+    directory=$parent
+  done
+}
+
+function ptxray_defs_select_openssl {
+  typeset candidate listing mode owner links me directory
+  for candidate in \
+      /usr/bin/openssl \
+      /opt/freeware/bin/openssl \
+      /QOpenSys/pkgs/bin/openssl
+  do
+    [ -x "$candidate" ] && [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || continue
+    listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || continue
+    mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+    links=$(printf '%s\n' "$listing" | awk '{print $2}')
+    owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+    me=$(id -un 2>/dev/null) || return 1
+    [ "$(printf '%s' "$mode" | cut -c1)" = - ] && [ "$links" = 1 ] \
+      && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+           || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ]; } \
+      && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+      && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || continue
+    directory=$(CDPATH= cd -- "$(dirname "$candidate")" 2>/dev/null \
+      && (pwd -P 2>/dev/null || pwd)) || continue
+    ptxray_defs_ancestry_safe "$directory" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+function ptxray_defs_sha256_file {
+  typeset verifier digest
+  verifier=$(ptxray_defs_select_openssl) || return 1
+  digest=$("$verifier" dgst -sha256 -r "$1" 2>/dev/null | awk '{print $1}') \
+    || return 1
+  printf '%s\n' "$digest" | awk '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    hex64($0){print;ok=1}END{exit ok?0:1}'
+}
+
+function ptxray_defs_private_dir_identity {
+  typeset directory listing inode mode owner me
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$directory" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode" in ''|*[!0-9]*) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = 'drwx------' ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s\n' "$inode" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_private_file_identity {
+  typeset path listing inode mode links owner size me
+  path=$1
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$path" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  links=$(printf '%s\n' "$listing" | awk '{print $3}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  size=$(printf '%s\n' "$listing" | awk '{print $6}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode:$links:$size" in *[!0-9:]*|::*|*:|:) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = '-rw-------' ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s|%s\n' "$inode" "$size" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_cleanup_snapshot {
+  typeset directory directory_id
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  directory=$PTXRAY_DEFS_SNAPSHOT_DIR
+  directory_id=$PTXRAY_DEFS_SNAPSHOT_DIR_ID
+  PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+  PTXRAY_DEFS_SNAPSHOT_DIR=
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+  [ -n "$directory" ] \
+    && [ "$directory_id" = "$(ptxray_defs_private_dir_identity \
+      "$directory" 2>/dev/null)" ] || return 1
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_KEV" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_KEV" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_KEV" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_CVES" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_CVES" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_CVES" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_APAR" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_APAR" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_APAR" 2>/dev/null || :
+  fi
+  PTXRAY_DEFS_SNAPSHOT_KEV=
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES=
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+  PTXRAY_DEFS_SNAPSHOT_APAR=
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=
+  rmdir "$directory" 2>/dev/null || return 1
+  return 0
+}
+
+function ptxray_defs_arm_snapshot_cleanup {
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  trap 'ptxray_defs_cleanup_snapshot' EXIT
+  trap 'ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+}
+
+function ptxray_defs_snapshot_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' \
+    -v generation="$PTXRAY_DEFS_GENERATION" \
+    -v kev="$PTXRAY_DEFS_KEV_SHA256" \
+    -v apar="$PTXRAY_DEFS_APAR_SHA256" '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=7||$1!="PTXRAY-DEFS"||$2!="1"||$3!="snapshot")bad=1
+      if($4!="generation=" generation)bad=1
+      if($5!="kev_sha256=" kev)bad=1
+      if($6!~/^cves_sha256=/||!hex64(substr($6,13)))bad=1
+      if($7!="apar_sha256=" apar)bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_prepare_snapshot {
+  typeset base physical try candidate output rc p1 p2 p3 generation kev cves apar
+  typeset actual
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  [ -n "$PTXRAY_DEFS_PATH" ] || return 1
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  try=0
+  while [ "$try" -lt 20 ]; do
+    candidate=$physical/.ptxray-definitions.$$.$try
+    if mkdir -m 700 "$candidate" 2>/dev/null; then
+      PTXRAY_DEFS_SNAPSHOT_DIR=$candidate
+      PTXRAY_DEFS_SNAPSHOT_ACTIVE=1
+      break
+    fi
+    try=$((try+1))
+  done
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 1
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=$(ptxray_defs_private_dir_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_DIR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  ptxray_defs_arm_snapshot_cleanup
+  output=$("$PTXRAY_DEFS_PATH" --snapshot "$PTXRAY_DEFS_GENERATION" \
+    "$candidate"); rc=$?
+  [ "$rc" -eq 0 ] && ptxray_defs_snapshot_protocol_valid "$output" \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  IFS='|' read p1 p2 p3 generation kev cves apar <<PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+$output
+PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=${cves#cves_sha256=}
+  PTXRAY_DEFS_SNAPSHOT_KEV=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev.json
+  PTXRAY_DEFS_SNAPSHOT_CVES=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev-cves.txt
+  PTXRAY_DEFS_SNAPSHOT_APAR=$PTXRAY_DEFS_SNAPSHOT_DIR/ibm-apar.csv
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_KEV") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_KEV") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_KEV_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_KEV")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_CVES") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_CVES") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_CVES")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_APAR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_APAR") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_APAR_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_APAR")" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_DIR_ID" = "$(ptxray_defs_private_dir_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_DIR")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  return 0
+}
+
+function ptxray_defs_resolve {
+  typeset selfdir candidate listing mode owner links me actual
+  PTXRAY_DEFS_PATH=
+  selfdir=$(ptxray_defs_self_dir) || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unavailable
+    echo 'ptxray: cannot resolve the adjacent definitions downloader directory' >&2
+    return 1
+  }
+  ptxray_defs_ancestry_safe "$selfdir" || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unsafe
+    echo 'ptxray: adjacent definitions downloader directory ancestry is unsafe' >&2
+    return 1
+  }
+  candidate=$selfdir/ptxray-defs.sh
+  [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -x "$candidate" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-missing
+    echo 'ptxray: same-release adjacent ptxray-defs.sh is missing or unsafe' >&2
+    return 1
+  }
+  listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  links=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = - ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = "$me" ]; } \
+    && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+    && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || {
+      PTXRAY_DEFS_OUTCOME=downloader-file-unsafe
+      echo 'ptxray: same-release adjacent ptxray-defs.sh ownership or mode is unsafe' >&2
+      return 1
+    }
+  actual=$(ptxray_defs_sha256_file "$candidate") || {
+    PTXRAY_DEFS_OUTCOME=downloader-verifier-unavailable
+    echo 'ptxray: cannot verify the adjacent definitions downloader digest' >&2
+    return 1
+  }
+  [ "$actual" = "$PTXRAY_DEFS_DOWNLOADER_SHA256" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-integrity-mismatch
+    echo 'ptxray: adjacent ptxray-defs.sh does not match this runner release; it was not executed' >&2
+    return 1
+  }
+  PTXRAY_DEFS_PATH=$candidate
+  return 0
+}
+
+function ptxray_defs_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' '
+    function digits(s){return s~/^(0|[1-9][0-9]*)$/}
+    function positive(s){return s~/^[1-9][0-9]*$/&&length(s)<=18}
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function ymd(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/}
+    function dotted(s){return s~/^[0-9][0-9][0-9][0-9][.][0-9][0-9][.][0-9][0-9]$/}
+    function version(s){return length(s)>=1&&length(s)<=64&&s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/}
+    function created(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/}
+    function generation(s, a,n){n=split(s,a,"-");return n==3&&a[1]=="g"&&positive(a[2])&&hex64(a[3])}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=15&&NF!=16)bad=1
+      if($1!="PTXRAY-DEFS"||$2!="1"||$3!="ok")bad=1
+      if($4!="update"&&$4!="cache"&&$4!="local"&&$4!="cache-fallback")bad=1
+      if($5!~/^sequence=/||!positive(substr($5,10)))bad=1
+      if($6!~/^created_at=/||!created(substr($6,12)))bad=1
+      if($7!~/^age_days=/||!digits(substr($7,10)))bad=1
+      if($8!="freshness=current"&&$8!="freshness=stale")bad=1
+      if($9!~/^kev_version=/||!dotted(substr($9,13)))bad=1
+      if($10!~/^kev_as_of=/||!ymd(substr($10,11)))bad=1
+      if($11!~/^kev_sha256=/||!hex64(substr($11,12)))bad=1
+      if($12!~/^apar_version=/||!version(substr($12,14)))bad=1
+      if($13!~/^apar_as_of=/||!ymd(substr($13,12)))bad=1
+      if($14!~/^apar_sha256=/||!hex64(substr($14,13)))bad=1
+      if($15!~/^generation=/||!generation(substr($15,12)))bad=1
+      if(NF==16){
+        if($4!="cache-fallback"||$16!~/^error=(transport|size-limit|signature|rollback|malformed|unsafe-cache|lock-contention)$/)bad=1
+      } else if($4=="cache-fallback")bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_accept_protocol {
+  typeset line p1 p2 p3 mode sequence created age freshness kev_version kev_asof
+  typeset kev_sha apar_version apar_asof apar_sha generation error
+  line=$1
+  ptxray_defs_protocol_valid "$line" || return 1
+  IFS='|' read p1 p2 p3 mode sequence created age freshness kev_version kev_asof \
+    kev_sha apar_version apar_asof apar_sha generation error <<PTXRAY_DEFS_PROTOCOL
+$line
+PTXRAY_DEFS_PROTOCOL
+  PTXRAY_DEFS_SELECTED=1
+  PTXRAY_DEFS_SELECTED_MODE=$mode
+  PTXRAY_DEFS_SEQUENCE=${sequence#sequence=}
+  PTXRAY_DEFS_CREATED_AT=${created#created_at=}
+  PTXRAY_DEFS_AGE_DAYS=${age#age_days=}
+  PTXRAY_DEFS_FRESHNESS=${freshness#freshness=}
+  PTXRAY_DEFS_KEV_VERSION=${kev_version#kev_version=}
+  PTXRAY_DEFS_KEV_ASOF=${kev_asof#kev_as_of=}
+  PTXRAY_DEFS_KEV_SHA256=${kev_sha#kev_sha256=}
+  PTXRAY_DEFS_APAR_VERSION=${apar_version#apar_version=}
+  PTXRAY_DEFS_APAR_ASOF=${apar_asof#apar_as_of=}
+  PTXRAY_DEFS_APAR_SHA256=${apar_sha#apar_sha256=}
+  PTXRAY_DEFS_GENERATION=${generation#generation=}
+  case "$error" in error=*) PTXRAY_DEFS_UPDATE_ERROR=${error#error=};; *) PTXRAY_DEFS_UPDATE_ERROR=none;; esac
+  PTXRAY_DEFS_OUTCOME=verified
+  return 0
+}
+
+function ptxray_defs_attempt {
+  typeset requested argument explicit output rc
+  requested=$1; argument=${2:-}; explicit=${3:-0}
+  if ! ptxray_defs_resolve; then
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if [ "$requested" = --local ]; then
+    output=$("$PTXRAY_DEFS_PATH" --local "$argument"); rc=$?
+  else
+    output=$("$PTXRAY_DEFS_PATH" "$requested"); rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    PTXRAY_DEFS_OUTCOME=downloader-refused
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if ! ptxray_defs_accept_protocol "$output"; then
+    PTXRAY_DEFS_OUTCOME=downloader-protocol-invalid
+    echo 'ptxray: adjacent definitions downloader returned an invalid status protocol' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  if ! ptxray_defs_prepare_snapshot; then
+    PTXRAY_DEFS_SELECTED=0
+    PTXRAY_DEFS_OUTCOME=snapshot-refused
+    echo 'ptxray: verified definitions could not be exported to a private run snapshot' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  return 0
+}
+
+function ptxray_defs_read_payload {
+  typeset source path expected actual before
+  source=$1
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  case "$source" in
+    cisa-kev)
+      path=$PTXRAY_DEFS_SNAPSHOT_KEV
+      expected=$PTXRAY_DEFS_KEV_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_KEV_ID
+      ;;
+    cisa-kev-cves)
+      path=$PTXRAY_DEFS_SNAPSHOT_CVES
+      expected=$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_CVES_ID
+      ;;
+    ibm-apar-csv)
+      path=$PTXRAY_DEFS_SNAPSHOT_APAR
+      expected=$PTXRAY_DEFS_APAR_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_APAR_ID
+      ;;
+    *) return 1;;
+  esac
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ] || return 1
+  actual=$(ptxray_defs_sha256_file "$path") || return 1
+  [ "$actual" = "$expected" ] || return 1
+  cat "$path" || return 1
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ]
+}
+
+function ptxray_defs_copy_payload {
+  typeset source destination expected actual
+  source=$1; destination=$2
+  case "$source" in
+    cisa-kev) expected=$PTXRAY_DEFS_KEV_SHA256;;
+    ibm-apar-csv) expected=$PTXRAY_DEFS_APAR_SHA256;;
+    *) return 1;;
+  esac
+  [ ! -e "$destination" ] && [ ! -L "$destination" ] || return 1
+  (set -C; umask 077; : >"$destination") 2>/dev/null || return 1
+  if ! ptxray_defs_read_payload "$source" >"$destination"; then
+    rm -f "$destination"
+    return 1
+  fi
+  chmod 600 "$destination" 2>/dev/null || { rm -f "$destination"; return 1; }
+  actual=$(ptxray_defs_sha256_file "$destination") || {
+    rm -f "$destination"; return 1
+  }
+  [ "$actual" = "$expected" ] || { rm -f "$destination"; return 1; }
+  return 0
+}
+
+function ptxray_defs_show_verified_age {
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 0
+  printf 'PTxray signed definitions verified: %s days old (%s), mode %s.\n' \
+    "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+    "$PTXRAY_DEFS_SELECTED_MODE" >&2
+}
+
+# ksh88 has no portable `read -t`, and some implementations restart a read
+# after a trapped signal.  A background reader writes into a mode-700 directory
+# created atomically under a trusted temporary parent; the foreground polls for
+# at most 30 seconds. EOF and timeout share the fail-closed cancellation path.
+function ptxray_defs_tty_read {
+  typeset base physical try prompt_dir reader elapsed limit read_rc
+  PTXRAY_DEFS_TTY_VALUE=
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  prompt_dir=
+  try=0
+  while [ "$try" -lt 20 ]; do
+    if mkdir -m 700 "$physical/.ptxray-prompt.$$.$try" 2>/dev/null; then
+      prompt_dir=$physical/.ptxray-prompt.$$.$try
+      break
+    fi
+    try=$((try+1))
+  done
+  [ -n "$prompt_dir" ] || return 1
+  umask 077
+  awk 'NR==1{print;exit}' <&3 >"$prompt_dir/value" &
+  reader=$!
+  limit=30
+  if [ "${PTXRAY_PRIVATE_TEST_BUILD:-0}" -eq 1 ] \
+      && [ "${PTXRAY_TEST_DEFS_FAST_TIMEOUT:-0}" = 1 ]; then
+    limit=1
+  fi
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ] \
+      && kill -0 "$reader" >/dev/null 2>&1; do
+    sleep 1
+    elapsed=$((elapsed+1))
+  done
+  if kill -0 "$reader" >/dev/null 2>&1; then
+    kill -9 "$reader" >/dev/null 2>&1 || :
+    wait "$reader" 2>/dev/null || :
+    rm -f "$prompt_dir/value" 2>/dev/null || :
+    rmdir "$prompt_dir" 2>/dev/null || :
+    return 1
+  fi
+  wait "$reader" 2>/dev/null
+  read_rc=$?
+  [ "$read_rc" -eq 0 ] \
+    && [ "$(wc -c <"$prompt_dir/value" 2>/dev/null | tr -d ' ')" -gt 0 ] \
+    || read_rc=1
+  PTXRAY_DEFS_TTY_VALUE=$(awk 'NR==1{print;exit}' "$prompt_dir/value" 2>/dev/null) \
+    || read_rc=1
+  rm -f "$prompt_dir/value" 2>/dev/null || read_rc=1
+  rmdir "$prompt_dir" 2>/dev/null || read_rc=1
+  [ "$read_rc" -eq 0 ]
+}
+
+function ptxray_defs_select_for_run {
+  typeset offline local_bundle answer local_path rc
+  offline=$1; local_bundle=$2
+  [ "$PTXRAY_DEFS_INTEGRATION" -eq 1 ] || return 0
+  if [ -n "$local_bundle" ]; then
+    ptxray_defs_attempt --local "$local_bundle" 1; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ "$offline" -eq 1 ]; then
+    ptxray_defs_attempt --cache '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if (: <> /dev/tty) 2>/dev/null; then
+    exec 3<> /dev/tty
+  else
+    ptxray_defs_attempt --update '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ -t 3 ]; then
+    while :; do
+      printf '%s\n' \
+        'PTxray signed definitions' \
+        '  Cache age: verified after selection' \
+        '  1. Update signed definitions now (default)' \
+        '  2. Use the last valid signed cache' \
+        '  3. Use a local signed definitions bundle' \
+        '  4. Continue without definitions' >&3
+      printf '%s' 'Selection [1] (30 seconds): ' >&3
+      if ! ptxray_defs_tty_read; then
+        exec 3>&-
+        PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+        echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+        return 130
+      fi
+      answer=$PTXRAY_DEFS_TTY_VALUE
+      [ -n "$answer" ] || answer=1
+      case "$answer" in
+        1)
+          exec 3>&-
+          ptxray_defs_attempt --update '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        2)
+          exec 3>&-
+          ptxray_defs_attempt --cache '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        3)
+          printf '%s' 'Local signed bundle path (30 seconds): ' >&3
+          if ! ptxray_defs_tty_read; then
+            exec 3>&-
+            PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+            echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+            return 130
+          fi
+          local_path=$PTXRAY_DEFS_TTY_VALUE
+          [ -n "$local_path" ] \
+            || { echo 'ptxray: a local signed bundle path is required' >&3; continue; }
+          exec 3>&-
+          ptxray_defs_attempt --local "$local_path" 1
+          rc=$?
+          ptxray_defs_show_verified_age
+          return "$rc"
+          ;;
+        4)
+          exec 3>&-
+          PTXRAY_DEFS_OUTCOME=operator-continued-without-definitions
+          return 0
+          ;;
+        *) echo 'ptxray: choose 1, 2, 3, or 4' >&3;;
+      esac
+    done
+  fi
+  exec 3>&-
+  ptxray_defs_attempt --update '' 0
+  ptxray_defs_show_verified_age
+  return 0
+}
+
+function ptxray_defs_summary {
+  if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ]; then
+    printf 'mode=%s; sequence=%s; signed=%s; age=%s days; freshness=%s; CISA KEV=%s (%s); IBM APAR=%s (%s); fallback_error=%s' \
+      "$PTXRAY_DEFS_SELECTED_MODE" "$PTXRAY_DEFS_SEQUENCE" "$PTXRAY_DEFS_CREATED_AT" \
+      "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+      "$PTXRAY_DEFS_KEV_VERSION" "$PTXRAY_DEFS_KEV_ASOF" \
+      "$PTXRAY_DEFS_APAR_VERSION" "$PTXRAY_DEFS_APAR_ASOF" \
+      "$PTXRAY_DEFS_UPDATE_ERROR"
+  else
+    printf 'mode=none; outcome=%s' "$PTXRAY_DEFS_OUTCOME"
+  fi
+}
 
 FORMAT=html
 CURRENCY_STATUS_MODE=0
@@ -633,41 +1284,16 @@ FLRTVC_DATA_VERSION=""
 FLRTVC_DATA_VINTAGE=""
 FLRTVC_DATA_AGE=""
 FV_PROVENANCE_REAL=0
-# Operator-supplied definition bundle (--definitions-bundle <file>): a single
-# air-gap-carried .aixray-defs envelope framing ibm-apar-csv + ibm-flrtvc (+
-# optional cisa-kev). parse_definitions_bundle() validates the envelope and
-# payload digests and decodes the verified payloads into a private scratch dir;
-# the apar_scan invoke path then runs the engine exactly like the embedded
-# delivery path. Any framing/integrity failure refuses the WHOLE bundle with a
-# one-line diagnostic on stderr and leaves every currency row at the no-bundle
-# baseline (never partial ingestion).
+PTXRAY_DEFS_APAR_FOR_FLRTVC=0
+PTXRAY_KEV_MATCH_STATE=not-assessed
+PTXRAY_KEV_MATCH_COUNT=0
+PTXRAY_KEV_MATCH_NAMES=""
+# Operator-supplied definition bundles are signed data-only PTxray 1.5
+# envelopes. Only the adjacent digest-bound downloader verifies/imports them.
 DEFINITIONS_BUNDLE=""
 DEFINITIONS_BUNDLE_SEEN=0
-DEFINITIONS_BUNDLE_VALID=0
-DEFINITIONS_BUNDLE_SCRATCH=""
-DEFINITIONS_BUNDLE_ENGINE=""
-DEFINITIONS_BUNDLE_APAR=""
-DEFINITIONS_BUNDLE_ENGINE_SHA=""
-DEFINITIONS_BUNDLE_APAR_SHA=""
-DEFINITIONS_BUNDLE_ENGINE_VERSION=""
-DEFINITIONS_BUNDLE_ENGINE_ASOF=""
-DEFINITIONS_BUNDLE_APAR_ASOF=""
-DEFINITIONS_BUNDLE_ENGINE_VBASIS=""
-DEFINITIONS_BUNDLE_ENGINE_ABASIS=""
-DEFINITIONS_BUNDLE_APAR_VERSION=""
-DEFINITIONS_BUNDLE_APAR_VBASIS=""
-DEFINITIONS_BUNDLE_APAR_ABASIS=""
-DEFINITIONS_BUNDLE_HAS_KEV=0
-DEFINITIONS_BUNDLE_KEV_VERSION=""
-DEFINITIONS_BUNDLE_KEV_VBASIS=""
-DEFINITIONS_BUNDLE_KEV_ASOF=""
-DEFINITIONS_BUNDLE_KEV_ABASIS=""
-DEFINITIONS_BUNDLE_KEV_SHA=""
-DEFINITIONS_CACHE=""
-DEFINITIONS_CACHE_SEEN=0
-NO_DEFINITION_FETCH=0
-KEV_JSON=""
-KEV_JSON_SEEN=0
+DEFINITIONS_OFFLINE=0
+DEFINITIONS_OFFLINE_SEEN=0
 COMPLIANCE=""
 # COMPLIANCE_LIST — space-separated standard selection in argv order. A single
 # --compliance X puts X here; repeated --compliance appends (order preserved), and a
@@ -693,7 +1319,7 @@ for _arg in "$@"; do
   [ "$_arg" = "--no-menu" ] || MENU_ONLY_FLAGS=0
 done
 [ "$MENU_ONLY_FLAGS" -eq 1 ] && [ "$#" -gt 0 ] && OUT_DIR=.
-USAGE="usage: $0 [--html|--json|--compliance stig|cis-l1|cis-l2|ffiec] [--out <dir>] [--no-menu] [--flrtvc-ksh <script> --flrtvc-apar-csv <file> | --flrtvc-report <file> | --definitions-bundle <file>] [--currency-max-age SOURCE_ID=DAYS ...] [--currency-status [--json]] [--flrt-export <dir>]"
+USAGE="usage: $0 [--html|--json|--compliance stig|cis-l1|cis-l2|ffiec] [--out <dir>] [--no-menu] [--offline | --definitions-bundle <signed-file>] [--flrtvc-ksh <script> [--flrtvc-apar-csv <file>] | --flrtvc-report <file>] [--currency-max-age SOURCE_ID=DAYS ...] [--currency-status [--json]] [--flrt-export <dir>]"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) FORMAT=json; CURRENCY_JSON=1; EXPLICIT_OUTPUT=1;;
@@ -704,7 +1330,7 @@ while [ "$#" -gt 0 ]; do
       shift
       CURRENCY_OVERRIDE=${1:-}
       case "$CURRENCY_OVERRIDE" in
-        ""|--*) echo "$USAGE" >&2; echo "aixray: --currency-max-age needs SOURCE_ID=DAYS" >&2; exit 2;;
+        ""|--*) echo "$USAGE" >&2; echo "ptxray: --currency-max-age needs SOURCE_ID=DAYS" >&2; exit 2;;
       esac
       CURRENCY_OVERRIDES="$CURRENCY_OVERRIDES${CURRENCY_OVERRIDES:+ }$CURRENCY_OVERRIDE"
       ;;
@@ -715,19 +1341,19 @@ while [ "$#" -gt 0 ]; do
       # (defined after the argument loop) and with render_compliance's case.
       case "$COMPLIANCE" in
         stig|cis-l1|cis-l2|ffiec) FORMAT=compliance; EXPLICIT_OUTPUT=1;;
-        *) echo "$USAGE" >&2; echo "aixray: --compliance needs one of: stig, cis-l1, cis-l2, ffiec" >&2; exit 2;;
+        *) echo "$USAGE" >&2; echo "ptxray: --compliance needs one of: stig, cis-l1, cis-l2, ffiec" >&2; exit 2;;
       esac
       # repeated --compliance appends to the selection list (order preserved); the same
       # standard twice is a usage error naming the duplicate.
       case " $COMPLIANCE_LIST " in
-        *" $COMPLIANCE "*) echo "$USAGE" >&2; echo "aixray: duplicate --compliance $COMPLIANCE" >&2; exit 2;;
+        *" $COMPLIANCE "*) echo "$USAGE" >&2; echo "ptxray: duplicate --compliance $COMPLIANCE" >&2; exit 2;;
         *) COMPLIANCE_LIST="$COMPLIANCE_LIST${COMPLIANCE_LIST:+ }$COMPLIANCE";;
       esac
       ;;
     --flrtvc-ksh)
       if [ "$FLRTVC_KSH_SEEN" -eq 1 ]; then
         echo "$USAGE" >&2
-        echo "aixray: duplicate --flrtvc-ksh" >&2
+        echo "ptxray: duplicate --flrtvc-ksh" >&2
         exit 2
       fi
       FLRTVC_KSH_SEEN=1
@@ -739,7 +1365,7 @@ while [ "$#" -gt 0 ]; do
     --flrtvc-apar-csv)
       if [ "$FLRTVC_APARCSV_SEEN" -eq 1 ]; then
         echo "$USAGE" >&2
-        echo "aixray: duplicate --flrtvc-apar-csv" >&2
+        echo "ptxray: duplicate --flrtvc-apar-csv" >&2
         exit 2
       fi
       FLRTVC_APARCSV_SEEN=1
@@ -751,7 +1377,7 @@ while [ "$#" -gt 0 ]; do
     --flrtvc-report)
       if [ "$FLRTVC_REPORT_SEEN" -eq 1 ]; then
         echo "$USAGE" >&2
-        echo "aixray: duplicate --flrtvc-report" >&2
+        echo "ptxray: duplicate --flrtvc-report" >&2
         exit 2
       fi
       FLRTVC_REPORT_SEEN=1
@@ -763,7 +1389,7 @@ while [ "$#" -gt 0 ]; do
     --definitions-bundle)
       if [ "$DEFINITIONS_BUNDLE_SEEN" -eq 1 ]; then
         echo "$USAGE" >&2
-        echo "aixray: duplicate --definitions-bundle" >&2
+        echo "ptxray: duplicate --definitions-bundle" >&2
         exit 2
       fi
       DEFINITIONS_BUNDLE_SEEN=1
@@ -771,10 +1397,19 @@ while [ "$#" -gt 0 ]; do
       DEFINITIONS_BUNDLE=${1:-}
       case "$DEFINITIONS_BUNDLE" in ""|--*) echo "$USAGE" >&2; exit 2;; esac
       ;;
+    --offline)
+      if [ "$DEFINITIONS_OFFLINE_SEEN" -eq 1 ]; then
+        echo "$USAGE" >&2
+        echo "ptxray: duplicate --offline" >&2
+        exit 2
+      fi
+      DEFINITIONS_OFFLINE_SEEN=1
+      DEFINITIONS_OFFLINE=1
+      ;;
     --flrt-export)
       shift
       FLRT_EXPORT=${1:-}
-      if [ -z "$FLRT_EXPORT" ]; then echo "$USAGE" >&2; echo "aixray: --flrt-export needs an output directory" >&2; exit 2; fi
+      if [ -z "$FLRT_EXPORT" ]; then echo "$USAGE" >&2; echo "ptxray: --flrt-export needs an output directory" >&2; exit 2; fi
       EXPLICIT_OUTPUT=1
       ;;
     --out)
@@ -784,7 +1419,7 @@ while [ "$#" -gt 0 ]; do
       case "$OUT_DIR" in
         ""|--*)
           echo "$USAGE" >&2
-          echo "aixray: --out needs an output directory" >&2
+          echo "ptxray: --out needs an output directory" >&2
           exit 2
           ;;
       esac
@@ -813,16 +1448,13 @@ COMPLIANCE_STANDARD_COUNT=4
 if [ -n "$FLRTVC_REPORT" ] \
     && { [ -n "$FLRTVC_KSH" ] || [ -n "$FLRTVC_APARCSV" ]; }; then
   echo "$USAGE" >&2
-  echo "aixray: --flrtvc-report conflicts with --flrtvc-ksh/--flrtvc-apar-csv" >&2
+  echo "ptxray: --flrtvc-report conflicts with --flrtvc-ksh/--flrtvc-apar-csv" >&2
   exit 2
 fi
 
-# A definition bundle is an alternative carrier for the same two IBM inputs; it
-# cannot be combined with any individual-input flag (exit 2, usage error).
-if [ -n "$DEFINITIONS_BUNDLE" ] \
-    && { [ -n "$FLRTVC_KSH" ] || [ -n "$FLRTVC_APARCSV" ] || [ -n "$FLRTVC_REPORT" ]; }; then
+if [ "$DEFINITIONS_OFFLINE" -eq 1 ] && [ -n "$DEFINITIONS_BUNDLE" ]; then
   echo "$USAGE" >&2
-  echo "aixray: --definitions-bundle conflicts with --flrtvc-ksh/--flrtvc-apar-csv/--flrtvc-report" >&2
+  echo "ptxray: --offline conflicts with --definitions-bundle" >&2
   exit 2
 fi
 
@@ -830,7 +1462,7 @@ if [ "$CURRENCY_STATUS_MODE" -eq 1 ] \
     && { [ -n "$COMPLIANCE" ] || [ -n "$FLRT_EXPORT" ] \
          || [ "$OUT_EXPLICIT" -eq 1 ] || [ "$CURRENCY_HTML_EXPLICIT" -eq 1 ]; }; then
   echo "$USAGE" >&2
-  echo "aixray: --currency-status accepts only --json, local FLRTVC inputs, and currency thresholds" >&2
+  echo "ptxray: --currency-status accepts only --json, local FLRTVC inputs, and currency thresholds" >&2
   exit 2
 fi
 
@@ -842,7 +1474,7 @@ for _std in $COMPLIANCE_LIST; do COMPLIANCE_COUNT=$((COMPLIANCE_COUNT+1)); done
 # directory. Single-standard --compliance X keeps writing to stdout (back-compat).
 if [ "$FORMAT" = "compliance" ] && [ "$COMPLIANCE_COUNT" -gt 1 ] && [ -z "$OUT_DIR" ]; then
   echo "$USAGE" >&2
-  echo "aixray: multiple standards require --out <dir>; single-standard --compliance X writes to stdout" >&2
+  echo "ptxray: multiple standards require --out <dir>; single-standard --compliance X writes to stdout" >&2
   exit 2
 fi
 
@@ -850,7 +1482,7 @@ fi
 # The single-standard silent override stays (back-compat).
 if [ "$COMPLIANCE_COUNT" -gt 1 ] && [ "$FORMAT" != "compliance" ]; then
   echo "$USAGE" >&2
-  echo "aixray: --html/--json conflicts with multiple --compliance selections" >&2
+  echo "ptxray: --html/--json conflicts with multiple --compliance selections" >&2
   exit 2
 fi
 
@@ -860,20 +1492,100 @@ if [ -n "$OUT_DIR" ]; then
     # no --flrt-export (which already demands stdout) is present.
     if [ -n "$FLRT_EXPORT" ] || [ "$FORMAT" != "compliance" ] || [ "$COMPLIANCE_COUNT" -le 1 ]; then
       echo "$USAGE" >&2
-      echo "aixray: --out writes the easy HTML report; use stdout redirection for --json, --compliance, or --flrt-export" >&2
+      echo "ptxray: --out writes the easy HTML report; use stdout redirection for --json, --compliance, or --flrt-export" >&2
       exit 2
     fi
   fi
 fi
 
+# Platform and privilege are startup preconditions, not assessment findings.
+# Private fixture artifacts can provide startup_platform.out and id_u.out; the
+# established AIX fixtures predate startup_platform.out, so their compiled-only
+# fixture boundary supplies the AIX platform value when that one row is absent.
+function aixray_startup_probe {
+  typeset key rc
+  key=$1
+  shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
+  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
+    if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
+      cat "$AIXRAY_FIXTURES/$key.out"
+      rc=0
+      [ -r "$AIXRAY_FIXTURES/$key.rc" ] \
+        && read rc < "$AIXRAY_FIXTURES/$key.rc"
+      return "$rc"
+    fi
+    [ "$key" = startup_platform ] && { printf '%s\n' AIX; return 0; }
+    return 127
+  fi
+  "$@" 2>/dev/null
+}
+
+AIXRAY_PLATFORM=$(aixray_startup_probe startup_platform /usr/bin/uname -s)
+AIXRAY_PLATFORM_RC=$?
+if [ "$AIXRAY_PLATFORM_RC" -ne 0 ] || [ "$AIXRAY_PLATFORM" != AIX ]; then
+  echo "ptxray-aix.sh: this is the AIX edition and this host is not AIX; no scan was run." >&2
+  exit 2
+fi
+MYUID=$(aixray_startup_probe id_u /usr/bin/id -u)
+MYUID_RC=$?
+if [ "$MYUID_RC" -ne 0 ] || [ "$MYUID" != 0 ]; then
+  echo "ptxray-aix.sh: root is required; re-run this assessment as root. No scan was run." >&2
+  exit 2
+fi
+
+# VIOS is AIX underneath, so uname cannot distinguish it. This one local,
+# startup-safe marker probe is part of the platform gate and is deliberately
+# completed before definitions consent or acquisition. Reuse the same result
+# for later role classification so the privileged runner does not race itself.
+AIXRAY_STARTUP_VIOS_MARKER=$(aixray_startup_probe ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+AIXRAY_STARTUP_VIOS_RC=$?
+AIXRAY_STARTUP_VIOS_ROWS=$(printf '%s\n' "$AIXRAY_STARTUP_VIOS_MARKER" | awk '
+  $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+AIXRAY_STARTUP_VIOS_MATCH=${AIXRAY_STARTUP_VIOS_ROWS%%:*}
+AIXRAY_STARTUP_VIOS_NONEMPTY=${AIXRAY_STARTUP_VIOS_ROWS#*:}
+if [ "$AIXRAY_STARTUP_VIOS_RC" -eq 0 ] \
+    && [ "$AIXRAY_STARTUP_VIOS_MATCH" -eq 1 ] \
+    && [ "$AIXRAY_STARTUP_VIOS_NONEMPTY" -eq 1 ] \
+    && [ "${AIXRAY_VIOS_DEV:-0}" != "1" ]; then
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ]; then
+    echo "ptxray-aix.sh: VIOS assessment is temporarily disabled in this release — below the quality bar; AIX is the supported target of this edition; no scan was run. Set AIXRAY_VIOS_DEV=1 only for development." >&2
+  else
+    echo "ptxray-aix.sh: VIOS assessment is temporarily disabled in this release — below the quality bar; AIX is the supported target of this edition; no scan was run." >&2
+  fi
+  exit 2
+fi
+
+# Definitions are selected only after platform/root/VIOS-gate acceptance and
+# before any non-gating assessment probe. The adjacent digest-bound downloader
+# is the sole egress component; this runner contains no transport implementation.
+PTXRAY_SIGNED_DEFINITIONS_BUNDLE=$DEFINITIONS_BUNDLE
+ptxray_defs_select_for_run "$DEFINITIONS_OFFLINE" "$PTXRAY_SIGNED_DEFINITIONS_BUNDLE"
+PTXRAY_DEFS_SELECT_RC=$?
+[ "$PTXRAY_DEFS_SELECT_RC" -eq 0 ] || exit "$PTXRAY_DEFS_SELECT_RC"
+if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] && [ -n "$FLRTVC_KSH" ] \
+    && [ -z "$FLRTVC_APARCSV" ] && [ -z "$FLRTVC_REPORT" ]; then
+  PTXRAY_DEFS_APAR_FOR_FLRTVC=1
+fi
+# The legacy unsigned envelope parser must never see the signed 1.5 bundle.
+DEFINITIONS_BUNDLE=""
+
 # ======================= embedded reference data (refresh: spec 03) ===================
-# Every row below is bound to its own registry metadata and digest. The tool
-# never phones home; stale or unknown data is visible in the attestation.
+# Every embedded row below is bound to its own registry metadata and digest.
+# Stale or unknown data is visible in the attestation.
 
 # AIX release | end of support (or SUPPORTED = none announced)
+# IBM's AIX 7.2 release-lifecycle entry showed no announced release EOS when
+# verified 2026-08-15; SUPPORTED is our inference from that absence, not a
+# positive IBM support-status statement. IBM's separate TL lifecycle table
+# listed AIX 7.2 TL5 End of Fix Support as "To be determined". SUPPORTED is
+# never a guessed EOS date.
 EOS_OS="
 7100|2023-04-30
-7200|2026-04-30
+7200|SUPPORTED
 7300|SUPPORTED
 "
 # AIX release | latest Technology Level for that release
@@ -888,7 +1600,7 @@ TL_SUPPORT="
 7300-02|2026-11-30
 7300-01|2025-12-31
 7300-00|2024-12-31
-7200-05|2026-04-30
+7200-05|SUPPORTED
 "
 # VIOS version prefix | end of support (or SUPPORTED)
 EOS_VIOS="
@@ -1174,12 +1886,12 @@ function finish_report {
   saved_report=${1:-}
   if [ "$FORMAT" = "html" ] || [ "$FORMAT" = "compliance" ]; then
     if [ -n "$saved_report" ]; then
-      printf './aixray-review-pack.sh --pseudonymize ' >&2
+      printf './ptxray-review-pack.sh --pseudonymize ' >&2
       shell_quote "$saved_report" >&2
       printf '\n' >&2
     else
       printf '%s\n' \
-        './aixray-review-pack.sh --pseudonymize <saved-report.html>' >&2
+        './ptxray-review-pack.sh --pseudonymize <saved-report.html>' >&2
     fi
   fi
   printf '%s\n' "$REVIEW_CTA" >&2
@@ -1488,7 +2200,7 @@ function d2j { # YYYY-MM-DD -> julian day number
   # (e.g. AIXRAY_TODAY="x[$(cmd)]-07-18") would otherwise be executed. valid_ymd
   # anchors the shape to pure digits before any $(( )) runs.
   if [ "$(valid_ymd "$1")" != 1 ]; then
-    echo "aixray: internal error: d2j requires a real calendar date in YYYY-MM-DD format" >&2
+    echo "ptxray: internal error: d2j requires a real calendar date in YYYY-MM-DD format" >&2
     return 1
   fi
   y=${1%%-*}; m=${1#*-}; m=${m%%-*}; d=${1##*-}
@@ -1789,7 +2501,7 @@ TODAY=${AIXRAY_TODAY:-$(date +%Y-%m-%d)}
 # AIXRAY_TODAY reaches d2j's $(( )) and ksh evaluates it (command injection on a
 # root-run tool). valid_ymd anchors the shape to pure digits.
 if [ "$(valid_ymd "$TODAY")" != 1 ]; then
-  echo "aixray: AIXRAY_TODAY must be a real calendar date in YYYY-MM-DD format" >&2
+  echo "ptxray: AIXRAY_TODAY must be a real calendar date in YYYY-MM-DD format" >&2
   exit 2
 fi
 TODAY_J=$(d2j "$TODAY")
@@ -1890,7 +2602,7 @@ function currency_set_runtime_record {
 
 function currency_apply_report_provenance {
   # report source-id array-index banner-version apar-date
-  # A report-carried AIXray record is useful only when it is unique,
+  # A report-carried PTxray record is useful only when it is unique,
   # structurally complete, and consistent with the report's own banners.
   typeset report source_id ci banner_version apar_date count line valid rest
   typeset schema line_id version asof digest version_basis asof_basis
@@ -1907,7 +2619,7 @@ function currency_apply_report_provenance {
   [ "$count" -eq 0 ] && return 0
   if [ "$count" -ne 1 ]; then
     currency_set_runtime_record "$ci" 1 unknown unknown unknown unknown unknown \
-      "conflicting AIXray provenance in operator-supplied FLRTVC report" \
+      "conflicting PTxray provenance in operator-supplied FLRTVC report" \
       invalid invalid
     return 0
   fi
@@ -1924,7 +2636,7 @@ function currency_apply_report_provenance {
   ')
   if [ "$valid" -ne 1 ]; then
     currency_set_runtime_record "$ci" 1 unknown unknown unknown unknown unknown \
-      "conflicting AIXray provenance in operator-supplied FLRTVC report" \
+      "conflicting PTxray provenance in operator-supplied FLRTVC report" \
       invalid invalid
     return 0
   fi
@@ -1942,7 +2654,7 @@ function currency_apply_report_provenance {
   if [ "$schema" != 1 ] || [ "$line_id" != "$source_id" ] \
       || [ "$(valid_ymd "$asof")" -ne 1 ]; then
     currency_set_runtime_record "$ci" 1 unknown unknown unknown unknown unknown \
-      "conflicting AIXray provenance in operator-supplied FLRTVC report" \
+      "conflicting PTxray provenance in operator-supplied FLRTVC report" \
       invalid invalid
     return 0
   fi
@@ -1954,7 +2666,7 @@ function currency_apply_report_provenance {
           || [ "$asof_basis" != source-declared ]; then
         currency_set_runtime_record "$ci" 1 "$version" "$version_basis" \
           "$asof" "$asof_basis" "$digest" \
-          "AIXray provenance conflicts with FLRTVC report banner" \
+          "PTxray provenance conflicts with FLRTVC report banner" \
           invalid invalid
         return 0
       fi
@@ -1965,7 +2677,7 @@ function currency_apply_report_provenance {
           || [ "$asof_basis" != curator-verified ]; then
         currency_set_runtime_record "$ci" 1 "$version" "$version_basis" \
           "$asof" "$asof_basis" "$digest" \
-          "AIXray provenance conflicts with FLRTVC report banner" \
+          "PTxray provenance conflicts with FLRTVC report banner" \
           invalid invalid
         return 0
       fi
@@ -1974,1064 +2686,8 @@ function currency_apply_report_provenance {
 
   currency_set_runtime_record "$ci" 1 "$version" "$version_basis" \
     "$asof" "$asof_basis" "$digest" \
-    "AIXray provenance record in operator-supplied FLRTVC report" \
+    "PTxray provenance record in operator-supplied FLRTVC report" \
     verified verified
-}
-
-# parse_definitions_bundle — validate and ingest an operator-supplied
-# --definitions-bundle <file> envelope (the .aixray-defs format produced by
-# tools/refresh-data.py fetch-bundle). Fully offline; ksh88 + openssl only. Fail
-# closed: ANY framing, footer-digest, source-manifest, base64, or per-source
-# payload-digest failure prints a one-line diagnostic on stderr, decodes
-# NOTHING, leaves every CU_* row at the no-bundle baseline, and lets the scan
-# proceed exactly as if no bundle was supplied — never partial ingestion. On
-# success the verified payloads are decoded into a private mode-700 scratch
-# directory, the cisa-kev/ibm-apar-csv/ibm-flrtvc CU rows are bound to the
-# envelope metadata (integrity=verified, provenance=verified), and the invoke
-# path is pointed at the decoded engine + apar.csv.
-function parse_definitions_bundle {
-  typeset bundle_file bundle_size bad_bytes magic line2 line3 footer_line
-  typeset declared_footer computed_footer source_data seq
-  typeset scratch scratch_try scratch_cand bundle_copy
-  typeset apar_version apar_vbasis apar_asof apar_abasis apar_sha
-  typeset eng_version eng_vbasis eng_asof eng_abasis eng_sha
-  typeset kev_version kev_vbasis kev_asof kev_abasis kev_sha
-  typeset decoded_sha payload_size expected_count rc _tag
-  bundle_file=$DEFINITIONS_BUNDLE
-  [ -n "$bundle_file" ] || return 0
-
-  if [ ! -r "$bundle_file" ]; then
-    echo "aixray: operator-supplied definitions bundle could not be read: $bundle_file" >&2
-    return 0
-  fi
-
-  # Private scratch for the decoded payloads. NOTE: an EXIT trap registered here
-  # would fire the moment this function RETURNS (ksh93 fires a function-set EXIT
-  # trap on function return), so cleanup is registered at top level after the
-  # metadata load, and the invoke path's own traps additionally cover it.
-  FV_TMPBASE_RAW=${TMPDIR:-/tmp}
-  FV_TMPBASE=$(CDPATH= cd -- "$FV_TMPBASE_RAW" 2>/dev/null && (pwd -P 2>/dev/null || pwd))
-  if [ -z "$FV_TMPBASE" ]; then
-    echo "aixray: definitions bundle could not be decoded — TMPDIR does not resolve to a physical path" >&2
-    return 0
-  fi
-  FV_TMPPROBLEM=$(path_untrusted "$FV_TMPBASE")
-  if [ -n "$FV_TMPPROBLEM" ]; then
-    echo "aixray: definitions bundle could not be decoded — untrusted scratch parent ($FV_TMPPROBLEM)" >&2
-    return 0
-  fi
-  DEFINITIONS_BUNDLE_SCRATCH=""
-  scratch_try=0
-  while [ "$scratch_try" -lt 20 ] && [ -z "$DEFINITIONS_BUNDLE_SCRATCH" ]; do
-    scratch_cand="$FV_TMPBASE/aixray-defs.$$.$(date +%s 2>/dev/null)${scratch_try}"
-    if mkdir -m 700 "$scratch_cand" 2>/dev/null; then
-      DEFINITIONS_BUNDLE_SCRATCH="$scratch_cand"
-    fi
-    scratch_try=$((scratch_try+1))
-  done
-  if [ -z "$DEFINITIONS_BUNDLE_SCRATCH" ]; then
-    echo "aixray: definitions bundle could not be decoded — could not create a secure temp directory" >&2
-    return 0
-  fi
-  scratch=$DEFINITIONS_BUNDLE_SCRATCH
-
-  # TOCTOU-safe copy: the operator-named file is copied into the private scratch
-  # ONCE and EVERY validation pass below reads the copy, never the operator path
-  # again. The copy is size-capped at the read itself (51 MiB read; anything over
-  # 50 MiB refuses) so an oversized or concurrently-growing file cannot exhaust
-  # scratch with decoded/re-wrapped bytes.
-  bundle_copy="$scratch/bundle.aixray-defs"
-  dd if="$bundle_file" of="$bundle_copy" bs=1048576 count=51 2>/dev/null
-  bundle_size=$(wc -c < "$bundle_copy" 2>/dev/null | tr -d ' ')
-  if [ -z "$bundle_size" ]; then
-    echo "aixray: operator-supplied definitions bundle could not be read: $bundle_file" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    return 0
-  fi
-  if [ "$bundle_size" -gt 52428800 ]; then
-    echo "aixray: definitions bundle exceeds the 50 MiB envelope cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    return 0
-  fi
-  bundle_file="$bundle_copy"
-
-  # ASCII only — every byte is LF or printable ASCII (0x20..0x7e). A CR, NUL,
-  # or any non-ASCII byte refuses the whole bundle.
-  bad_bytes=$(LC_ALL=C tr -d '\n\040-\176' < "$bundle_file" 2>/dev/null | wc -c | tr -d ' ')
-  if [ -n "$bad_bytes" ] && [ "$bad_bytes" -ne 0 ]; then
-    echo "aixray: definitions bundle framing is invalid — not pure ASCII (a control or non-ASCII byte is present)" >&2
-    return 0
-  fi
-  magic=$(awk 'NR==1{print; exit}' "$bundle_file")
-  if [ "$magic" != "AIXRAY-DEFINITION-BUNDLE|1" ]; then
-    echo "aixray: definitions bundle framing is invalid — wrong magic or version" >&2
-    return 0
-  fi
-  line2=$(awk 'NR==2{print; exit}' "$bundle_file")
-  line3=$(awk 'NR==3{print; exit}' "$bundle_file")
-  case "$line2" in
-    "CREATED-AT|"*) ;;
-    *) echo "aixray: definitions bundle is malformed — missing CREATED-AT record" >&2; return 0;;
-  esac
-  case "$line3" in
-    "PRODUCER|aixray-definitions|"*) ;;
-    *) echo "aixray: definitions bundle is malformed — missing or wrong PRODUCER record" >&2; return 0;;
-  esac
-
-  # Footer framing: the END-BUNDLE line must be the last line and declare a
-  # 64-hex digest covering every preceding byte, including the LF that ends the
-  # last END-PAYLOAD line. sed '$d' drops only the END-BUNDLE line and keeps
-  # that LF, so the digest of the remainder is exactly the covered region.
-  footer_line=$(LC_ALL=C tail -n 1 "$bundle_file")
-  declared_footer=$(printf '%s\n' "$footer_line" | awk -F'|' \
-    'NF==3 && $1=="END-BUNDLE" && $2==1 && $3 ~ /^[0-9a-f]{64}$/ {print $3}')
-  if [ -z "$declared_footer" ]; then
-    echo "aixray: definitions bundle framing is invalid — missing or malformed END-BUNDLE footer" >&2
-    return 0
-  fi
-  computed_footer=$(LC_ALL=C sed '$d' "$bundle_file" 2>/dev/null \
-    | openssl dgst -sha256 -r 2>/dev/null | awk '{print $1}')
-  if [ "$computed_footer" != "$declared_footer" ]; then
-    echo "aixray: definitions bundle integrity check failed — footer digest does not match; file may be corrupted or truncated in transit" >&2
-    return 0
-  fi
-
-  # SOURCE manifest: 2 or 3 records, exactly 17 fields each, GET/200, known ids,
-  # 64-hex digests, non-negative sizes, no empty metadata fields. Emits compact
-  # SRC lines for the caller; a malformed manifest refuses the whole bundle.
-  source_data=$(awk -F'|' '
-    BEGIN { count=0 }
-    NR<=3 {next}
-    $1=="SOURCE" {
-      if(NF!=17){print "ERR field-count"; exit 1}
-      if($5!="GET" || $6!="200"){print "ERR method"; exit 1}
-      if($2!="ibm-apar-csv" && $2!="ibm-flrtvc" && $2!="cisa-kev"){print "ERR unknown-id"; exit 1}
-      if($12 !~ /^[0-9a-f]{64}$/ || $14 !~ /^[0-9a-f]{64}$/){print "ERR digest"; exit 1}
-      if($13+0<0 || $15+0<0){print "ERR size"; exit 1}
-      if($8=="" || $9=="" || $10=="" || $11=="" || $16=="" || $17==""){print "ERR empty-field"; exit 1}
-      print "SRC|" $2 "|" $8 "|" $9 "|" $10 "|" $11 "|" $14 "|" $15
-      count++
-      next
-    }
-    $1=="BEGIN-PAYLOAD" {exit}
-    {print "ERR unexpected"; exit 1}
-    END {
-      if(count<2 || count>3){print "ERR count"; exit 1}
-    }
-  ' "$bundle_file")
-  case "$source_data" in
-    ERR*|"") echo "aixray: definitions bundle source manifest is malformed" >&2; return 0;;
-  esac
-
-  apar_version=""; apar_vbasis=""; apar_asof=""; apar_abasis=""; apar_sha=""
-  eng_version=""; eng_vbasis=""; eng_asof=""; eng_abasis=""; eng_sha=""
-  kev_version=""; kev_vbasis=""; kev_asof=""; kev_abasis=""; kev_sha=""
-  seq=""
-  while IFS='|' read -r _tag sid sver svbasis sasof sabasis ssha ssize; do
-    case "$sid" in
-      ibm-apar-csv)
-        apar_version=$sver; apar_vbasis=$svbasis; apar_asof=$sasof
-        apar_abasis=$sabasis; apar_sha=$ssha
-        seq="$seq apar"
-        ;;
-      ibm-flrtvc)
-        eng_version=$sver; eng_vbasis=$svbasis; eng_asof=$sasof
-        eng_abasis=$sabasis; eng_sha=$ssha
-        seq="$seq engine"
-        ;;
-      cisa-kev)
-        kev_version=$sver; kev_vbasis=$svbasis; kev_asof=$sasof
-        kev_abasis=$sabasis; kev_sha=$ssha
-        seq="$seq kev"
-        ;;
-    esac
-  done <<EOF
-$source_data
-EOF
-  case "$seq" in
-    " apar engine") ;;
-    " apar engine kev") ;;
-    *) echo "aixray: definitions bundle source manifest is malformed (wrong source order or duplicates)" >&2; return 0;;
-  esac
-
-  # Payload blocks: one per SOURCE, in manifest order, each framed by
-  # BEGIN-PAYLOAD|<id>|<count> ... END-PAYLOAD|<id>. One sequential awk pass
-  # enforces order and extracts each block to a private file, verifying the
-  # base64 alphabet and the declared character count.
-  expected_count=2
-  [ "$seq" = " apar engine kev" ] && expected_count=3
-  if ! awk -F'|' -v outdir="$scratch" -v nsrc="$expected_count" \
-      -v s1="ibm-apar-csv" -v s2="ibm-flrtvc" -v s3="cisa-kev" '
-    BEGIN { eidx=1; why=0 }
-    $1=="BEGIN-PAYLOAD" {
-      if(eidx>nsrc){why=1; exit 99}
-      want=""
-      if(eidx==1){want=s1}
-      else if(eidx==2){want=s2}
-      else {want=s3}
-      if($2!=want || NF!=3){why=2; exit 99}
-      declared=$3+0
-      if(declared<=0){why=5; exit 99}
-      cur=$2
-      nlines[cur]=0
-      next
-    }
-    cur!="" && $1=="END-PAYLOAD" {
-      if($2!=cur || NF!=2){why=2; exit 99}
-      if(nlines[cur]<=0 || len[cur]!=declared){why=4; exit 99}
-      cur=""
-      eidx++
-      next
-    }
-    cur!="" {
-      if($0 ~ /[^A-Za-z0-9+\/=]/){why=3; exit 99}
-      len[cur]=len[cur]+length($0)
-      nlines[cur]=nlines[cur]+1
-      print > (outdir "/payload-" eidx ".b64")
-      next
-    }
-    END {
-      if(why!=0){exit why}
-      if(eidx-1 != nsrc){exit 2}
-    }
-  ' "$bundle_file"; then
-    rc=$?
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    echo "aixray: definitions bundle payload blocks are malformed (base64 or block framing)" >&2
-    return 0
-  fi
-
-  # Decode each verified payload and re-check its SHA-256 against the envelope.
-  # A decode failure or digest mismatch refuses the WHOLE bundle (never a
-  # partial ingestion), matching the fail-closed acceptance contract. The
-  # [ -f ] guard keeps a missing block to a single diagnostic line with no
-  # internal scratch path leaked by a failed redirection.
-  if [ ! -f "$scratch/payload-1.b64" ] \
-      || ! openssl base64 -d -out "$scratch/apar.csv" < "$scratch/payload-1.b64" 2>/dev/null; then
-    echo "aixray: definitions bundle payload base64 decode failed for ibm-apar-csv" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  chmod 0600 "$scratch/apar.csv" 2>/dev/null
-  decoded_sha=$(sha256_of "$scratch/apar.csv")
-  payload_size=$(wc -c < "$scratch/apar.csv" 2>/dev/null | tr -d ' ')
-  if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$apar_sha" ]; then
-    echo "aixray: ibm-apar-csv payload failed integrity validation" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-    echo "aixray: ibm-apar-csv payload exceeds the 32 MiB per-source cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-
-  if [ ! -f "$scratch/payload-2.b64" ] \
-      || ! openssl base64 -d -out "$scratch/flrtvc.ksh" < "$scratch/payload-2.b64" 2>/dev/null; then
-    echo "aixray: definitions bundle payload base64 decode failed for ibm-flrtvc" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  chmod 0600 "$scratch/flrtvc.ksh" 2>/dev/null
-  decoded_sha=$(sha256_of "$scratch/flrtvc.ksh")
-  payload_size=$(wc -c < "$scratch/flrtvc.ksh" 2>/dev/null | tr -d ' ')
-  if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$eng_sha" ]; then
-    echo "aixray: ibm-flrtvc payload failed integrity validation" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-    echo "aixray: ibm-flrtvc payload exceeds the 32 MiB per-source cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-
-  if [ "$seq" = " apar engine kev" ]; then
-    if [ ! -f "$scratch/payload-3.b64" ] \
-        || ! openssl base64 -d -out "$scratch/kev.json" < "$scratch/payload-3.b64" 2>/dev/null; then
-      echo "aixray: definitions bundle payload base64 decode failed for cisa-kev" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    chmod 0600 "$scratch/kev.json" 2>/dev/null
-    decoded_sha=$(sha256_of "$scratch/kev.json")
-    payload_size=$(wc -c < "$scratch/kev.json" 2>/dev/null | tr -d ' ')
-    if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$kev_sha" ]; then
-      echo "aixray: cisa-kev payload failed integrity validation" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-      echo "aixray: cisa-kev payload exceeds the 32 MiB per-source cap" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    DEFINITIONS_BUNDLE_HAS_KEV=1
-  fi
-
-  # Hand the verified decoded files + envelope metadata to the invoke path and
-  # bind the CU rows (a validated bundle is verified AND provenance-bound by the
-  # envelope footer + per-source payload digests).
-  DEFINITIONS_BUNDLE_VALID=1
-  DEFINITIONS_BUNDLE_ENGINE="$scratch/flrtvc.ksh"
-  DEFINITIONS_BUNDLE_APAR="$scratch/apar.csv"
-  DEFINITIONS_BUNDLE_ENGINE_SHA=$eng_sha
-  DEFINITIONS_BUNDLE_APAR_SHA=$apar_sha
-  DEFINITIONS_BUNDLE_ENGINE_VERSION=$eng_version
-  DEFINITIONS_BUNDLE_ENGINE_VBASIS=$eng_vbasis
-  DEFINITIONS_BUNDLE_ENGINE_ASOF=$eng_asof
-  DEFINITIONS_BUNDLE_ENGINE_ABASIS=$eng_abasis
-  DEFINITIONS_BUNDLE_APAR_VERSION=$apar_version
-  DEFINITIONS_BUNDLE_APAR_VBASIS=$apar_vbasis
-  DEFINITIONS_BUNDLE_APAR_ASOF=$apar_asof
-  DEFINITIONS_BUNDLE_APAR_ABASIS=$apar_abasis
-  if [ "$seq" = " apar engine kev" ]; then
-    DEFINITIONS_BUNDLE_HAS_KEV=1
-    DEFINITIONS_BUNDLE_KEV_VERSION=$kev_version
-    DEFINITIONS_BUNDLE_KEV_VBASIS=$kev_vbasis
-    DEFINITIONS_BUNDLE_KEV_ASOF=$kev_asof
-    DEFINITIONS_BUNDLE_KEV_ABASIS=$kev_abasis
-    DEFINITIONS_BUNDLE_KEV_SHA=$kev_sha
-  fi
-  currency_bind_definitions_bundle_rows
-  return 0
-}
-function definition_cleanup {
-  typeset doomed
-  doomed=$DEFINITION_SCRATCH
-  DEFINITION_SCRATCH=""
-  [ -n "$doomed" ] && rm -rf "$doomed"
-}
-function definition_self_dir {
-  typeset resolved
-  case "$AIXRAY_SELF" in
-    */*) (cd "$(dirname "$AIXRAY_SELF")" 2>/dev/null && (pwd -P 2>/dev/null || pwd));;
-    *) resolved=$(whence -p "$AIXRAY_SELF" 2>/dev/null)
-       case "$resolved" in
-         */*) (cd "$(dirname "$resolved")" 2>/dev/null && (pwd -P 2>/dev/null || pwd));;
-         *) return 1;;
-       esac;;
-  esac
-}
-function definition_make_scratch {
-  typeset parent token candidate tries
-  parent=${TMPDIR:-/tmp}; tries=0
-  [ -d "$parent" ] || return 1
-  umask 077
-  while [ "$tries" -lt 20 ]; do
-    token=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
-    [ -n "$token" ] || token="$$.$tries"
-    candidate="$parent/aixray-definitions.$$.$token"
-    if (umask 077 && mkdir "$candidate") 2>/dev/null; then
-      DEFINITION_SCRATCH=$candidate
-      return 0
-    fi
-    tries=$((tries+1))
-  done
-  return 1
-}
-function definition_set_invalid {
-  typeset di=$1
-  DA_VERIFICATION[$di]=INVALID
-  DA_FRESHNESS[$di]=INVALID
-  DA_AGE[$di]=unknown
-}
-function definition_evaluate_source {
-  typeset di=$1 asof age
-  [ "${DA_VERIFICATION[$di]}" = VERIFIED ] || return
-  asof=${DA_ASOF[$di]}
-  if [ "$(valid_ymd "$asof")" != 1 ]; then
-    definition_set_invalid "$di"; return
-  fi
-  age=$((TODAY_J - $(d2j "$asof")))
-  if [ "$age" -lt 0 ]; then
-    definition_set_invalid "$di"; return
-  fi
-  DA_AGE[$di]=$age
-  if [ "$age" -le "${DA_THRESHOLD[$di]}" ]; then
-    DA_FRESHNESS[$di]=CURRENT
-  else
-    DA_FRESHNESS[$di]=STALE
-  fi
-}
-# Parse only the ASCII envelope here.  Source bytes are decoded into a mode-700
-# directory and then validated independently so one bad source cannot suppress valid
-# adverse evidence from another source.
-function definition_parse_envelope {
-  typeset bundle=$1 size last footer declared actual meta encoded decoded di
-  [ -r "$bundle" ] && [ -f "$bundle" ] && [ ! -L "$bundle" ] || return 1
-  size=$(wc -c < "$bundle" 2>/dev/null | tr -d ' ')
-  case "$size" in ''|*[!0-9]*) return 1;; esac
-  [ "$size" -gt 0 ] && [ "$size" -le 52428800 ] || return 1
-  last=$(tail -c 1 "$bundle" 2>/dev/null | od -An -tx1 | tr -dc '0-9a-f')
-  [ "$last" = 0a ] || return 1
-  od -An -tx1 "$bundle" 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="00"||$i=="0d")exit 1}' || return 1
-  footer=$(tail -n 1 "$bundle" 2>/dev/null)
-  case "$footer" in END-BUNDLE\|1\|[0-9a-f][0-9a-f]*) ;; *) return 1;; esac
-  declared=$(printf '%s\n' "$footer" | awk -F'[|]' '{print $3}')
-  [ "${#declared}" -eq 64 ] || return 1
-  awk 'NR>1{print previous} {previous=$0}' "$bundle" > "$DEFINITION_SCRATCH/envelope" || return 1
-  actual=$(sha256_of "$DEFINITION_SCRATCH/envelope")
-  [ "$actual" = "$declared" ] || return 1
-
-  meta="$DEFINITION_SCRATCH/metadata.tsv"
-  awk -v out="$DEFINITION_SCRATCH" '
-    function bad(){exit 1}
-    NR==1{if($0!="AIXRAY-DEFINITION-BUNDLE|1")bad();next}
-    NR==2{if($0!~/^CREATED-AT\|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)bad(); created=substr($0,12);next}
-    NR==3{if($0!~/^PRODUCER\|aixray-definitions\|[A-Za-z0-9][A-Za-z0-9._+-]*$/)bad();next}
-    NR>=4 && NR<=6{
-      n=split($0,f,"[|]"); if(n!=17||f[1]!="SOURCE")bad()
-      want[4]="ibm-apar-csv"; want[5]="ibm-flrtvc"; want[6]="cisa-kev"
-      pub[4]="IBM"; pub[5]="IBM"; pub[6]="CISA"
-      url[4]="h""ttps://esupport.ibm.com/customercare/flrt/doc?page=aparCSV"
-      url[5]="h""ttps://esupport.ibm.com/customercare/sas/f/flrt3/FLRTVC-0.8.14.zip"
-      url[6]="h""ttps://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-      verify[4]="apar-schema-vintage-mincount"; verify[5]="aixray-flrtvc-sha256-pin"; verify[6]="cisa-kev-schema-count-vintage"
-      transform[4]="identity"; transform[5]="zip-member:flrtvc.ksh"; transform[6]="identity"
-      if(f[2]!=want[NR]||f[3]!=pub[NR]||f[4]!=url[NR]||f[5]!="GET"||f[6]!="200"||f[16]!=transform[NR]||f[17]!=verify[NR])bad()
-      if(f[7]!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)bad()
-      if(f[10]!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)bad()
-      if(f[12]!~/^[0-9a-f]{64}$/||f[14]!~/^[0-9a-f]{64}$/||f[13]!~/^[0-9]+$/||f[15]!~/^[0-9]+$/)bad()
-      if((NR!=5)&&(f[12]!=f[14]||f[13]!=f[15]))bad()
-      line[NR-3]=$0; next
-    }
-    /^BEGIN-PAYLOAD\|/{
-      if(block||++b>3)bad(); n=split($0,f,"[|]"); if(n!=3||f[2]!=want[b+3]||f[3]!~/^[0-9]+$/)bad()
-      declared=f[3]+0; count=0; lines=0; block=1; next
-    }
-    /^END-PAYLOAD\|/{
-      if(!block||$0!="END-PAYLOAD|" want[b+3]||count!=declared||lines==0)bad()
-      block=0; next
-    }
-    /^END-BUNDLE\|1\|/{
-      if(block||b!=3||seen_footer++)bad()
-      print created > (out "/created")
-      for(i=1;i<=3;i++)print line[i] >> (out "/metadata.tsv")
-      next
-    }
-    {
-      if(!block||$0!~/^[A-Za-z0-9+\/=]+$/||length($0)>76)bad()
-      if(lines>0&&lastlen!=76)bad()
-      print $0 >> (out "/payload-" b ".b64")
-      count+=length($0); lastlen=length($0); lines++; next
-    }
-    END{if(!seen_footer||block||b!=3)exit 1}
-  ' "$bundle" || return 1
-
-  DEFINITION_BUNDLE_CREATED=$(cat "$DEFINITION_SCRATCH/created" 2>/dev/null)
-  DEFINITION_BUNDLE_SHA="sha256:$(sha256_of "$bundle")"
-  di=0
-  while [ "$di" -lt 3 ]; do
-    encoded="$DEFINITION_SCRATCH/payload-$((di+1)).b64"
-    decoded="$DEFINITION_SCRATCH/${DA_ID[$di]}"
-    if openssl base64 -d -out "$decoded" < "$encoded" 2>/dev/null; then
-      chmod 600 "$decoded" 2>/dev/null
-      set -- $(awk -F'[|]' -v row=$((di+1)) 'NR==row{print $7,$8,$9,$10,$11,$12,$13,$14,$15}' "$meta")
-      DA_RETRIEVED[$di]=$1; DA_VERSION[$di]=$2; DA_VERSION_BASIS[$di]=$3
-      DA_ASOF[$di]=$4; DA_ASOF_BASIS[$di]=$5
-      DA_TRANSPORT[$di]="sha256:$6"; DA_CONTENT[$di]="sha256:$8"
-      if [ "$(wc -c < "$decoded" | tr -d ' ')" = "$9" ] \
-          && [ "$(sha256_of "$decoded")" = "$8" ]; then
-        DA_VERIFICATION[$di]=VERIFIED
-      else
-        definition_set_invalid "$di"
-      fi
-    else
-      definition_set_invalid "$di"
-    fi
-    di=$((di+1))
-  done
-  return 0
-}
-function definition_validate_apar {
-  typeset file=$1 vintage rows
-  vintage=$(apar_csv_metadata < "$file") || return 1
-  rows=$(awk -F, '$1=="sec"||$1=="hiper"{if(NF>=15)n++}END{print n+0}' "$file")
-  [ "$rows" -ge 100 ] || return 1
-  [ "$vintage" = "${DA_VERSION[0]}" ] && [ "$vintage" = "${DA_ASOF[0]}" ] \
-    && [ "${DA_VERSION_BASIS[0]}" = source-vintage ] \
-    && [ "${DA_ASOF_BASIS[0]}" = source-declared ]
-}
-function definition_validate_flrtvc {
-  typeset file=$1 selfdir pinfile pinsha pinversion pinasof version first
-  selfdir=$(definition_self_dir) || return 1
-  pinfile="$selfdir/tools/flrtvc-pin.txt"
-  [ -r "$pinfile" ] && [ -f "$pinfile" ] && [ ! -L "$pinfile" ] || return 1
-  pinsha=$(awk -F= '/^SHA256=/{print $2}' "$pinfile")
-  pinversion=$(awk -F= '/^VERSION=/{print $2}' "$pinfile")
-  pinasof=$(awk -F= '/^AS_OF=/{print $2}' "$pinfile")
-  first=$(sed -n '1p' "$file")
-  version=$(awk -F= '/^VERSION=/{v=$2;gsub(/^[ \t"\047]+|[ \t"\047]+$/,"",v);print v;exit}' "$file")
-  case "$first" in *ksh93*) ;; *) return 1;; esac
-  [ "$(sha256_of "$file")" = "$pinsha" ] && [ "$version" = "$pinversion" ] \
-    && [ "${DA_VERSION[1]}" = "$pinversion" ] && [ "${DA_ASOF[1]}" = "$pinasof" ] \
-    && [ "${DA_VERSION_BASIS[1]}" = publisher-version ] \
-    && [ "${DA_ASOF_BASIS[1]}" = curator-pin-date ]
-}
-# A small streaming JSON grammar for the KEV feed.  It is intentionally not a
-# grep-for-CVEs shortcut: duplicate keys, malformed strings/numbers, count drift,
-# missing required fields, bad dates, and duplicate CVEs all invalidate this source.
-function definition_validate_kev {
-  typeset file=$1 output=$2 compare_metadata=${3:-1} result version asof count
-  : > "$output" || return 1
-  awk -v out="$output" '
-    function fail(){bad=1; exit 1}
-    function realdate(v, a,y,m,d,dim,leap){
-      if(v!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)return 0
-      split(v,a,"-"); y=a[1]+0;m=a[2]+0;d=a[3]+0
-      if(m<1||m>12)return 0
-      dim=31;if(m==4||m==6||m==9||m==11)dim=30
-      if(m==2){leap=(y%400==0||(y%4==0&&y%100!=0));dim=leap?29:28}
-      return d>=1&&d<=dim
-    }
-    function mark(k){
-      if(seen[depth SUBSEP k]++)fail()
-      key[depth]=k
-    }
-    function scalar(kind,v, k){
-      if(depth<1)fail()
-      if(type[depth]=="O"){
-        if(state[depth]!=2)fail(); k=key[depth]
-        if(depth==1){
-          if(k=="title"){if(kind!="S")fail(); root_title=1}
-          else if(k=="catalogVersion"){if(kind!="S"||v!~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/)fail();version=v;root_version=1}
-          else if(k=="dateReleased"){if(kind!="S"||v!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/)fail();asof=substr(v,1,10);if(!realdate(asof))fail();root_date=1}
-          else if(k=="count"){if(kind!="N"||v!~/^(0|[1-9][0-9]*)$/)fail();declared=v+0;root_count=1}
-          else if(k=="vulnerabilities")fail()
-        } else if(vuln[depth]){
-          if(kind!="S")fail()
-          required=" cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes "
-          if(index(required," " k " "))got[depth SUBSEP k]=1
-          if(k=="cveID"){
-            if(v!~/^CVE-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]+$/||cves[v]++)fail()
-            vcve[depth]=v
-          } else if((k=="dateAdded"||k=="dueDate")&&!realdate(v))fail()
-        }
-        state[depth]=3
-      } else {
-        if(state[depth]!=0)fail(); state[depth]=1
-      }
-    }
-    function begin(kind, parentkey,isv){
-      if(depth==0){if(root_seen++||kind!="O")fail()}
-      else if(type[depth]=="O"){
-        if(state[depth]!=2)fail();parentkey=key[depth]
-        if(depth==1&&parentkey=="vulnerabilities"){
-          if(kind!="A")fail();root_vulns=1;vuln_array_depth=depth+1
-        }
-        state[depth]=3
-      } else {
-        if(state[depth]!=0)fail()
-        isv=(depth==vuln_array_depth)
-        if(isv&&kind!="O")fail()
-        state[depth]=1
-      }
-      depth++;type[depth]=kind;state[depth]=0
-      if(isv)vuln[depth]=1
-    }
-    function end_container(kind, k,required,n,a){
-      if(depth<1||type[depth]!=kind)fail()
-      if(kind=="O"&&state[depth]!=0&&state[depth]!=3)fail()
-      if(kind=="A"&&state[depth]!=0&&state[depth]!=1)fail()
-      if(vuln[depth]){
-        required="cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes"
-        n=split(required,a," ");for(k=1;k<=n;k++)if(!got[depth SUBSEP a[k]])fail()
-        print vcve[depth] >> (out); actual++
-      }
-      for(k in seen)if(index(k,depth SUBSEP)==1)delete seen[k]
-      for(k in got)if(index(k,depth SUBSEP)==1)delete got[k]
-      delete type[depth];delete state[depth];delete key[depth];delete vuln[depth];delete vcve[depth]
-      depth--
-    }
-    function emit_token(kind,v,wantstate){
-      if(kind=="{")begin("O")
-      else if(kind=="[")begin("A")
-      else if(kind=="}")end_container("O")
-      else if(kind=="]")end_container("A")
-      else if(kind==","){
-        wantstate=1;if(type[depth]=="O")wantstate=3
-        if(depth<1||state[depth]!=wantstate)fail();state[depth]=0
-      } else if(kind==":"){
-        if(depth<1||type[depth]!="O"||state[depth]!=1)fail();state[depth]=2
-      } else if(kind=="S"){
-        if(depth>0&&type[depth]=="O"&&state[depth]==0){mark(v);state[depth]=1}
-        else scalar("S",v)
-      } else scalar(kind,v)
-    }
-    function hex4(v){return v~/^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/}
-    {
-      data=$0 "\n";i=1
-      while(i<=length("" data)){
-        c=substr(data,i,1)
-        if(mode=="S"){
-          if(esc){
-            if(c=="u"){u=substr(data,i+1,4);if(length("" u)!=4||!hex4(u))fail();s=s "?";i+=5;esc=0;continue}
-            if(index("\"\\/bfnrt",c)==0)fail();s=s c;esc=0;i++;continue
-          }
-          if(c=="\\"){esc=1;i++;continue}
-          if(c=="\""){mode="";emit_token("S",s);s="";i++;continue}
-          if(c=="\n"||c=="\r"||c=="\t")fail()
-          s=s c;i++;continue
-        }
-        if(mode=="N"){
-          if(c~/[0-9eE+.-]/){num=num c;i++;continue}
-          if(num!~/^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$/)fail()
-          mode="";emit_token("N",num);num="";continue
-        }
-        if(mode=="L"){
-          if(c~/[A-Za-z]/){lit=lit c;i++;continue}
-          if(lit!="true"&&lit!="false"&&lit!="null")fail()
-          emit_token("L",lit);mode="";lit="";continue
-        }
-        if(c~/[ \t\r\n]/){i++;continue}
-        if(c=="\""){mode="S";s="";i++;continue}
-        if(c~/[-0-9]/){mode="N";num=c;i++;continue}
-        if(c~/[tfn]/){mode="L";lit=c;i++;continue}
-        if(index("{}[],:",c)>0){emit_token(c);i++;continue}
-        fail()
-      }
-    }
-    END{
-      if(bad||mode!=""||depth!=0||!root_seen||!root_title||!root_version||!root_date||!root_count||!root_vulns||declared!=actual)exit 1
-      if(actual<100)exit 1
-      print "META|" version "|" asof "|" actual >> (out)
-    }
-  ' "$file" || return 1
-  result=$(tail -n 1 "$output")
-  case "$result" in META\|*\|*\|*) ;;
-    *) return 1;;
-  esac
-  version=$(printf '%s' "$result" | awk -F'|' '{print $2}')
-  asof=$(printf '%s' "$result" | awk -F'|' '{print $3}')
-  count=$(printf '%s' "$result" | awk -F'|' '{print $4}')
-  awk '!/^META\|/' "$output" > "$output.cves" || return 1
-  mv "$output.cves" "$output" || return 1
-  if [ "$compare_metadata" -eq 0 ]; then
-    DA_VERSION[2]=$version; DA_VERSION_BASIS[2]=source-revision
-    DA_ASOF[2]=$asof; DA_ASOF_BASIS[2]=source-declared
-    return 0
-  fi
-  [ "$version" = "${DA_VERSION[2]}" ] && [ "$asof" = "${DA_ASOF[2]}" ] \
-    && [ "${DA_VERSION_BASIS[2]}" = source-revision ] \
-    && [ "${DA_ASOF_BASIS[2]}" = source-declared ]
-}
-function definition_load_direct_kev {
-  typeset actual
-  [ -r "$KEV_JSON" ] && [ -f "$KEV_JSON" ] && [ ! -L "$KEV_JSON" ] || {
-    definition_set_invalid 2; return 1
-  }
-  if [ -z "$DEFINITION_SCRATCH" ]; then
-    definition_make_scratch || { definition_set_invalid 2; return 1; }
-  fi
-  cp "$KEV_JSON" "$DEFINITION_SCRATCH/cisa-kev" 2>/dev/null || {
-    definition_set_invalid 2; return 1
-  }
-  chmod 600 "$DEFINITION_SCRATCH/cisa-kev" 2>/dev/null
-  actual=$(sha256_of "$DEFINITION_SCRATCH/cisa-kev")
-  [ "${#actual}" -eq 64 ] || { definition_set_invalid 2; return 1; }
-  DA_CONTENT[2]="sha256:$actual"; DA_TRANSPORT[2]="sha256:$actual"
-  DA_RETRIEVED[2]=unknown
-  if definition_validate_kev "$DEFINITION_SCRATCH/cisa-kev" "$DEFINITION_SCRATCH/kev-cves" 0; then
-    DA_VERIFICATION[2]=VERIFIED
-    definition_evaluate_source 2
-    DEFINITION_KEV_CVES=$(cat "$DEFINITION_SCRATCH/kev-cves")
-    return 0
-  fi
-  definition_set_invalid 2
-  return 1
-}
-function definition_consume_bundle {
-  typeset bundle=$1 make_rc parse_rc
-  DEFINITION_ACQUISITION_MODE=operator-bundle
-  DEFINITION_ACQUISITION_CONSENT=downloader-fetch-command
-  if ! command -v openssl >/dev/null 2>&1; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 1
-  fi
-  definition_make_scratch; make_rc=$?
-  if [ "$make_rc" -ne 0 ]; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 1
-  fi
-  definition_parse_envelope "$bundle"; parse_rc=$?
-  if [ "$parse_rc" -ne 0 ]; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=structure
-    return 1
-  fi
-  if [ "${DA_VERIFICATION[0]}" = VERIFIED ] \
-      && ! definition_validate_apar "$DEFINITION_SCRATCH/ibm-apar-csv"; then
-    definition_set_invalid 0
-  fi
-  if [ "${DA_VERIFICATION[1]}" = VERIFIED ] \
-      && ! definition_validate_flrtvc "$DEFINITION_SCRATCH/ibm-flrtvc"; then
-    definition_set_invalid 1
-  fi
-  if [ "${DA_VERIFICATION[2]}" = VERIFIED ] \
-      && ! definition_validate_kev "$DEFINITION_SCRATCH/cisa-kev" "$DEFINITION_SCRATCH/kev-cves"; then
-    definition_set_invalid 2
-  fi
-  definition_evaluate_source 0; definition_evaluate_source 1; definition_evaluate_source 2
-  if [ "${DA_VERIFICATION[0]}" = VERIFIED ] && [ "${DA_VERIFICATION[1]}" = VERIFIED ]; then
-    FLRTVC_APARCSV="$DEFINITION_SCRATCH/ibm-apar-csv"
-    FLRTVC_KSH="$DEFINITION_SCRATCH/ibm-flrtvc"
-  fi
-  if [ "${DA_VERIFICATION[2]}" = VERIFIED ]; then
-    DEFINITION_KEV_CVES=$(cat "$DEFINITION_SCRATCH/kev-cves")
-  fi
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[1]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[2]}" = CURRENT ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=CURRENT
-    DEFINITION_ACQUISITION_OUTCOME=bundle-used
-    DEFINITION_ACQUISITION_REASON=none
-  elif [ "${DA_VERIFICATION[0]}" = VERIFIED ] || [ "${DA_VERIFICATION[1]}" = VERIFIED ] \
-      || [ "${DA_VERIFICATION[2]}" = VERIFIED ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=UNVERIFIED
-    DEFINITION_ACQUISITION_OUTCOME=stale-used
-    DEFINITION_ACQUISITION_REASON=stale
-  else
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=structure
-  fi
-}
-function definition_cache_file_safe {
-  typeset target=$1 parent physical ls mode owner links me
-  case "$target" in /*) ;; *) return 1;; esac
-  parent=${target%/*}; [ -n "$parent" ] || parent=/
-  [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
-  physical=$(cd "$parent" 2>/dev/null && (pwd -P 2>/dev/null || pwd)) || return 1
-  [ -z "$(path_untrusted "$physical")" ] || return 1
-  [ -e "$target" ] || return 0
-  [ -f "$target" ] && [ ! -L "$target" ] || return 1
-  ls=$(LC_ALL=C ls -ld "$target" 2>/dev/null) || return 1
-  mode=$(printf '%s\n' "$ls" | awk '{print $1}')
-  links=$(printf '%s\n' "$ls" | awk '{print $2}')
-  owner=$(printf '%s\n' "$ls" | awk '{print $3}')
-  me=$(id -un 2>/dev/null)
-  [ "$links" = 1 ] || return 1
-  [ "$owner" = root ] || [ "$owner" = "$me" ] || return 1
-  [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
-    && [ "$(printf '%s' "$mode" | cut -c9)" != w ]
-}
-function definition_default_cache {
-  typeset uid parent
-  uid=$(id -u 2>/dev/null)
-  case "$uid" in ''|*[!0-9]*) return 1;; esac
-  parent="/var/tmp/aixray-definitions-$uid"
-  if [ ! -e "$parent" ]; then
-    [ -d /var/tmp ] && [ ! -L /var/tmp ] || return 1
-    (umask 077 && mkdir "$parent") 2>/dev/null || return 1
-  fi
-  chmod 700 "$parent" 2>/dev/null || return 1
-  printf '%s/current.aixray-defs\n' "$parent"
-}
-function definition_sidecar_trusted {
-  typeset selfdir sidecar ls mode owner me digest
-  selfdir=$(definition_self_dir) || return 1
-  [ -z "$(path_untrusted "$selfdir")" ] || return 1
-  sidecar="$selfdir/aixray-definition-fetch.pl"
-  [ -f "$sidecar" ] && [ ! -L "$sidecar" ] || return 1
-  ls=$(LC_ALL=C ls -ld "$sidecar" 2>/dev/null) || return 1
-  mode=$(printf '%s\n' "$ls" | awk '{print $1}')
-  owner=$(printf '%s\n' "$ls" | awk '{print $3}')
-  me=$(id -un 2>/dev/null)
-  [ "$owner" = root ] || [ "$owner" = "$me" ] || return 1
-  [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
-    && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || return 1
-  digest=$(sha256_of "$sidecar")
-  [ "$digest" = "$DEFINITION_SIDECAR_SHA256" ] || return 1
-  printf '%s\n' "$sidecar"
-}
-function definition_prepare_cache_temp {
-  typeset cache=$1 parent base token attempt candidate
-  parent=${cache%/*}; base=${cache##*/}; attempt=0
-  while [ "$attempt" -lt 20 ]; do
-    token=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
-    [ -n "$token" ] || token="$$.$attempt"
-    candidate="$parent/.$base.fetch.$token"
-    [ ! -e "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
-    attempt=$((attempt+1))
-  done
-  return 1
-}
-function definition_parse_fetch_message {
-  printf '%s\n' "$1" | awk '
-function allowed(reason) {
-  return reason == "dns" || reason == "route" || reason == "timeout" \
-    || reason == "tls" || reason == "http-status" || reason == "size-limit" \
-    || reason == "structure" || reason == "digest" || reason == "stale" \
-    || reason == "completion"
-}
-$1 == "aixray-definition-fetch:" && NF == 3 {
-  reason = $2
-  attempts = $3
-  sub(/^reason=/, "", reason)
-  sub(/^attempts=/, "", attempts)
-  if ($0 == "aixray-definition-fetch: reason=" reason " attempts=" attempts \
-      && allowed(reason) && attempts ~ /^[123]$/) {
-    parsed_reason = reason
-    parsed_attempts = attempts
-  }
-}
-END {
-  if (parsed_reason != "") {
-    print parsed_reason, parsed_attempts
-  }
-}'
-} # definition_parse_fetch_message
-function definition_select_cache_or_fetch {
-  typeset cache current_cache=0 stale_cache=0 sidecar temp fetch_rc consent_time
-  typeset fetch_message fetch_values fetch_reason fetch_attempts
-  [ -z "$DEFINITIONS_BUNDLE" ] && [ -z "$FLRTVC_REPORT" ] \
-    && [ -z "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
-    && [ -z "$KEV_JSON" ] || return 0
-  [ "$CURRENCY_STATUS_MODE" -eq 0 ] && [ -z "$FLRT_EXPORT" ] || return 0
-  [ -z "${AIXRAY_FIXTURES:-}" ] || return 0
-
-  if [ -n "$DEFINITIONS_CACHE" ]; then
-    cache=$DEFINITIONS_CACHE
-  else
-    cache=$(definition_default_cache) || {
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-      DEFINITION_ACQUISITION_REASON=runtime-missing
-      return 0
-    }
-  fi
-  definition_cache_file_safe "$cache" || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  if [ -s "$cache" ]; then
-    definition_consume_bundle "$cache" || :
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_CONSENT=prior-interactive-yes
-    DEFINITION_ACQUISITION_CONSENT_AT=$DEFINITION_BUNDLE_CREATED
-    if [ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ]; then
-      DEFINITION_ACQUISITION_OUTCOME=cache-used
-      DEFINITION_ACQUISITION_REASON=none
-      return 0
-    fi
-    [ "$DEFINITION_ACQUISITION_OUTCOME" != invalid-input ] && stale_cache=1
-  fi
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[2]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[1]}" = STALE ]; then
-    DEFINITION_ACQUISITION_OUTCOME=stale-used
-    DEFINITION_ACQUISITION_REASON=release-pin-stale
-    return 0
-  fi
-  if [ "$NO_DEFINITION_FETCH" -eq 1 ]; then
-    if [ "$stale_cache" -eq 1 ]; then
-      DEFINITION_ACQUISITION_OUTCOME=stale-used; DEFINITION_ACQUISITION_REASON=stale
-    fi
-    return 0
-  fi
-  if [ ! -t 0 ] || [ ! -t 2 ]; then
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=no-tty
-    DEFINITION_ACQUISITION_REASON=no-controlling-tty
-    return 0
-  fi
-  sidecar=$(definition_sidecar_trusted) || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=sidecar-integrity
-    return 0
-  }
-  [ -x /usr/bin/perl ] || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  temp=$(definition_prepare_cache_temp "$cache") || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  consent_time=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null); [ -n "$consent_time" ] || consent_time=unknown
-  fetch_message=$(/usr/bin/perl -T "$sidecar" prompt-and-fetch "$temp" \
-    "$DEFINITION_REGISTRY_SHA256" "$VERSION" "$TODAY")
-  fetch_rc=$?
-  fetch_values=$(definition_parse_fetch_message "$fetch_message")
-  case "$fetch_values" in
-    *' '*)
-      fetch_reason=${fetch_values% *}
-      fetch_attempts=${fetch_values#* };;
-    *) fetch_reason=; fetch_attempts=;;
-  esac
-  case "$fetch_rc" in
-    0)
-      definition_cleanup
-      definition_consume_bundle "$temp" || {
-        rm -f "$temp"
-        if [ "$stale_cache" -eq 1 ]; then
-          definition_cleanup
-          definition_consume_bundle "$cache" || :
-          DEFINITION_ACQUISITION_MODE=consented-in-place
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used
-        else
-          DEFINITION_ACQUISITION_MODE=consented-in-place
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        fi
-        DEFINITION_ACQUISITION_CONSENT=interactive-yes
-        DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-        DEFINITION_ACQUISITION_NETWORK=true
-        DEFINITION_ACQUISITION_REQUESTS=3
-        DEFINITION_ACQUISITION_REASON=structure
-        return 0
-      }
-      if [ "$VULNERABILITY_DEFINITIONS_STATUS" != CURRENT ]; then
-        rm -f "$temp"
-        if [ "$stale_cache" -eq 1 ]; then
-          definition_cleanup
-          definition_consume_bundle "$cache" || :
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used
-        else
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        fi
-        DEFINITION_ACQUISITION_MODE=consented-in-place
-        DEFINITION_ACQUISITION_CONSENT=interactive-yes
-        DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-        DEFINITION_ACQUISITION_NETWORK=true
-        DEFINITION_ACQUISITION_REQUESTS=3
-        DEFINITION_ACQUISITION_REASON=stale
-        return 0
-      fi
-      chmod 600 "$temp" 2>/dev/null
-      mv -f "$temp" "$cache" 2>/dev/null || {
-        rm -f "$temp"
-        DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        DEFINITION_ACQUISITION_REASON=completion
-        return 0
-      }
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=fetched-and-used
-      DEFINITION_ACQUISITION_CONSENT=interactive-yes
-      DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-      DEFINITION_ACQUISITION_NETWORK=true
-      DEFINITION_ACQUISITION_REQUESTS=3
-      DEFINITION_ACQUISITION_REASON=none
-      ;;
-    10)
-      rm -f "$temp"
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=declined
-      DEFINITION_ACQUISITION_CONSENT=none
-      DEFINITION_ACQUISITION_REASON=operator-declined
-      ;;
-    11)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=no-tty
-      DEFINITION_ACQUISITION_REASON=no-controlling-tty;;
-    20)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-      DEFINITION_ACQUISITION_REASON=runtime-missing;;
-    31|32|33)
-      rm -f "$temp"; DEFINITION_ACQUISITION_NETWORK=true
-      case "$fetch_attempts" in 1|2|3) DEFINITION_ACQUISITION_REQUESTS=$fetch_attempts;;
-        *) DEFINITION_ACQUISITION_REQUESTS=$((fetch_rc-30));; esac
-      [ "$stale_cache" -eq 1 ] \
-        && DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used \
-        || DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-      DEFINITION_ACQUISITION_CONSENT=interactive-yes
-      DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-      case "$fetch_reason" in
-        dns|route|timeout|tls|http-status|size-limit|structure|digest|stale|completion)
-          DEFINITION_ACQUISITION_REASON=$fetch_reason;;
-        *) DEFINITION_ACQUISITION_REASON=completion;;
-      esac;;
-    *)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-      DEFINITION_ACQUISITION_REASON=completion;;
-  esac
-}
-function definition_firmware_only_currency {
-  typeset ci offenders
-  [ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ] || return 1
-  [ "$CURRENCY_STATUS" = UNVERIFIED ] || return 1
-  offenders=""
-  ci=0
-  while [ "$ci" -lt "$CURRENCY_SOURCE_COUNT" ]; do
-    if [ "${CU_REQUIRED[$ci]}" -eq 1 ] && [ "${CU_STATUS[$ci]}" != CURRENT ]; then
-      offenders="$offenders ${CU_ID[$ci]}"
-    fi
-    ci=$((ci+1))
-  done
-  [ "$offenders" = " ibm-flrt-firmware" ] \
-    && [ "${CU_LOADED[5]}" -eq 0 ] \
-    && [ "${CU_STATUS[5]}" = UNKNOWN ] \
-    && [ "${CU_REASON[5]}" = "source was not loaded" ] || return 1
-  case "${CU_LOCATOR[5]}" in operator-supplied*) return 0;; *) return 1;; esac
-}
-function emit_definition_acquisition_html {
-  typeset headline detail
-  if definition_firmware_only_currency; then
-    headline="Vulnerability definitions: CURRENT — IBM APAR and CISA KEV are verified and current; IBM FLRTVC is current and matches AIXray's curated SHA-256 pin."
-    detail=" Firmware caveat — overall eight-source currency remains UNVERIFIED solely because no operator-supplied IBM firmware lifecycle response was provided. AIXray did not query IBM's firmware service because that request would send system-specific data. Firmware-dependent results remain NOT_ASSESSED."
-  elif [ "$DEFINITION_ACQUISITION_MODE" = operator-bundle ]; then
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — operator-supplied bundle created by the companion downloader (${DEFINITION_BUNDLE_CREATED}). No network was attempted by this scan. Source vintages and bundle SHA-256 follow."
-  elif [ "$DEFINITION_ACQUISITION_MODE" = consented-in-place ]; then
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — fetched on this AIX host with explicit consent at $DEFINITION_ACQUISITION_CONSENT_AT."
-  else
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — definition acquisition was not requested. No network was attempted by this scan."
-  fi
-  if [ "$VULNERABILITY_DEFINITIONS_STATUS" != CURRENT ]; then
-    detail=" Findings below must not be treated as a current clean assessment. Definition-dependent clean results are NOT_ASSESSED. Observed adverse evidence, if any, is still shown."
-  else
-    detail=" IBM APAR vintage ${DA_ASOF[0]}; IBM FLRTVC ${DA_VERSION[1]} matched AIXray's curated SHA-256 pin; CISA KEV vintage ${DA_ASOF[2]}. Bundle SHA-256 ${DEFINITION_BUNDLE_SHA}."
-  fi
-  printf '<section class="definition-acquisition" aria-labelledby="definition-acquisition-heading"><h2 id="definition-acquisition-heading">Definition acquisition</h2><div class="%s" data-aixray-field="technical" data-aixray-location="report:definition-acquisition">%s%s</div></section>' \
-    "$([ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ] && echo currency-verified || echo currency-alert)" \
-    "$(printf '%s' "$headline" | hesc)" "$(printf '%s' "$detail" | hesc)"
-}
-function definition_sync_direct_attestation {
-  typeset di ci
-  [ "$DEFINITION_ACQUISITION_MODE" = direct-files ] || return
-  di=0
-  while [ "$di" -lt 2 ]; do
-    ci=$((di+3))
-    if { [ "$di" -eq 0 ] && [ -n "$FLRTVC_APARCSV" ]; } \
-        || { [ "$di" -eq 1 ] && [ -n "$FLRTVC_KSH" ]; }; then
-      DA_VERSION[$di]=${CU_VERSION[$ci]}; DA_VERSION_BASIS[$di]=${CU_VERSION_BASIS[$ci]}
-      DA_ASOF[$di]=${CU_ASOF[$ci]}; DA_ASOF_BASIS[$di]=${CU_ASOF_BASIS[$ci]}
-      DA_CONTENT[$di]=${CU_SHA256[$ci]}; DA_TRANSPORT[$di]=unknown
-      case "${CU_STATUS[$ci]}" in
-        CURRENT|STALE)
-          DA_VERIFICATION[$di]=VERIFIED; DA_FRESHNESS[$di]=${CU_STATUS[$ci]}
-          [ -n "${CU_AGE[$ci]}" ] && DA_AGE[$di]=${CU_AGE[$ci]} || DA_AGE[$di]=unknown
-          ;;
-        INVALID) definition_set_invalid "$di";;
-        *) DA_VERIFICATION[$di]=UNKNOWN; DA_FRESHNESS[$di]=UNKNOWN;;
-      esac
-    fi
-    di=$((di+1))
-  done
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[1]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[2]}" = CURRENT ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=CURRENT
-  else
-    VULNERABILITY_DEFINITIONS_STATUS=UNVERIFIED
-  fi
-}
-
-# currency_bind_definitions_bundle_rows — (re)bind CU rows 2/3/4 from the
-# validated bundle envelope metadata. Called by parse_definitions_bundle() on
-# success and again after fixture-record replay so an operator-supplied bundle
-# always wins for the sources it frames.
-function currency_bind_definitions_bundle_rows {
-  [ "$DEFINITIONS_BUNDLE_VALID" -eq 1 ] || return 0
-  currency_set_runtime_record 3 1 "$DEFINITIONS_BUNDLE_APAR_VERSION" \
-    "$DEFINITIONS_BUNDLE_APAR_VBASIS" "$DEFINITIONS_BUNDLE_APAR_ASOF" \
-    "$DEFINITIONS_BUNDLE_APAR_ABASIS" "sha256:$DEFINITIONS_BUNDLE_APAR_SHA" \
-    "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  currency_set_runtime_record 4 1 "$DEFINITIONS_BUNDLE_ENGINE_VERSION" \
-    "$DEFINITIONS_BUNDLE_ENGINE_VBASIS" "$DEFINITIONS_BUNDLE_ENGINE_ASOF" \
-    "$DEFINITIONS_BUNDLE_ENGINE_ABASIS" "sha256:$DEFINITIONS_BUNDLE_ENGINE_SHA" \
-    "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  if [ "$DEFINITIONS_BUNDLE_HAS_KEV" -eq 1 ]; then
-    currency_set_runtime_record 2 1 "$DEFINITIONS_BUNDLE_KEV_VERSION" \
-      "$DEFINITIONS_BUNDLE_KEV_VBASIS" "$DEFINITIONS_BUNDLE_KEV_ASOF" \
-      "$DEFINITIONS_BUNDLE_KEV_ABASIS" "sha256:$DEFINITIONS_BUNDLE_KEV_SHA" \
-      "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  fi
-  return 0
 }
 
 function currency_load_local_flrtvc_metadata {
@@ -3039,23 +2695,12 @@ function currency_load_local_flrtvc_metadata {
   typeset first second report_version report_date report_valid
   typeset embedded_sha embedded_version embedded_date embedded_integrity prov_unknown apar_valid
 
-  # An operator-supplied definition bundle is a higher-priority carrier for the
-  # same two IBM inputs, so it is parsed BEFORE the fixture records, the
-  # embedded delivery slots, and the per-file flags below. Any validation
-  # failure leaves the CU rows at the no-bundle baseline and the scan proceeds
-  # untouched.
-  parse_definitions_bundle
-
   # A complete fixture record file is the disclosed conformance package.  It
   # replaces metadata only during fixture replay and never exists in production.
   if [ -n "${AIXRAY_FIXTURES:-}" ] \
       && [ -r "$AIXRAY_FIXTURES/source-records.tsv" ]; then
     currency_load_fixture_records "$AIXRAY_FIXTURES/source-records.tsv" \
       || return $?
-    # Re-bind the bundle-framed rows AFTER fixture replay so an operator-supplied
-    # bundle always wins for the sources it carries; the fixture records cover
-    # the remaining rows.
-    currency_bind_definitions_bundle_rows
     return 0
   fi
 
@@ -3214,10 +2859,10 @@ function currency_load_local_flrtvc_metadata {
         ' "$FLRTVC_REPORT")
         if [ "$prov_unknown" = 1 ]; then
           currency_set_runtime_record 3 1 unknown unknown unknown unknown unknown \
-            "conflicting AIXray provenance in operator-supplied FLRTVC report" \
+            "conflicting PTxray provenance in operator-supplied FLRTVC report" \
             invalid invalid
           currency_set_runtime_record 4 1 unknown unknown unknown unknown unknown \
-            "conflicting AIXray provenance in operator-supplied FLRTVC report" \
+            "conflicting PTxray provenance in operator-supplied FLRTVC report" \
             invalid invalid
         else
           currency_apply_report_provenance "$FLRTVC_REPORT" \
@@ -3241,14 +2886,14 @@ function currency_load_local_flrtvc_metadata {
 }
 
 function currency_apply_overrides {
-  typeset override source_id days ci found normalized
+  typeset override source_id days ci found normalized consumer_cap
   for override in $CURRENCY_OVERRIDES; do
     case "$override" in
       *=*) source_id=${override%%=*}; days=${override#*=};;
-      *) echo "aixray: currency max age must be SOURCE_ID=DAYS" >&2; return 2;;
+      *) echo "ptxray: currency max age must be SOURCE_ID=DAYS" >&2; return 2;;
     esac
     if ! printf '%s\n' "$days" | awk '$0 ~ /^[0-9]+$/ {ok=1} END{exit ok?0:1}'; then
-      echo "aixray: currency max age for $source_id must be a non-negative base-10 integer" >&2
+      echo "ptxray: currency max age for $source_id must be a non-negative base-10 integer" >&2
       return 2
     fi
     normalized=$(printf '%s\n' "$days" | awk '
@@ -3258,7 +2903,17 @@ function currency_apply_overrides {
       if [ "${CU_ID[$ci]}" = "$source_id" ]; then
         found=1
         if [ "${CU_OVERRIDE[$ci]}" -eq 1 ]; then
-          echo "aixray: duplicate currency max-age override: $source_id" >&2
+          echo "ptxray: duplicate currency max-age override: $source_id" >&2
+          return 2
+        fi
+        consumer_cap=${CU_THRESHOLD[$ci]}
+        if ! awk -v requested="$normalized" -v cap="$consumer_cap" '
+          BEGIN {
+            if (length(requested) < length(cap)) exit 0
+            if (length(requested) > length(cap)) exit 1
+            exit (("x" requested) <= ("x" cap) ? 0 : 1)
+          }'; then
+          echo "ptxray: currency max age for $source_id cannot exceed its consumer cap of $consumer_cap days" >&2
           return 2
         fi
         CU_THRESHOLD[$ci]=$normalized
@@ -3267,7 +2922,7 @@ function currency_apply_overrides {
       ci=$((ci+1))
     done
     if [ "$found" -eq 0 ]; then
-      echo "aixray: unknown currency source ID: ${source_id:-\(empty\)}" >&2
+      echo "ptxray: unknown currency source ID: ${source_id:-\(empty\)}" >&2
       return 2
     fi
   done
@@ -3457,7 +3112,7 @@ function emit_currency_json {
 
 function emit_currency_text {
   typeset ci age
-  printf 'AIXray currency: %s (evaluated %s)\n' "$CURRENCY_STATUS" "$TODAY"
+  printf 'PTxray currency: %s (evaluated %s)\n' "$CURRENCY_STATUS" "$TODAY"
   printf '%-27s %-24s %-12s %-10s %-6s %s\n' \
     SOURCE VERSION/REVISION AS-OF AGE LIMIT STATUS
   ci=0
@@ -3677,17 +3332,29 @@ function currency_standard_reference_h {
 
 currency_copy_registry
 if ! currency_load_local_flrtvc_metadata; then
-  echo "aixray: currency attestation: $CURRENCY_INTERNAL_ERROR" >&2
+  echo "ptxray: currency attestation: $CURRENCY_INTERNAL_ERROR" >&2
   exit 1
 fi
+if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ]; then
+  PTXRAY_DEFS_LOCATOR="signed PTxray definitions; $(ptxray_defs_summary)"
+  PTXRAY_DEFS_CURRENCY_INDEX=$(currency_source_index cisa-kev) || {
+    echo 'ptxray: signed definitions cannot bind the CISA KEV currency row' >&2
+    exit 1
+  }
+  currency_set_runtime_record "$PTXRAY_DEFS_CURRENCY_INDEX" 1 \
+    "$PTXRAY_DEFS_KEV_VERSION" source-revision \
+    "$PTXRAY_DEFS_KEV_ASOF" source-declared \
+    "sha256:$PTXRAY_DEFS_KEV_SHA256" "$PTXRAY_DEFS_LOCATOR" verified verified
+  PTXRAY_DEFS_CURRENCY_INDEX=$(currency_source_index ibm-apar-csv) || {
+    echo 'ptxray: signed definitions cannot bind the IBM APAR currency row' >&2
+    exit 1
+  }
+  currency_set_runtime_record "$PTXRAY_DEFS_CURRENCY_INDEX" 1 \
+    "$PTXRAY_DEFS_APAR_VERSION" source-vintage \
+    "$PTXRAY_DEFS_APAR_ASOF" source-declared \
+    "sha256:$PTXRAY_DEFS_APAR_SHA256" "$PTXRAY_DEFS_LOCATOR" verified verified
+fi
 
-# The operator-bundle scratch holds decoded (verified) IBM payload bytes until
-# the invoke path stages them; clean it at exit on every path, including
-# --currency-status and the non-AIX early exit. Registered at top level because
-# a function-set EXIT trap fires when that function returns. The invoke path
-# later replaces this trap with one that also cleans its own scratch.
-trap '[ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"' EXIT
-trap '[ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
 currency_apply_overrides
 CURRENCY_OVERRIDE_RC=$?
 [ "$CURRENCY_OVERRIDE_RC" -eq 0 ] || exit "$CURRENCY_OVERRIDE_RC"
@@ -3703,18 +3370,13 @@ if [ "$CURRENCY_STATUS_MODE" -eq 1 ]; then
   exit 3
 fi
 
-if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-  echo "aixray-aix.sh: this is the AIX/VIOS edition and this host is not AIX; AIXray assesses only AIX and VIOS." >&2
-  exit 2
-fi
-
 # ---- interactive standard-selection menu (SPEC-tty-menu unit B) ----------------------
 # Shown ONLY when both stdout and stdin are terminals, the operator made NO explicit
 # output-format/mode selection (--json/--html/--compliance/--currency-status/--flrt-export/
 # --flrtvc-* all set EXPLICIT_OUTPUT and win — fix-cycle-2 R1 ruling), and neither --no-menu
 # nor AIXRAY_NO_MENU opts out. Every non-interactive invocation (pipes, < /dev/null, cron,
 # CI, an explicit --compliance) skips this block and stays byte-identical to the pre-menu
-# binary. No download or network behaviour is offered — the scanner has zero egress. The
+# binary. This compliance-format menu itself performs no definitions selection or egress. The
 # menu renders its numbered lines and its ALL token from COMPLIANCE_STANDARDS /
 # COMPLIANCE_STANDARD_LABELS / COMPLIANCE_STANDARD_COUNT (defined after the argument
 # loop), so the numbering cannot drift from the vocabulary.
@@ -3725,12 +3387,12 @@ MENU_ENV_OK=1
 case "${AIXRAY_NO_MENU:-0}" in ""|0) MENU_ENV_OK=1;; *) MENU_ENV_OK=0;; esac
 if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
    && [ "$NO_MENU" -eq 0 ] && [ "$MENU_ENV_OK" -eq 1 ]; then
-  trap 'exit 130' INT
+  trap 'ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 130' INT
   MENU_ATTEMPTS=0
   MENU_ANSWER=""
   while :; do
     # menu text goes to stderr (the operator channel); the report product stays on stdout
-    printf '%s\n' 'AIXray compliance scanner' >&2
+    printf '%s\n' 'PTxray compliance scanner' >&2
     printf '%s\n' '  Select one or more standards to assess:' >&2
     printf '%s\n' '' >&2
     _mi=0
@@ -3746,7 +3408,7 @@ if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
     else
       # EOF (Ctrl-D) — spec: default to ALL standards, with a note
       printf '%s\n' '' >&2
-      printf '%s\n' 'aixray: EOF — selecting all standards' >&2
+      printf '%s\n' 'ptxray: EOF — selecting all standards' >&2
       MENU_ANSWER=""
     fi
     # strip surrounding blanks; an empty answer defaults to ALL standards
@@ -3792,16 +3454,20 @@ if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
     if [ "$MENU_BAD" -eq 1 ]; then
       MENU_ATTEMPTS=$((MENU_ATTEMPTS+1))
       if [ "$MENU_ATTEMPTS" -ge 3 ]; then
-        printf '%s\n' 'aixray: three invalid selections — continuing with all standards' >&2
+        printf '%s\n' 'ptxray: three invalid selections — continuing with all standards' >&2
         MENU_SEL="ALL"
         break
       fi
-      printf '%s\n' "aixray: bad selection — enter a number from 1 to $((COMPLIANCE_STANDARD_COUNT+1)) (space-separated for multiple)" >&2
+      printf '%s\n' "ptxray: bad selection — enter a number from 1 to $((COMPLIANCE_STANDARD_COUNT+1)) (space-separated for multiple)" >&2
       continue
     fi
     break
   done
-  trap - INT
+  if [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ]; then
+    ptxray_defs_arm_snapshot_cleanup
+  else
+    trap - INT
+  fi
   # menu selection -> COMPLIANCE_LIST; ALL expands the authoritative vocabulary in order
   if [ "$MENU_SEL" = "ALL" ]; then
     COMPLIANCE_LIST="${COMPLIANCE_STANDARDS[*]}"
@@ -3821,7 +3487,7 @@ if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
   # explicit --out is honoured, never rejected and never silently dropped.
   if [ "$COMPLIANCE_COUNT" -gt 1 ] && [ -z "$OUT_DIR" ]; then
     echo "$USAGE" >&2
-    echo "aixray: multiple standards require --out <dir>; single-standard --compliance X writes to stdout" >&2
+    echo "ptxray: multiple standards require --out <dir>; single-standard --compliance X writes to stdout" >&2
     exit 2
   fi
 fi
@@ -3904,7 +3570,7 @@ function currency_finding_indices {
   case "$1" in
     os_level|os_tl_sp|hw_gen|firmware|vios_level) echo "0";;
     sec_apars) echo "1";;
-    apar_scan) echo "3 4";;
+    apar_scan) echo "2 3 4";;
     stig_fileperms|stig_secattr|stig_nettune|stig_svcoff) echo "6 7";;
     *) echo "";;
   esac
@@ -3951,7 +3617,7 @@ function add { # category id label status sev observed meaning fix [controls]
   case "$1" in
     lifecycle) ci=0;; patch) ci=1;; storage) ci=2;; performance) ci=3;; errors) ci=4;;
     resilience) ci=5;; security) ci=6;; config) ci=7;; monitoring) ci=8;;
-    *) echo "aixray: internal error: unknown category '$1'" >&2; exit 3;;
+    *) echo "ptxray: internal error: unknown category '$1'" >&2; exit 3;;
   esac
   ADD_STATUS=$4
   ADD_ORIGINAL=$4
@@ -4018,17 +3684,13 @@ function add { # category id label status sev observed meaning fix [controls]
   NFIND=$((NFIND+1))
 }
 
-MYUID=$(aix id_u id -u)
-if [ "${MYUID:-0}" != "0" ]; then
-  echo "running without root: root-only checks may report WARN or NOT_ASSESSED" >&2
-fi
 function nr_warn { # category id label <what> <command> [controls] [status] [severity]
   typeset NR_STATUS NR_SEVERITY
   NR_STATUS=${7:-WARN}
   NR_SEVERITY=${8:-med}
   if [ "${MYUID:-0}" != "0" ]; then
     add "$1" "$2" "$3" "$NR_STATUS" "$NR_SEVERITY" "n/a" "Could not read $4 (needs root)." \
-        "re-run aixray as root, or inspect '$5' manually." "${6:-}"
+        "re-run ptxray as root, or inspect '$5' manually." "${6:-}"
   else
     add "$1" "$2" "$3" "$NR_STATUS" "$NR_SEVERITY" "n/a" "Could not read $4 (unexpected as root)." \
         "inspect '$5' manually." "${6:-}"
@@ -4044,10 +3706,11 @@ if [ -n "${AIXRAY_TODAY:-}" ]; then NOW="$TODAY"; else NOW=$(date '+%Y-%m-%d %H:
 # (Java.auto.ksh, FLRT.report) branch on exactly '[ -f /usr/ios/cli/ioscli ]', NOT on
 # ioslevel (which reads empty on a plain LPAR). Detect ONCE here; reuse $IS_VIOS / $ROLE
 # throughout (presentation, lifecycle weighting, and the VIOS-role depth in checks_vios).
-VIOS_MARKER=$(aix ls_ioscli ls /usr/ios/cli/ioscli); VIOS_MARKER_RC=$?
-VIOS_MARKER_ROWS=$(printf '%s\n' "$VIOS_MARKER" | awk '$0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
-VIOS_MARKER_MATCH=${VIOS_MARKER_ROWS%%:*}
-VIOS_MARKER_NONEMPTY=${VIOS_MARKER_ROWS#*:}
+VIOS_MARKER=$AIXRAY_STARTUP_VIOS_MARKER
+VIOS_MARKER_RC=$AIXRAY_STARTUP_VIOS_RC
+VIOS_MARKER_ROWS=$AIXRAY_STARTUP_VIOS_ROWS
+VIOS_MARKER_MATCH=$AIXRAY_STARTUP_VIOS_MATCH
+VIOS_MARKER_NONEMPTY=$AIXRAY_STARTUP_VIOS_NONEMPTY
 if [ "$VIOS_MARKER_RC" -eq 0 ] && [ "$VIOS_MARKER_MATCH" -eq 1 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 1 ]; then
   IS_VIOS=1; ROLE=vios
 elif [ "$VIOS_MARKER_RC" -eq 2 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 0 ]; then
@@ -4057,6 +3720,10 @@ else
   # Keep the scanner operational, but make vios_level explicitly unreadable.
   IS_VIOS=0; ROLE=unknown
 fi
+
+# The public VIOS refusal already ran as a startup gate before definitions
+# selection. AIXRAY_VIOS_DEV=1 exists only in private test bytes so the dormant
+# role-specific judgment path can retain fixture coverage pending live acceptance.
 
 # ============================ CHECKS (read-only) ======================================
 
@@ -4234,7 +3901,7 @@ function checks_lifecycle {
         ;;
       NOT_ASSESSED)
         add lifecycle os_tl_sp "Technology Level currency" NOT_ASSESSED med "$OBS" "$MEAN" \
-            "check IBM's current AIX lifecycle and TL support pages, refresh the bundled reference data, and rerun AIXray." "ffiec:II.C.11"
+            "check IBM's current AIX lifecycle and TL support pages, refresh the bundled reference data, and rerun PTxray." "ffiec:II.C.11"
         ;;
     esac
   fi
@@ -4821,7 +4488,7 @@ function checks_patch {
   # upgrade_headroom_preview — framing note, docs/aixray-spec-v2.md Sec 5 cap-runtime row: the
   # IBM-sourced AUTHORITATIVE "will this update fit" answer is 'smitty update_all' with "PREVIEW
   # only? = yes" (or 'installp -p'), which reports an "Estimated system resource requirements"
-  # table (Needed vs Free PER FILESYSTEM) against the SPECIFIC lpp_source being applied. AIXray
+  # table (Needed vs Free PER FILESYSTEM) against the SPECIFIC lpp_source being applied. PTxray
   # cannot compute this itself — it requires a real, chosen lpp_source/update target this general
   # health scan does not have, and running installp even in preview mode against one is an
   # update-time action, not a general scan action. This finding is deliberately always the same
@@ -4940,8 +4607,8 @@ SEC_APARS_EOF
   elif [ "$EMGRV3_RC" -ne 0 ]; then
     add patch sec_apars "Tracked security APARs" NOT_ASSESSED high \
         "not assessed — emgr -lv3 capture failed (rc=$EMGRV3_RC)" \
-        "AIXray could not verify interim-fix coverage because emgr -lv3 did not complete successfully; its stdout was not used as evidence." \
-        "rerun 'emgr -lv3' successfully, then rerun AIXray before treating tracked APAR coverage as complete." \
+        "PTxray could not verify interim-fix coverage because emgr -lv3 did not complete successfully; its stdout was not used as evidence." \
+        "rerun 'emgr -lv3' successfully, then rerun PTxray before treating tracked APAR coverage as complete." \
         "ffiec:II.C.10"
   elif [ -n "$MISS" ]; then
     add patch sec_apars "Tracked security APARs" FAIL high "missing:$MISS" \
@@ -5011,7 +4678,8 @@ SEC_APARS_EOF
   #   0. Delivery bundle (DEFAULT when present): decode the embedded, pinned data into
   #      this run's private scratch directory and invoke offline. The committed/public
   #      scanner has empty slots, so it retains the seed-only fallback and ships no IBM IP.
-  #   1. --flrtvc-ksh <script> --flrtvc-apar-csv <file> (explicit override): AIXray invokes
+  #   1. --flrtvc-ksh <script> with the selected signed apar.csv (or an explicit
+  #      --flrtvc-apar-csv override): PTxray invokes
   #      flrtvc.ksh ITSELF, in the enforced offline mode (-s -f -l -e), and captures its
   #      real exit status directly via $? — the safe invocation is GUARANTEED, not hoped
   #      for from an externally-produced file (adversarial review round 3, item 2). Fetch both
@@ -5020,7 +4688,7 @@ SEC_APARS_EOF
   #      published SHA256, per docs/DATA-REFRESH.md — a mismatch refuses to write).
   #   2. --flrtvc-report <file> (FALLBACK, e.g. no ksh93 on this box): parses a report
   #      generated elsewhere. Its completion proof is the `# FLRTVC_EXIT=<n>` trailer an
-  #      admin-side wrapper must append — a weaker attestation than path 1, since AIXray
+  #      admin-side wrapper must append — a weaker attestation than path 1, since PTxray
   #      cannot itself verify that invocation used the enforced offline flags. The finding
   #      text says which path produced the result.
   #
@@ -5060,24 +4728,16 @@ SEC_APARS_EOF
       && [ "${#apar_csv_sha256}" -gt 0 ] && [ "${#apar_csv_vintage}" -gt 0 ]; then
     FV_BUNDLE_COMPLETE=1
   fi
-  if [ -n "$FLRTVC_KSH" ] && [ -n "$FLRTVC_APARCSV" ]; then
+  if [ -n "$FLRTVC_KSH" ] \
+      && { [ -n "$FLRTVC_APARCSV" ] || [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; }; then
     FV_INVOKE_MODE="external"
-    FLRTVC_DATA_SOURCE="fetched-flag"
-  elif [ -n "$DEFINITIONS_BUNDLE" ] && [ "$DEFINITIONS_BUNDLE_VALID" -eq 1 ]; then
-    # Operator-supplied definition bundle: verified envelope payloads decoded
-    # into a private scratch; the invoke path runs the engine exactly like the
-    # embedded delivery path. The JSON/HTML mode field stays within the frozen
-    # flrtvc_data contract vocabulary ("bundled"); the currency attestation rows
-    # and the finding's ATTRIB disclose "operator-supplied definitions bundle".
-    FV_INVOKE_MODE="bundle"
-    FLRTVC_DATA_SOURCE="bundled"
-    FLRTVC_DATA_VERSION=$DEFINITIONS_BUNDLE_ENGINE_VERSION
-    if [ "$(valid_ymd "$DEFINITIONS_BUNDLE_APAR_ASOF")" -eq 1 ]; then
-      FV_META_AGE=$(( TODAY_J - $(d2j "$DEFINITIONS_BUNDLE_APAR_ASOF") ))
-      if [ "$FV_META_AGE" -ge 0 ]; then
-        FLRTVC_DATA_VINTAGE=$DEFINITIONS_BUNDLE_APAR_ASOF
-        FLRTVC_DATA_AGE=$FV_META_AGE
-      fi
+    if [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; then
+      FLRTVC_DATA_SOURCE="signed-definitions"
+      FLRTVC_DATA_VERSION=$PTXRAY_DEFS_APAR_VERSION
+      FLRTVC_DATA_VINTAGE=$PTXRAY_DEFS_APAR_ASOF
+      FLRTVC_DATA_AGE=$PTXRAY_DEFS_AGE_DAYS
+    else
+      FLRTVC_DATA_SOURCE="fetched-flag"
     fi
   elif [ -z "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
       && [ -z "$FLRTVC_REPORT" ] && [ "${AIXRAY_NO_BUNDLED_FLRTVC:-0}" != "1" ] \
@@ -5096,7 +4756,8 @@ SEC_APARS_EOF
     FLRTVC_DATA_SOURCE="report-flag"
   fi
 
-  if [ -n "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ]; then
+  if [ -n "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
+      && [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -ne 1 ]; then
     FLRTVC_DATA_SOURCE="fetched-flag"
     add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — --flrtvc-ksh given without --flrtvc-apar-csv" \
         "Both are required together to invoke flrtvc.ksh directly." "supply --flrtvc-apar-csv <file> alongside --flrtvc-ksh." "ffiec:II.C.10"
@@ -5111,7 +4772,9 @@ SEC_APARS_EOF
     if [ "$FV_INVOKE_MODE" = "external" ] && [ ! -r "$FLRTVC_KSH" ]; then
       add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — cannot read $FLRTVC_KSH" \
           "The --flrtvc-ksh file could not be read." "check the path and permissions of the flrtvc.ksh script." "ffiec:II.C.10"
-    elif [ "$FV_INVOKE_MODE" = "external" ] && [ ! -r "$FLRTVC_APARCSV" ]; then
+    elif [ "$FV_INVOKE_MODE" = "external" ] \
+        && [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -ne 1 ] \
+        && [ ! -r "$FLRTVC_APARCSV" ]; then
       add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — cannot read $FLRTVC_APARCSV" \
           "The --flrtvc-apar-csv file could not be read." "check the path and permissions of the apar.csv file." "ffiec:II.C.10"
     else
@@ -5240,7 +4903,7 @@ SEC_APARS_EOF
 
       # TRUSTED PIN LOCATION (adversarial review round 5, item 1): dirname "$0" alone resolves
       # against the caller CWD when $0 arrives without a slash — and slashless $0 is a
-      # REAL AIX case, verified live on ksh88: both "ksh aixray-aix.sh" (script-operand
+      # REAL AIX case, verified live on ksh88: both "ksh ptxray-aix.sh" (script-operand
       # PATH search) and a bare PATH exec leave $0 as just the command name. That let an
       # attacker in an untrusted CWD supply BOTH a malicious script and a matching
       # ./tools/flrtvc-pin.txt. Resolution order for a slashless $0:
@@ -5290,7 +4953,7 @@ SEC_APARS_EOF
       # a symlink target could be re-pointed between this check and the cp), and 'bin'
       # is accepted as a trusted owner (AIX system account).
         if [ -z "$FV_SELFDIR" ]; then
-          FV_PINPROBLEM="could not resolve the AIXray install directory from \$0 ($AIXRAY_SELF) — refusing to guess a pin-file location (the caller CWD is never trusted)"
+          FV_PINPROBLEM="could not resolve the PTxray install directory from \$0 ($AIXRAY_SELF) — refusing to guess a pin-file location (the caller CWD is never trusted)"
         elif [ -n "$FV_DIRPROBLEM" ]; then
           FV_PINPROBLEM="untrusted pin location — $FV_DIRPROBLEM; a pin in an attacker-writable directory could be swapped out from under its own verification"
         else
@@ -5335,28 +4998,6 @@ SEC_APARS_EOF
             && { [ "$(valid_ymd "$apar_csv_vintage")" -ne 1 ] || [ -z "$FLRTVC_DATA_AGE" ]; }; then
           FV_PINPROBLEM="bundled apar.csv vintage is invalid or in the future: $apar_csv_vintage"
         fi
-      else
-        # Operator-bundle mode: parse_definitions_bundle() already footer-bound the
-        # envelope and payload digests; this is a defense-in-depth re-check that the
-        # metadata handed to the invoke path is well-formed before any copy/exec.
-        FV_BUNDLE_KHEX=$(printf '%s' "$DEFINITIONS_BUNDLE_ENGINE_SHA" | awk '$0 ~ /^[0-9a-f]+$/ {print "hex"}')
-        FV_BUNDLE_AHEX=$(printf '%s' "$DEFINITIONS_BUNDLE_APAR_SHA" | awk '$0 ~ /^[0-9a-f]+$/ {print "hex"}')
-        if [ "${#DEFINITIONS_BUNDLE_ENGINE_SHA}" -ne 64 ] || [ "$FV_BUNDLE_KHEX" != "hex" ] \
-            || [ "${#DEFINITIONS_BUNDLE_APAR_SHA}" -ne 64 ] || [ "$FV_BUNDLE_AHEX" != "hex" ]; then
-          FV_PINPROBLEM="definitions-bundle SHA256 metadata is missing or malformed"
-        else
-          case "$DEFINITIONS_BUNDLE_ENGINE_VERSION" in
-            ''|*[!A-Za-z0-9._-]*) FV_PINPROBLEM="definitions-bundle engine version metadata is malformed" ;;
-          esac
-        fi
-        if [ -z "$FV_PINPROBLEM" ] \
-            && [ "$(valid_ymd "$DEFINITIONS_BUNDLE_ENGINE_ASOF")" -ne 1 ]; then
-          FV_PINPROBLEM="definitions-bundle engine as-of date is invalid: $DEFINITIONS_BUNDLE_ENGINE_ASOF"
-        fi
-        if [ -z "$FV_PINPROBLEM" ] \
-            && { [ "$(valid_ymd "$DEFINITIONS_BUNDLE_APAR_ASOF")" -ne 1 ] || [ -z "$FLRTVC_DATA_AGE" ]; }; then
-          FV_PINPROBLEM="definitions-bundle apar.csv vintage is invalid or in the future: $DEFINITIONS_BUNDLE_APAR_ASOF"
-        fi
       fi
       FV_HASHTOOL=$(command -v openssl 2>/dev/null)
       # Prefer a binary literally named ksh93 (the standard AIX path, /usr/bin/ksh93);
@@ -5396,14 +5037,10 @@ SEC_APARS_EOF
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
               "The embedded delivery metadata is not trustworthy enough to decode or execute as root; the bundled sweep was refused and the seed remains the only patch signal." \
               "rebuild the local delivery artifact; never hand-edit or publish its slots." "ffiec:II.C.10"
-        elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-          add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
-              "The operator-supplied definitions bundle metadata is not trustworthy enough to decode or execute as root; the bundled sweep was refused and the seed remains the only patch signal." \
-              "re-fetch a valid definitions bundle and re-run." "ffiec:II.C.10"
         else
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
               "There is no trustworthy pinned SHA256 to verify the supplied --flrtvc-ksh script against, and an unverified script must never be executed (it typically runs as root)." \
-              "ensure tools/flrtvc-pin.txt is present, root-or-owner-owned, and not group/other-writable, in a non-attacker-writable AIXray install directory, or use --flrtvc-report instead." "ffiec:II.C.10"
+              "ensure tools/flrtvc-pin.txt is present, root-or-owner-owned, and not group/other-writable, in a non-attacker-writable PTxray install directory, or use --flrtvc-report instead." "ffiec:II.C.10"
         fi
       elif [ -n "$FV_TMPPROBLEM" ]; then
         add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — untrusted FLRTVC scratch parent — $FV_TMPPROBLEM" \
@@ -5432,19 +5069,20 @@ SEC_APARS_EOF
         # set so an early/fatal shell exit also cleans the mode-700 scratch (which holds
         # the full fileset+efix inventories).
         FV_TMPDIR=""; FV_MADE=""
-        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; [ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"' EXIT
-        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; [ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; ptxray_defs_cleanup_snapshot' EXIT
+        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
         FV_TRY=0
         while [ "$FV_TRY" -lt 20 ] && [ -z "$FV_MADE" ]; do
           FV_CAND="$FV_TMPBASE/aixray-flrtvc.$$.$(date +%s 2>/dev/null)${FV_TRY}"
           # mkdir first; publish FV_TMPDIR/FV_MADE only on success, so the trap never
-          # names a path AIXray did not itself create.
+          # names a path PTxray did not itself create.
           if mkdir -m 700 "$FV_CAND" 2>/dev/null; then FV_TMPDIR="$FV_CAND"; FV_MADE=1; fi
           FV_TRY=$((FV_TRY+1))
         done
         FV_CLEANUP="$FV_TMPDIR"
         if [ -z "$FV_MADE" ]; then
           trap - EXIT HUP INT TERM   # nothing was created; disarm the (no-op) traps
+          ptxray_defs_arm_snapshot_cleanup
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not create a secure temp directory for the flrtvc.ksh invocation" \
               "A private, mode-700 scratch directory could not be created after multiple attempts." \
               "check /tmp permissions and available space, then re-run." "ffiec:II.C.10"
@@ -5456,13 +5094,6 @@ SEC_APARS_EOF
             # introduced. The decoded private copy is still verified before execution.
             FV_PINSHA=$flrtvc_ksh_sha256
             FV_PINVERSION=$flrtvc_ksh_version
-          elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-            # Operator-bundle path has no external pin path either: the expected
-            # engine digest/version come from the envelope the operator supplied,
-            # and the whole envelope was footer-bound before any payload decode.
-            FV_PINSHA=$DEFINITIONS_BUNDLE_ENGINE_SHA
-            FV_PINVERSION=$DEFINITIONS_BUNDLE_ENGINE_VERSION
-            FV_PINASOF=$DEFINITIONS_BUNDLE_ENGINE_ASOF
           else
             # Path 1 PIN: copy into the private scratch dir and read the hash from the
             # COPY (round 6 item 4) — the security-critical SHA256 is never taken from
@@ -5542,73 +5173,6 @@ SEC_APARS_EOF
                   FV_PAYLOAD_READY=1
                 fi
               fi
-            elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-              # Operator-bundle path: copy the parse-verified decoded payloads
-              # into THIS private scratch and re-hash the copies, so the
-              # canonical attestation binds to exactly the bytes handed to
-              # flrtvc.ksh. The expected digests/version come from the envelope
-              # (FV_PINSHA/FV_PINVERSION set above), not an external pin file.
-              FV_TMPAPAR="$FV_TMPDIR/apar.csv"
-              if ! cp "$DEFINITIONS_BUNDLE_ENGINE" "$FV_TMPKSH" 2>/dev/null; then
-                add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy the definitions-bundle engine payload into the private scratch" \
-                    "The verified bundle engine could not be staged for execution; an unstaged script is never executed." \
-                    "check free space in ${TMPDIR:-/tmp} and re-run." "ffiec:II.C.10"
-              elif ! cp "$DEFINITIONS_BUNDLE_APAR" "$FV_TMPAPAR" 2>/dev/null; then
-                add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy the definitions-bundle apar.csv payload into the private scratch" \
-                    "The verified bundle feed could not be staged; no sweep is claimed from an unstaged input." \
-                    "check free space in ${TMPDIR:-/tmp} and re-run." "ffiec:II.C.10"
-              else
-                chmod 0600 "$FV_TMPKSH" "$FV_TMPAPAR" 2>/dev/null
-                FV_ACTUALSHA=$(sha256_of "$FV_TMPKSH")
-                FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
-                FV_DECODE_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
-                FV_DECODE_VALID=$?
-                if [ -z "$FV_ACTUALSHA" ] || [ -z "$FV_ACTUALAPARSHA" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv could not be integrity-bound"
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
-                    "decoded bundle flrtvc.ksh could not be integrity-bound"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not checksum the decoded definitions-bundle FLRTVC data" \
-                      "The staged private copies could not be integrity-checked, so neither is trusted or executed." \
-                      "confirm openssl works and re-run." "ffiec:II.C.10"
-                elif [ "$FV_ACTUALSHA" != "$FV_PINSHA" ]; then
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
-                    "decoded bundle flrtvc.ksh conflicts with envelope digest"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle flrtvc.ksh SHA256 does not match the envelope digest — REFUSING to execute it" \
-                      "The staged engine does not match the verified envelope's declared SHA256 ($FV_ACTUALSHA vs. expected $FV_PINSHA). Corrupt or tampered code is never executed, especially as root." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_ACTUALAPARSHA" != "$DEFINITIONS_BUNDLE_APAR_SHA" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv conflicts with envelope digest"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv SHA256 does not match the envelope digest" \
-                      "The staged feed does not match the verified envelope's declared SHA256, so it is not a trustworthy assessment input." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_DECODE_VALID" -ne 0 ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv failed structural validation"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv failed structural validation" \
-                      "The decoded feed did not contain the required FLRT CSV header, source-vintage row, and structurally complete advisory records." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_DECODE_VINTAGE" != "$DEFINITIONS_BUNDLE_APAR_ASOF" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv vintage conflicts with envelope metadata"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv row-2 vintage does not match envelope metadata ($FV_DECODE_VINTAGE vs. $DEFINITIONS_BUNDLE_APAR_ASOF)" \
-                      "The feed bytes and advertised vintage disagree; the scanner refuses to present either as authoritative." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                else
-                  currency_set_runtime_record 3 1 "$FV_DECODE_VINTAGE" source-vintage \
-                    "$FV_DECODE_VINTAGE" source-declared "sha256:$FV_ACTUALAPARSHA" \
-                    "IBM FLRT apar.csv row-2 vintage" verified verified
-                  currency_evaluate
-                  FV_RUN_APARCSV=$FV_TMPAPAR
-                  FV_PAYLOAD_READY=1
-                fi
-              fi
-              # The parse-time scratch held verified copies; the files are now
-              # staged in FV_TMPDIR, so release it eagerly (the EXIT traps also
-              # no-op once the variable is cleared).
-              rm -rf "$DEFINITIONS_BUNDLE_SCRATCH" 2>/dev/null
-              DEFINITIONS_BUNDLE_SCRATCH=""
             else
               # Path 1 RUNTIME PIN ENFORCEMENT (round 4 item 1, round 5 item 1):
               # Copy BOTH supplied inputs into the private scratch dir first, then
@@ -5621,7 +5185,16 @@ SEC_APARS_EOF
                 FV_SCRIPT_COPIED=1
                 FV_ACTUALSHA=$(sha256_of "$FV_TMPKSH")
               fi
-              if cp "$FLRTVC_APARCSV" "$FV_TMPAPAR" 2>/dev/null; then
+              if [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; then
+                if ptxray_defs_copy_payload ibm-apar-csv "$FV_TMPAPAR"; then
+                  FV_APAR_COPIED=1
+                  FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
+                  FV_COPY_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
+                  FV_COPY_APAR_VALID=$?
+                else
+                  FV_COPY_APAR_VALID=1
+                fi
+              elif cp "$FLRTVC_APARCSV" "$FV_TMPAPAR" 2>/dev/null; then
                 FV_APAR_COPIED=1
                 FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
                 FV_COPY_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
@@ -5821,11 +5394,9 @@ SEC_APARS_EOF
       esac
     fi
     if [ "$FV_INVOKED" -eq 1 ] && [ "$FV_INVOKE_MODE" = "bundled" ]; then
-      ATTRIB="path 0 — bundled embedded data; AIXray invoked flrtvc.ksh itself, offline"
-    elif [ "$FV_INVOKED" -eq 1 ] && [ "$FV_INVOKE_MODE" = "bundle" ]; then
-      ATTRIB="operator-supplied definitions bundle; AIXray invoked flrtvc.ksh itself, offline"
+      ATTRIB="path 0 — bundled embedded data; PTxray invoked flrtvc.ksh itself, offline"
     elif [ "$FV_INVOKED" -eq 1 ]; then
-      ATTRIB="path 1 — external --flrtvc-* files; AIXray invoked flrtvc.ksh itself, offline"
+      ATTRIB="path 1 — external --flrtvc-* files; PTxray invoked flrtvc.ksh itself, offline"
     else
       ATTRIB="path 2 — parsed from an externally supplied --flrtvc-report; the invocation itself could not be directly verified"
     fi
@@ -5995,6 +5566,36 @@ SEC_APARS_EOF
       FVNCVE=$(printf '%s' "$SUMLINE" | awk -F'\t' '{print $8+0}')
       FVNAPAR=$(printf '%s' "$SUMLINE" | awk -F'\t' '{print $9+0}')
 
+      # Match only CVEs already reported adverse by IBM FLRTVC against the
+      # CVE-ID list derived by the adjacent verifier from the selected signed
+      # CISA KEV JSON. No downloaded data is sourced or executed.
+      PTXRAY_KEV_MATCH_STATE=not-assessed
+      PTXRAY_KEV_MATCH_COUNT=0
+      PTXRAY_KEV_MATCH_NAMES=""
+      # A stale or unknown KEV set cannot prove a CVE is absent. Only current
+      # signed KEV data may populate true/false membership; otherwise the
+      # exposure field remains null/NOT_ASSESSED instead of rendering false/0.
+      if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] && [ "$PTXRAY_DEFS_FRESHNESS" = current ]; then
+        PTXRAY_KEV_CVES=$(ptxray_defs_read_payload cisa-kev-cves)
+        PTXRAY_KEV_READ_RC=$?
+        if [ "$PTXRAY_KEV_READ_RC" -eq 0 ] \
+            && printf '%s\n' "$PTXRAY_KEV_CVES" | awk '
+              $0 !~ /^CVE-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9]*$/ {bad=1}
+              seen[$0]++ {bad=1}
+              END{exit bad||NR<1?1:0}'; then
+          DETAILLINES=$(printf '%s\n%s\n%s\n' "$PTXRAY_KEV_CVES" \
+            '--PTXRAY-EXPOSURES--' "$DETAILLINES" | awk -F'\t' '
+              $0=="--PTXRAY-EXPOSURES--" {details=1;next}
+              !details {kev[$1]=1;next}
+              NF>=14 {print $0 "\t" (($1!=""&&kev[$1])?1:0)}')
+          PTXRAY_KEV_MATCH_COUNT=$(printf '%s\n' "$DETAILLINES" \
+            | awk -F'\t' 'NF>=15&&$15==1{n++}END{print n+0}')
+          PTXRAY_KEV_MATCH_NAMES=$(printf '%s\n' "$DETAILLINES" \
+            | awk -F'\t' 'NF>=15&&$15==1&&!seen[$1]++{printf "%s%s",(n++?", ":""),$1}')
+          PTXRAY_KEV_MATCH_STATE=assessed
+        fi
+      fi
+
       # A trailer/body contradiction makes the completion INVALID even when the
       # exit code alone is a legal 0 or 2 — and it fills the disclosure so the
       # FAIL narrative below can carry it. Evaluated only under the unified banner
@@ -6068,7 +5669,12 @@ SEC_APARS_EOF
           }
           END{printf "Critical %d; High %d; Medium %d; Low %d; None %d; Unscored %d",critical+0,high+0,medium+0,low+0,none+0,unscored+0}
         ')
-        add patch apar_scan "FLRT APAR exposure scan" FAIL high "CVSS ladder: Known-Exploited NOT_ASSESSED; $FV_LADDER_COUNTS — $FVNEXP exposure record(s)$HIPERNOTE$IDBREAKDOWN: $FVNAMES$COMPLETION_NOTE" \
+        if [ "$PTXRAY_KEV_MATCH_STATE" = assessed ]; then
+          PTXRAY_KEV_OBSERVED="Known-Exploited $PTXRAY_KEV_MATCH_COUNT"
+        else
+          PTXRAY_KEV_OBSERVED="Known-Exploited NOT_ASSESSED"
+        fi
+        add patch apar_scan "FLRT APAR exposure scan" FAIL high "CVSS ladder: $PTXRAY_KEV_OBSERVED; $FV_LADDER_COUNTS — $FVNEXP exposure record(s)$HIPERNOTE$IDBREAKDOWN: $FVNAMES$COMPLETION_NOTE" \
             "Published fixes you don't have, per IBM's own FLRTVC engine ($ATTRIB) — this box matches $FVNEXP exposure record(s) ($FVNCVE distinct CVE(s), $FVNAPAR distinct APAR/ifix identifier(s)) whose fix exists and is not installed here.$MALNOTE$STALENOTE$COMPLETION_NOTE" \
             "apply the listed APAR/ifix from IBM Fix Central (the bulletin/download URLs are in the JSON exposures[]); re-scan after patching." "ffiec:II.C.10"
         FV_PROVENANCE_REAL=1
@@ -6101,13 +5707,13 @@ SEC_APARS_EOF
         # proven from the inventory itself, so the PASS states its assumption rather
         # than silently implying "complete inventory verified". (Path 2 reports carry
         # no capture count here, so the clause is invoke-mode only.)
-        # Disclosure is invoke-mode only: FV_LSLPP_ROWS exists only when AIXray captured
+        # Disclosure is invoke-mode only: FV_LSLPP_ROWS exists only when PTxray captured
         # the inventory itself (path 1). Keep every reference to it INSIDE this guard —
         # under set -u a bare reference on the path-2 report branch would abort the run.
         FV_CAPNOTE=""; FV_CAPMEAN=""
         if [ "$FV_INVOKED" -eq 1 ]; then
           FV_CAPNOTE=" against the $FV_LSLPP_ROWS filesets captured from this box (NOT an independently verified-complete inventory)"
-          FV_CAPMEAN=" IMPORTANT: this clean result is bounded by the inventory captured here — AIXray applies a plausibility floor (row count + base-fileset family) but cannot prove from the capture alone that no installed fileset was omitted, and flrtvc.ksh emits no parsed-fileset count to cross-check. Treat a PASS as \"no exposures among the $FV_LSLPP_ROWS filesets scanned,\" not \"this box is proven exposure-free.\""
+          FV_CAPMEAN=" IMPORTANT: this clean result is bounded by the inventory captured here — PTxray applies a plausibility floor (row count + base-fileset family) but cannot prove from the capture alone that no installed fileset was omitted, and flrtvc.ksh emits no parsed-fileset count to cross-check. Treat a PASS as \"no exposures among the $FV_LSLPP_ROWS filesets scanned,\" not \"this box is proven exposure-free.\""
         fi
         add patch apar_scan "FLRT APAR exposure scan" PASS high "0 exposures (IBM FLRTVC, report vintage $FVDATE, $ATTRIB)$FV_CAPNOTE" \
             "No exposures found by IBM's own FLRTVC engine$FV_CAPNOTE.$FV_CAPMEAN" "n/a" "ffiec:II.C.10"
@@ -6123,7 +5729,7 @@ SEC_APARS_EOF
   # is recreated (predictable name, another actor or a later reuse) and a signal
   # lands in the window between the rm completing and the trap being cleared, the
   # STALE trap (still referencing the old FV_TMPDIR value) would rm -rf whatever now
-  # occupies that path — one AIXray no longer owns. Disarming first closes that:
+  # occupies that path — one PTxray no longer owns. Disarming first closes that:
   # once the traps are cleared and FV_MADE/FV_TMPDIR are blanked, nothing running
   # afterward (however long the rm itself takes) can reference this path again. An
   # abort mid-rm (default signal disposition, no trap installed) can still leave the
@@ -6131,6 +5737,7 @@ SEC_APARS_EOF
   # is not.
   if [ -n "$FV_CLEANUP" ]; then
     trap - EXIT HUP INT TERM
+    ptxray_defs_arm_snapshot_cleanup
     FV_MADE=""
     FV_TMPDIR=""
     rm -rf "$FV_CLEANUP"
@@ -6305,16 +5912,16 @@ function checks_storage {
       add storage "fs_$M" "Filesystem $M" NOT_ASSESSED high \
           "$OBS" \
           "Filesystem use could not be assessed because $DFNOTE." \
-          "rerun 'df -g' successfully, then rerun AIXray before treating filesystem capacity as healthy."
+          "rerun 'df -g' successfully, then rerun PTxray before treating filesystem capacity as healthy."
     done
     add storage fs_other "Other filesystems" NOT_ASSESSED med \
         "$OBS" \
         "Other-filesystem use could not be assessed because $DFNOTE." \
-        "rerun 'df -g' successfully, then rerun AIXray before treating other filesystems as healthy."
+        "rerun 'df -g' successfully, then rerun PTxray before treating other filesystems as healthy."
     add storage fs_inodes "Inode usage (JFS2)" NOT_ASSESSED med \
         "$OBS" \
         "Inode use could not be assessed because $DFNOTE." \
-        "rerun 'df -g' successfully, then rerun AIXray before relying on inode headroom."
+        "rerun 'df -g' successfully, then rerun PTxray before relying on inode headroom."
   else
   for M in / /var /tmp; do
     U=$(printf '%s\n' "$DFG" | awk -v m="$M" '
@@ -6328,7 +5935,7 @@ function checks_storage {
       add storage "fs_$M" "Filesystem $M" NOT_ASSESSED high \
           "not assessed — no complete df -g row for $M" \
           "Filesystem use could not be assessed because df -g did not contain a complete row for $M; the capture may be incomplete or the mount may be absent." \
-          "verify 'df -g $M' returns a complete row, then rerun AIXray before relying on this filesystem assessment."
+          "verify 'df -g $M' returns a complete row, then rerun PTxray before relying on this filesystem assessment."
       continue
     fi
     UCLASS=$(printf '%s\n' "$U" | awk -v max_pct="$STOR_FACT_MAX_USED_PCT" '
@@ -6537,7 +6144,7 @@ _AIXRAY_SESSION_KEYS=""
   else
     add storage paging "Paging space" NOT_ASSESSED med "$LSPSWHY" \
         "Paging-space use could not be assessed because lsps -a failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'lsps -a' manually, then rerun AIXray before treating paging-space use as healthy."
+        "run 'lsps -a' manually, then rerun PTxray before treating paging-space use as healthy."
   fi
 _AIXRAY_SESSION_KEYS=""
 
@@ -6640,7 +6247,7 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$VG_STALE_GAP" ]; then
     add storage vg_stale "LV mirror sync" NOT_ASSESSED high "not assessed — $VG_STALE_GAP" \
         "LV mirror synchronization could not be assessed because one or more lsvg captures failed, were empty, or were unparseable." \
-        "run 'lsvg -o' and 'lsvg -l <vg>' manually for every online VG, then rerun AIXray."
+        "run 'lsvg -o' and 'lsvg -l <vg>' manually for every online VG, then rerun PTxray."
   elif [ -n "$STALE" ]; then
     add storage vg_stale "LV mirror sync" FAIL high "stale:$STALE" \
         "Mirror copies are out of sync — you believe you are protected and you are not." \
@@ -6651,7 +6258,7 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$VG_PVS_GAP" ]; then
     add storage vg_pvs "Volume group disks" NOT_ASSESSED high "not assessed — $VG_PVS_GAP" \
         "Volume-group disk state could not be assessed because lsvg or lspv evidence failed, was empty, unparseable, or internally incomplete." \
-        "run 'lsvg -o', 'lsvg -p <vg>', and 'lspv' manually, then rerun AIXray."
+        "run 'lsvg -o', 'lsvg -p <vg>', and 'lspv' manually, then rerun PTxray."
   elif [ -n "$MISSPV" ]; then
     add storage vg_pvs "Volume group disks" FAIL high "missing:$MISSPV" \
         "A disk the volume group expects is gone — data redundancy or capacity is already degraded." \
@@ -7093,7 +6700,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage vg_capacity "Volume group free space" NOT_ASSESSED med \
         "${VGLWHY:-not assessed — lsvg -o capture unavailable}" \
         "Volume-group free-space headroom could not be assessed because the online VG inventory was unavailable or unparseable." \
-        "run 'lsvg -o' manually, then rerun AIXray before treating every online VG as having growth headroom."
+        "run 'lsvg -o' manually, then rerun PTxray before treating every online VG as having growth headroom."
   else
     for VG in $VGL; do
       VGO=$(aix "lsvg_$VG" lsvg "$VG"); VGORC=$?
@@ -7222,7 +6829,7 @@ _AIXRAY_SESSION_KEYS=""
     LSP=""
     add storage mpio "MPIO path health" NOT_ASSESSED high "$LSPWHY" \
         "MPIO path health could not be assessed because lspath failed, returned no evidence, or included a row/status outside the expected AIX output grammar." \
-        "run 'lspath' manually, resolve the capture or unexpected status, and rerun AIXray before treating path redundancy as healthy."
+        "run 'lspath' manually, resolve the capture or unexpected status, and rerun PTxray before treating path redundancy as healthy."
   elif [ "$LSP_NO_PATHS" -eq 1 ]; then
     add storage mpio "MPIO path health" PASS low \
         "lspath capture empty (rc=0); disk inventory succeeded ($LSP_DISK_COUNT disk(s)); no MPIO paths reported" \
@@ -7469,7 +7076,7 @@ _AIXRAY_SESSION_KEYS=""
     LSADP=""
     add storage fc_errors "Fibre Channel adapter errors" NOT_ASSESSED low "$LSADPWHY" \
         "Fibre Channel health could not be assessed because the adapter inventory failed, returned no evidence, or did not match the expected AIX lsdev output shape." \
-        "run 'lsdev -c adapter' manually, then rerun AIXray before treating FC adapter health as clean."
+        "run 'lsdev -c adapter' manually, then rerun PTxray before treating FC adapter health as clean."
   else
     FCS=$(printf '%s\n' "$LSADP" | awk '$1 ~ /^fcs[0-9]+$/ {print $1}')
     if [ -z "$FCS" ]; then
@@ -7571,7 +7178,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage vg_geometry "Volume group geometry" NOT_ASSESSED low \
         "${VGLWHY:-not assessed — lsvg -o capture unavailable}" \
         "Volume-group geometry could not be assessed because the online VG inventory was unavailable or unparseable." \
-        "run 'lsvg -o' manually, then rerun AIXray before treating every online VG's PP geometry as healthy." "ffiec:II.C.11"
+        "run 'lsvg -o' manually, then rerun PTxray before treating every online VG's PP geometry as healthy." "ffiec:II.C.11"
   else
     for VG in $VGL; do
       VGO=$(aix "lsvg_$VG" lsvg "$VG"); VGORC=$?
@@ -7663,7 +7270,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage lv_policy "LV mirror placement" NOT_ASSESSED high \
         "${VGLWHY:-not assessed — lsvg -o capture unavailable}" \
         "LV mirror placement could not be assessed because the online VG inventory was unavailable or unparseable." \
-        "run 'lsvg -o' manually, then rerun AIXray before treating mirrored-LV disk separation as healthy." "ffiec:II.C.11"
+        "run 'lsvg -o' manually, then rerun PTxray before treating mirrored-LV disk separation as healthy." "ffiec:II.C.11"
   else
     for VG in $VGL; do
       LSVG_L=$(aix "lsvg_l_$VG" lsvg -l "$VG"); LSVG_L_RC=$?
@@ -7848,7 +7455,7 @@ _AIXRAY_SESSION_KEYS=""
     LSFSQ=""
     add storage fs_lv_slack "Filesystem vs LV sizing" NOT_ASSESSED low "$LSFSQWHY" \
         "Filesystem-to-LV sizing could not be assessed because lsfs -q failed, returned no evidence, or did not contain complete numeric filesystem/detail row pairs." \
-        "run 'lsfs -q' manually, then rerun AIXray before treating filesystem/LV sizing as healthy." "ffiec:II.C.11"
+        "run 'lsfs -q' manually, then rerun PTxray before treating filesystem/LV sizing as healthy." "ffiec:II.C.11"
   else
     set -- $(printf '%s\n' "$LSFSQ" | awk '
       /^[ 	]*\(lv size:/ {
@@ -7880,7 +7487,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage jfs_legacy "Legacy JFS filesystems" NOT_ASSESSED low \
         "${LSFSQWHY:-not assessed — lsfs -q capture unavailable}" \
         "Legacy-JFS use could not be assessed because lsfs -q failed, returned no evidence, or did not contain complete filesystem/detail row pairs." \
-        "run 'lsfs -q' manually, then rerun AIXray before treating every filesystem as JFS2." "ffiec:II.C.11"
+        "run 'lsfs -q' manually, then rerun PTxray before treating every filesystem as JFS2." "ffiec:II.C.11"
   else
     JFSLEG=$(printf '%s\n' "$LSFSQ" | awk '$1 ~ /^\/dev\// && NF>=5 && $4=="jfs" {printf "%s%s",(n++?", ":""),$3}')
     JFSLEG_RC=$?
@@ -7888,7 +7495,7 @@ _AIXRAY_SESSION_KEYS=""
       add storage jfs_legacy "Legacy JFS filesystems" NOT_ASSESSED low \
           "not assessed — lsfs -q vfs-column scan failed (rc=$JFSLEG_RC)" \
           "Legacy-JFS use could not be assessed because the validated lsfs -q evidence could not be scanned for legacy jfs rows." \
-          "make the lsfs -q vfs-column scan complete successfully, then rerun AIXray before treating every filesystem as JFS2." "ffiec:II.C.11"
+          "make the lsfs -q vfs-column scan complete successfully, then rerun PTxray before treating every filesystem as JFS2." "ffiec:II.C.11"
     elif [ -n "$JFSLEG" ]; then
       add storage jfs_legacy "Legacy JFS filesystems" WARN low "jfs (not jfs2): $JFSLEG" \
           "One or more filesystems are still legacy JFS, not JFS2 — JFS caps at 2 TB, has no online shrink, weaker concurrency and no inline log. It still works, but it is a dead-end filesystem type on current AIX." \
@@ -7962,7 +7569,7 @@ _AIXRAY_SESSION_KEYS=""
     MNT=""
     add storage mount_options "Mount options" NOT_ASSESSED med "$MNTWHY" \
         "Mount hygiene could not be assessed because mount failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'mount' manually, then rerun AIXray before treating /tmp separation or JFS2 logging as healthy." "ffiec:II.C.11"
+        "run 'mount' manually, then rerun PTxray before treating /tmp separation or JFS2 logging as healthy." "ffiec:II.C.11"
   else
     set -- $MNTSTAT
     TMPSEP=${1:-0}; NJFS2=${2:-0}; ATIMEN=${3:-0}; NOLOG=${4:-none}
@@ -7988,7 +7595,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage paging_parity "Paging space parity" NOT_ASSESSED med \
         "${LSPSWHY:-not assessed — lsps -a capture unavailable}" \
         "Paging-space parity could not be assessed because lsps -a failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'lsps -a' manually, then rerun AIXray before treating multi-space paging as balanced."
+        "run 'lsps -a' manually, then rerun PTxray before treating multi-space paging as balanced."
   else
     PPAR_COUNT=$(printf '%s\n' "$LSPS" | awk 'NR>1 && NF>1 {n++} END {print n+0}')
     PPAR_COUNT_RC=$?
@@ -7996,7 +7603,7 @@ _AIXRAY_SESSION_KEYS=""
       add storage paging_parity "Paging space parity" NOT_ASSESSED med \
           "not assessed — lsps -a row-count scan failed (rc=$PPAR_COUNT_RC)" \
           "Paging-space parity could not be assessed because a validated lsps -a derivation failed before size and active-state parity could be determined." \
-          "make the lsps -a row-count and parity scans complete successfully, then rerun AIXray before treating multi-space paging as balanced."
+          "make the lsps -a row-count and parity scans complete successfully, then rerun PTxray before treating multi-space paging as balanced."
     elif [ "$PPAR_COUNT" -gt 1 ]; then
       PPAR_TABLE=$(printf '%s\n' "$LSPS" | awk '
         BEGIN { print "NAME | PV | SIZE | ACTIVE" }
@@ -8052,7 +7659,7 @@ _AIXRAY_SESSION_KEYS=""
         add storage paging_parity "Paging space parity" NOT_ASSESSED med \
             "not assessed — lsps -a parity scan failed (rc=$PPAR_META_RC)" \
             "Paging-space parity could not be assessed because a validated lsps -a derivation failed before size and active-state parity could be determined." \
-            "make the lsps -a row-count and parity scans complete successfully, then rerun AIXray before treating multi-space paging as balanced."
+            "make the lsps -a row-count and parity scans complete successfully, then rerun PTxray before treating multi-space paging as balanced."
       else
         PPAR_MIN_MB=$(printf '%s\n' "$PPAR_META" | awk -F '\t' '{print $1}')
         PPAR_WASTE_MB=$(printf '%s\n' "$PPAR_META" | awk -F '\t' '{print $2}')
@@ -8097,11 +7704,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${LSPS_OK:-0}" -ne 1 ]; then
     add storage paging_layout "Paging space layout" NOT_ASSESSED low "${LSPSWHY:-not assessed — lsps -a capture unavailable}" \
         "Paging-space placement could not be assessed because lsps -a failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'lsps -a' manually, then rerun AIXray before treating paging-space placement as healthy." "ffiec:II.C.11"
+        "run 'lsps -a' manually, then rerun PTxray before treating paging-space placement as healthy." "ffiec:II.C.11"
   elif [ "${VGL_OK:-0}" -ne 1 ]; then
     add storage paging_layout "Paging space layout" NOT_ASSESSED low "${VGLWHY:-not assessed — lsvg -o capture unavailable}" \
         "Paging-space placement could not be assessed completely because the online volume-group list was unavailable or unparseable." \
-        "run 'lsvg -o' manually, then rerun AIXray before treating cross-VG paging placement as healthy." "ffiec:II.C.11"
+        "run 'lsvg -o' manually, then rerun PTxray before treating cross-VG paging placement as healthy." "ffiec:II.C.11"
   else
     PLSTAT=$(printf '%s\n' "$LSPS" | awk '
       NR>1 && NF>1 {
@@ -8114,7 +7721,7 @@ _AIXRAY_SESSION_KEYS=""
       add storage paging_layout "Paging space layout" NOT_ASSESSED low \
           "not assessed — lsps -a placement scan failed (rc=$PLSTAT_RC)" \
           "Paging-space placement could not be assessed because the validated lsps -a evidence could not be scanned for disk and volume-group placement." \
-          "make the lsps -a placement scan complete successfully, then rerun AIXray before treating paging-space placement as healthy." "ffiec:II.C.11"
+          "make the lsps -a placement scan complete successfully, then rerun PTxray before treating paging-space placement as healthy." "ffiec:II.C.11"
     else
       set -- $PLSTAT
       PLNPS=${1:-0}; PLDUP=${2:-0}; PLROOT=${3:-0}; PLTOTMB=${4:-0}
@@ -8340,7 +7947,7 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$VM_OK" -ne 1 ]; then
     add errors crash_evidence "Recent crash evidence" NOT_ASSESSED med "$VMWHY" \
         "Recent crash evidence could not be assessed because the vmcore search failed or returned text that did not match absolute vmcore paths under /var/adm/ras." \
-        "run \"find /var/adm/ras -name 'vmcore*' -mtime -30 -print\" manually, resolve any errors, then rerun AIXray."
+        "run \"find /var/adm/ras -name 'vmcore*' -mtime -30 -print\" manually, resolve any errors, then rerun PTxray."
   elif [ -z "$VM" ]; then
     add errors crash_evidence "Recent crash evidence" PASS low "none in 30 days" "No recent crash dumps found." "n/a"
   else
@@ -8388,8 +7995,8 @@ _AIXRAY_SESSION_KEYS=""
 
   if [ "$PSE_OK" -ne 1 ]; then
     add errors errdemon_health "Error-logging daemon" NOT_ASSESSED high "$PSEWHY" \
-        "AIXray could not validate the process list, so it cannot determine whether errdemon is running or whether the AIX error log is recording new events." \
-        "make 'ps -e -o comm' return a complete process list, then re-run AIXray before relying on error-log findings."
+        "PTxray could not validate the process list, so it cannot determine whether errdemon is running or whether the AIX error log is recording new events." \
+        "make 'ps -e -o comm' return a complete process list, then re-run PTxray before relying on error-log findings."
   else
   ERDRUN=$(printf '%s\n' "$PSE" | awk 'NR>1 && $1=="errdemon"{n++} END{print n+0}')
   if [ "${ERDRUN:-0}" -eq 0 ]; then
@@ -8407,14 +8014,14 @@ _AIXRAY_SESSION_KEYS=""
       # NOT_ASSESSED, never PASS (the daemon-running fact alone is a WARN-worthy partial
       # read, not a clean bill of health for errlog sizing).
       add errors errdemon_health "Error-logging daemon" NOT_ASSESSED low "errdemon running; log-size configuration not read (needs root)" \
-          "The error-logging daemon is up, so errors are being captured. Its log-size configuration could not be read (needs root), so whether the errlog is capped below the 1 MB default is unknown — re-run as root to confirm." "re-run aixray as root, or inspect 'errdemon -l' manually."
+          "The error-logging daemon is up, so errors are being captured. Its log-size configuration could not be read (needs root), so whether the errlog is capped below the 1 MB default is unknown — re-run as root to confirm." "re-run ptxray as root, or inspect 'errdemon -l' manually."
     else
       ERDSZ=$(printf '%s\n' "$ERDL" | awk '/Log Size/{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/){print $i; exit}}')
       ERDDUP=$(printf '%s\n' "$ERDL" | awk '/Duplicate Removal/{print $NF}')
       if [ -z "$ERDSZ" ]; then
         add errors errdemon_health "Error-logging daemon" NOT_ASSESSED low "errdemon running; Log Size row missing or unreadable" \
             "The error-logging daemon is up, but the Log Size row in 'errdemon -l' output was missing or unreadable, so whether the errlog is capped below the 1 MB default is unknown." \
-            "inspect '/usr/lib/errdemon -l' manually; if Log Size is missing or non-numeric, repair the errdemon configuration before re-running aixray."
+            "inspect '/usr/lib/errdemon -l' manually; if Log Size is missing or non-numeric, repair the errdemon configuration before re-running ptxray."
       elif [ "$ERDSZ" -lt "$ERRDEMON_LOG_MIN" ]; then
         add errors errdemon_health "Error-logging daemon" WARN low "errdemon running; errlog capped at ${ERDSZ} bytes (below the ${ERRDEMON_LOG_MIN}-byte default)" \
             "The error daemon is up, but the circular error log is capped below the 1 MB default — on a chatty box the oldest entries roll off sooner, so a fault that logged a few days ago may already be gone when you look." \
@@ -8533,8 +8140,8 @@ _AIXRAY_SESSION_KEYS=""
 
   if [ "$ERA_OK" -ne 1 ]; then
     add errors errpt_decode "Decoded error labels" NOT_ASSESSED high "$ERAWHY" \
-        "The detailed seven-day error-log capture could not be trusted, so AIXray did not infer that there were no error labels to decode." \
-        "run 'errpt -a -s <MMDDhhmmyy>'; resolve the reported capture failure or malformed output, then rerun AIXray."
+        "The detailed seven-day error-log capture could not be trusted, so PTxray did not infer that there were no error labels to decode." \
+        "run 'errpt -a -s <MMDDhhmmyy>'; resolve the reported capture failure or malformed output, then rerun PTxray."
   else
   # Feed the label table as leading input lines (terminated by a marker), then the errpt data:
   # AIX awk caps a -v value at 399 bytes, so the table cannot be passed as one variable — it is
@@ -8697,8 +8304,8 @@ _AIXRAY_SESSION_KEYS=""
 
   if [ "$ERA_OK" -ne 1 ]; then
     add errors errpt_signatures "Pre-failure signatures" NOT_ASSESSED high "$ERAWHY" \
-        "The detailed seven-day error-log capture could not be trusted, so AIXray did not infer that no pre-failure signatures were present." \
-        "run 'errpt -a -s <MMDDhhmmyy>'; resolve the reported capture failure or malformed output, then rerun AIXray."
+        "The detailed seven-day error-log capture could not be trusted, so PTxray did not infer that no pre-failure signatures were present." \
+        "run 'errpt -a -s <MMDDhhmmyy>'; resolve the reported capture failure or malformed output, then rerun PTxray."
   else
     SIGS=$(printf '%s\n' "$ERA" | awk '
     function rec(){
@@ -8765,8 +8372,8 @@ _AIXRAY_SESSION_KEYS=""
   errnotify_decode; RC=$?
   if [ "$RC" -ne 0 ] || [ "$ERRNOTIFY_OK" -ne 1 ]; then
     add errors errnotify_methods "Error notification methods" NOT_ASSESSED med "$ERRNOTIFY_WHY" \
-        "AIXray could not validate the errnotify ODM capture, so it cannot determine which error-notification methods run." \
-        "make 'odmget errnotify' return complete ODM evidence, then re-run AIXray."
+        "PTxray could not validate the errnotify ODM capture, so it cannot determine which error-notification methods run." \
+        "make 'odmget errnotify' return complete ODM evidence, then re-run PTxray."
   else
     ENCUST=$(printf '%s' "$ERRNOTIFY_DEC" | awk -F'\t' '{print $1+0}')
     ENDEF=$(printf '%s' "$ERRNOTIFY_DEC" | awk -F'\t' '{print $2+0}')
@@ -8807,12 +8414,12 @@ _AIXRAY_SESSION_KEYS=""
     add errors dump_history "System dump history" NOT_ASSESSED med \
         "not assessed — sysdumpdev -L capture failed (rc=$DHISRC)" \
         "System dump history could not be assessed because 'sysdumpdev -L' failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run AIXray."
+        "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run PTxray."
   elif [ -z "$DHIS" ]; then
     add errors dump_history "System dump history" NOT_ASSESSED med \
         "not assessed — sysdumpdev -L capture empty (rc=0)" \
         "System dump history could not be assessed because 'sysdumpdev -L' failed, returned no evidence, or did not match the expected AIX output shape." \
-        "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run AIXray."
+        "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run PTxray."
   else
     DSTAT=$(printf '%s\n' "$DHIS" | awk '
       $1=="Dump" && $2=="status:"{ sub(/^[^:]*:[ \t]*/,""); print; exit }
@@ -8835,7 +8442,7 @@ _AIXRAY_SESSION_KEYS=""
       add errors dump_history "System dump history" NOT_ASSESSED med \
           "not assessed — sysdumpdev -L capture unparseable (rc=0)" \
           "System dump history could not be assessed because 'sysdumpdev -L' failed, returned no evidence, or did not match the expected AIX output shape." \
-          "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run AIXray."
+          "run 'sysdumpdev -L' as root, repair any dump-history read problem, then re-run PTxray."
     fi
   fi
 }
@@ -8852,7 +8459,7 @@ _AIXRAY_SESSION_KEYS=""
 #   device captured it (same forensic loss, one step later). The dump estimate already reflects
 #   fw-assisted/compressed dumps, so it is the right yardstick for both device and copy dir.
 #   After a kernel/TL update the boot image on hd5 must be rebuilt (bosboot) or the box may
-#   boot the pre-update kernel or fail to boot; AIXray is READ-ONLY so it cannot run or inspect
+#   boot the pre-update kernel or fail to boot; PTxray is READ-ONLY so it cannot run or inspect
 #   bosboot, and the /dev/hd5 node timestamp reflects device access (not the image build), so
 #   bosboot_currency compares the kernel fileset (bos.mp64) install date to the last boot as a
 #   proxy and says so. A NIM client (/etc/niminfo present) usually holds its mksysb/lpp_source
@@ -10438,7 +10045,7 @@ function checks_resilience {
   # nim_client_state (LEVEL 2) — if /etc/niminfo exists this box is a NIM client; decode the
   # master. Veteran signal: on a NIM-managed box the mksysb/lpp_source resources usually live
   # on the NIM master, so a thin local-backup story is not the whole picture — the real restore
-  # image is centralized there. AIXray cannot reach the master, but niminfo names it. Reuses the
+  # image is centralized there. PTxray cannot reach the master, but niminfo names it. Reuses the
   # ls /etc/niminfo probe that already feeds the mksysb note above.
   if [ "$NIMPROBERC" -eq 0 ]; then
     NIMI=$(aix cat_niminfo cat /etc/niminfo)
@@ -10457,12 +10064,12 @@ function checks_resilience {
   elif [ "$NIMPROBERC" -ne 2 ]; then
     add resilience nim_client_state "NIM client state" WARN low \
         "not assessed — ls /etc/niminfo probe failed (rc=$NIMPROBERC)" \
-        "AIXray could not determine whether this box is a NIM client because the /etc/niminfo probe did not execute successfully; absence cannot be inferred from probe rc=$NIMPROBERC." \
+        "PTxray could not determine whether this box is a NIM client because the /etc/niminfo probe did not execute successfully; absence cannot be inferred from probe rc=$NIMPROBERC." \
         "run 'ls /etc/niminfo' manually, then read NIM_MASTER_HOSTNAME from the file if it exists." "ffiec:II.C.21"
   fi
 
   # bosboot_currency (LEVEL 2) — after a kernel/TL update the boot image on hd5 must be rebuilt
-  # (bosboot) or the box may boot the pre-update kernel or fail to boot. AIXray is READ-ONLY: it
+  # (bosboot) or the box may boot the pre-update kernel or fail to boot. PTxray is READ-ONLY: it
   # cannot run or inspect bosboot, and the /dev/hd5 node timestamp reflects device access, not
   # the image build — so this compares the kernel fileset (bos.mp64) install date to the last
   # boot as a proxy and says so. Veteran signal: if the kernel fileset is NEWER than the last
@@ -10484,11 +10091,11 @@ function checks_resilience {
     [ "$BJUL" -gt $(( TODAY_J + 2 )) ] && BJUL=$(d2j "$(( BYEAR - 1 ))-$BMM-$BDAY")
     if [ "$KJUL" -gt "$BJUL" ]; then
       add resilience bosboot_currency "Boot image currency" WARN med "kernel bos.mp64 installed $KINST, after last boot $BMON $BDAY" \
-          "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (AIXray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
+          "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (PTxray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
           "confirm a bosboot was applied for the new kernel ('bosboot -av' if unsure — it rebuilds the hd5 boot image) and schedule the pending reboot; verify the boot device with 'bootlist -m normal -o'." "ffiec:II.C.21"
     else
       add resilience bosboot_currency "Boot image currency" PASS low "booted $BMON $BDAY, after kernel bos.mp64 install $KINST" \
-          "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (AIXray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
+          "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (PTxray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
     fi
   fi
 }
@@ -10904,8 +10511,8 @@ _AIXRAY_SESSION_KEYS=""
   MAT_STATUS=NOT_ASSESSED
   MAT_SEVERITY=med
   MAT_OBSERVED=''
-  MAT_MEANING='AIXray did not obtain one trustworthy global effective MaxAuthTries value, so it cannot establish the authentication-attempt limit.'
-  MAT_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  MAT_MEANING='PTxray did not obtain one trustworthy global effective MaxAuthTries value, so it cannot establish the authentication-attempt limit.'
+  MAT_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   MAT_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -10953,7 +10560,7 @@ _AIXRAY_SESSION_KEYS=""
             MAT_STATUS=FAIL
             MAT_SEVERITY=med
             MAT_MEANING="MaxAuthTries is $MAT_VAL — exceeds the required maximum of 4."
-            MAT_FIX="set 'MaxAuthTries 4' or lower in the global sshd configuration, validate it with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+            MAT_FIX="set 'MaxAuthTries 4' or lower in the global sshd configuration, validate it with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           fi
           ;;
       esac
@@ -10973,8 +10580,8 @@ _AIXRAY_SESSION_KEYS=""
   RH_STATUS=NOT_ASSESSED
   RH_SEVERITY=med
   RH_OBSERVED=''
-  RH_MEANING='AIXray did not obtain one trustworthy global effective host-based trust policy, so it cannot establish both IgnoreRhosts and HostbasedAuthentication.'
-  RH_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  RH_MEANING='PTxray did not obtain one trustworthy global effective host-based trust policy, so it cannot establish both IgnoreRhosts and HostbasedAuthentication.'
+  RH_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   RH_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -11029,7 +10636,7 @@ _AIXRAY_SESSION_KEYS=""
             RH_SEVERITY=high
             RH_OBSERVED="IgnoreRhosts=$IGN_RHOSTS, HostbasedAuthentication=$HOST_BASED"
             RH_MEANING='sshd host-based trust is not fully disabled — one or both global effective settings deviate from IgnoreRhosts yes and HostbasedAuthentication no.'
-            RH_FIX="set global 'IgnoreRhosts yes' and 'HostbasedAuthentication no', validate both with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+            RH_FIX="set global 'IgnoreRhosts yes' and 'HostbasedAuthentication no', validate both with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           fi
           ;;
       esac
@@ -11049,8 +10656,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_MACS_MEANING SSH_MACS_FIX SSH_MACS_REASON
   SSH_MACS_STATUS=NOT_ASSESSED
   SSH_MACS_OBSERVED=''
-  SSH_MACS_MEANING='AIXray did not obtain one trustworthy global effective MACs value, so it cannot establish the SSH transport-integrity algorithm set.'
-  SSH_MACS_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_MACS_MEANING='PTxray did not obtain one trustworthy global effective MACs value, so it cannot establish the SSH transport-integrity algorithm set.'
+  SSH_MACS_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_MACS_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -11113,7 +10720,7 @@ _AIXRAY_SESSION_KEYS=""
             SSH_MACS_STATUS=FAIL
             SSH_MACS_OBSERVED="MACs $SSH_MACS_VALUE; invalid member $SSH_MACS_BAD"
             SSH_MACS_MEANING='The global effective SSH MAC list contains an unapproved algorithm, weakening transport integrity.'
-            SSH_MACS_FIX='replace the MACs value with a nonempty list drawn only from the approved AIX CIS set, validate it with sshd -T, and restart sshd; AIXray only recommends these actions.'
+            SSH_MACS_FIX='replace the MACs value with a nonempty list drawn only from the approved AIX CIS set, validate it with sshd -T, and restart sshd; PTxray only recommends these actions.'
           else
             SSH_MACS_STATUS=PASS
             SSH_MACS_OBSERVED="MACs $SSH_MACS_VALUE"
@@ -11136,8 +10743,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_LL_STATUS SSH_LL_OBSERVED SSH_LL_MEANING SSH_LL_FIX SSH_LL_REASON
   SSH_LL_STATUS=NOT_ASSESSED
   SSH_LL_OBSERVED=''
-  SSH_LL_MEANING='AIXray did not obtain one trustworthy global effective LogLevel value, so it cannot establish the sshd logging policy.'
-  SSH_LL_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_LL_MEANING='PTxray did not obtain one trustworthy global effective LogLevel value, so it cannot establish the sshd logging policy.'
+  SSH_LL_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_LL_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -11179,7 +10786,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_LL_STATUS=FAIL
           SSH_LL_OBSERVED="LogLevel $SSH_LL_VALUE"
           SSH_LL_MEANING='The global effective sshd logging level is outside the required INFO or VERBOSE values and may omit security events or expose excessive debug detail.'
-          SSH_LL_FIX="set 'LogLevel INFO' or 'LogLevel VERBOSE' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          SSH_LL_FIX="set 'LogLevel INFO' or 'LogLevel VERBOSE' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
         __COUNT__)
           SSH_LL_REASON='effective row is missing or duplicate'
@@ -11202,8 +10809,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_SM_STATUS SSH_SM_OBSERVED SSH_SM_MEANING SSH_SM_FIX SSH_SM_REASON
   SSH_SM_STATUS=NOT_ASSESSED
   SSH_SM_OBSERVED=''
-  SSH_SM_MEANING='AIXray did not obtain one trustworthy global effective StrictModes value, so it cannot establish whether sshd enforces ownership and mode checks.'
-  SSH_SM_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_SM_MEANING='PTxray did not obtain one trustworthy global effective StrictModes value, so it cannot establish whether sshd enforces ownership and mode checks.'
+  SSH_SM_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_SM_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -11245,7 +10852,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_SM_STATUS=FAIL
           SSH_SM_OBSERVED='StrictModes no'
           SSH_SM_MEANING='sshd strict ownership and mode checks are disabled, allowing unsafe user-file permissions to participate in authentication.'
-          SSH_SM_FIX="set 'StrictModes yes' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          SSH_SM_FIX="set 'StrictModes yes' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
         __COUNT__)
           SSH_SM_REASON='effective row is missing or duplicate'
@@ -11269,8 +10876,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_PUE_REASON
   SSH_PUE_STATUS=NOT_ASSESSED
   SSH_PUE_OBSERVED=''
-  SSH_PUE_MEANING='AIXray did not obtain one trustworthy global effective PermitUserEnvironment value, so it cannot establish whether sshd accepts user-controlled environment settings.'
-  SSH_PUE_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_PUE_MEANING='PTxray did not obtain one trustworthy global effective PermitUserEnvironment value, so it cannot establish whether sshd accepts user-controlled environment settings.'
+  SSH_PUE_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_PUE_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -11318,7 +10925,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_PUE_STATUS=FAIL
           SSH_PUE_OBSERVED="PermitUserEnvironment $SSH_PUE_VALUE"
           SSH_PUE_MEANING='sshd accepts user-controlled environment settings, which can bypass restrictions in configurations that trust environment-sensitive programs.'
-          SSH_PUE_FIX="set 'PermitUserEnvironment no' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          SSH_PUE_FIX="set 'PermitUserEnvironment no' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
       esac
     fi
@@ -11373,13 +10980,13 @@ _AIXRAY_SESSION_KEYS=""
           NOT_ASSESSED high \
           "not assessed — pwd_algorithm capture not executed (requires root; rc=$PWH_RC)" \
           "The password hashing policy needs root access and no pwd_algorithm capture was executed." \
-          "re-run aixray as root, or inspect 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually." "cis-l1"
+          "re-run ptxray as root, or inspect 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually." "cis-l1"
     else
       add security pw_hashing "Password hashing algorithm" \
           NOT_ASSESSED high \
           "not assessed — pwd_algorithm capture failed (rc=$PWH_RC)" \
-          "The pwd_algorithm read failed, which is unexpected as root, so AIXray obtained no trustworthy password-hashing evidence." \
-          "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, restore read access, then rerun AIXray." "cis-l1"
+          "The pwd_algorithm read failed, which is unexpected as root, so PTxray obtained no trustworthy password-hashing evidence." \
+          "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, restore read access, then rerun PTxray." "cis-l1"
     fi
   else
     PWH_PARSED=$(printf '%s\n' "$PWH_RAW" | awk '
@@ -11419,26 +11026,26 @@ _AIXRAY_SESSION_KEYS=""
       empty)
         add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
             "not assessed — pwd_algorithm capture empty (rc=0); read returned no assignment" \
-            "The successful read returned no pwd_algorithm assignment, so AIXray cannot claim the attribute is absent or select a release default." \
-            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun AIXray." "cis-l1"
+            "The successful read returned no pwd_algorithm assignment, so PTxray cannot claim the attribute is absent or select a release default." \
+            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." "cis-l1"
         ;;
       multiple)
         add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
             "not assessed — multiple pwd_algorithm assignments (values: $PWH_VALUE)" \
-            "The capture contained more than one pwd_algorithm assignment, so AIXray cannot determine one effective hashing policy." \
-            "remove duplicate or conflicting usw pwd_algorithm assignments, then rerun AIXray." "cis-l1"
+            "The capture contained more than one pwd_algorithm assignment, so PTxray cannot determine one effective hashing policy." \
+            "remove duplicate or conflicting usw pwd_algorithm assignments, then rerun PTxray." "cis-l1"
         ;;
       bad)
         add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
             "not assessed — pwd_algorithm capture unparseable: output was not exactly one usw pwd_algorithm assignment" \
-            "The password hashing policy could not be parsed, so AIXray cannot claim that password hashes use an approved algorithm." \
-            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun AIXray." "cis-l1"
+            "The password hashing policy could not be parsed, so PTxray cannot claim that password hashes use an approved algorithm." \
+            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." "cis-l1"
         ;;
       absent)
         add security pw_hashing "Password hashing algorithm" FAIL high \
             "/etc/security/login.cfg usw pwd_algorithm unset (defaults to legacy crypt); requires ssha256, ssha512 or bcrypt" \
             "An unset pwd_algorithm defaults to legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash." \
-            "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); AIXray only recommends this command and never executes it." "cis-l1"
+            "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
         ;;
       value)
         case "$PWH_VALUE" in
@@ -11452,13 +11059,13 @@ _AIXRAY_SESSION_KEYS=""
             add security pw_hashing "Password hashing algorithm" FAIL high \
                 "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha256, ssha512 or bcrypt" \
                 "pwd_algorithm=crypt selects legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash." \
-                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); AIXray only recommends this command and never executes it." "cis-l1"
+                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
             ;;
           *)
             add security pw_hashing "Password hashing algorithm" FAIL high \
                 "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha256, ssha512 or bcrypt" \
                 "The configured password hashing algorithm is not one of the accepted choices (ssha256, ssha512, or bcrypt); ssha256 is the minimum recommendation." \
-                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); AIXray only recommends this command and never executes it." "cis-l1"
+                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
             ;;
         esac
         ;;
@@ -11573,14 +11180,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_maxexpired "Password expiration grace period" FAIL high \
           "$PW_MX_OBSERVED" \
           "The observed policy is unlimited, outside the documented domain, over the four-week bound, or ineffective because maxage disables password expiration." \
-          "set the default-stanza maxexpired attribute to an integer from 0 through 4 and keep maxage positive after validating account policy; chsec is operator guidance only and AIXray never executes it." \
+          "set the default-stanza maxexpired attribute to an integer from 0 through 4 and keep maxage positive after validating account policy; chsec is operator guidance only and PTxray never executes it." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_maxexpired "Password expiration grace period" NOT_ASSESSED high \
           "not assessed — maxexpired/maxage $PW_MX_REASON" \
-          "AIXray did not obtain one trustworthy default-stanza maxexpired value together with the maxage value that determines whether it is effective." \
-          "inspect maxexpired and maxage together with lssec as root, correct capture ambiguity, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy default-stanza maxexpired value together with the maxage value that determines whether it is effective." \
+          "inspect maxexpired and maxage together with lssec as root, correct capture ambiguity, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -11681,13 +11288,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_maxage "Password maximum age" FAIL high \
           "$PW_AGE_OBSERVED" \
           "Accounts inheriting the default stanza receive a weaker maxage policy." \
-          "after access-impact review, set maxage to the boundary with 'chsec -f /etc/security/user -s default -a maxage=8'; AIXray only recommends this command." \
+          "after access-impact review, set maxage to the boundary with 'chsec -f /etc/security/user -s default -a maxage=8'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_maxage "Password maximum age" NOT_ASSESSED high \
           "not assessed — lssec maxage $PW_AGE_REASON" \
-          "AIXray did not obtain one trustworthy numeric default value." \
+          "PTxray did not obtain one trustworthy numeric default value." \
           "run 'lssec -f /etc/security/user -s default -a maxage' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -11789,13 +11396,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_minage "Password minimum age" FAIL high \
           "$PW_MINAGE_OBSERVED" \
           "Accounts inheriting the default stanza receive a weaker minage policy." \
-          "after access-impact review, set minage to the boundary with 'chsec -f /etc/security/user -s default -a minage=1'; AIXray only recommends this command." \
+          "after access-impact review, set minage to the boundary with 'chsec -f /etc/security/user -s default -a minage=1'; PTxray only recommends this command." \
           "cis-l2"
       ;;
     *)
       add security pw_minage "Password minimum age" NOT_ASSESSED high \
           "not assessed — lssec minage $PW_MINAGE_REASON" \
-          "AIXray did not obtain one trustworthy numeric default value." \
+          "PTxray did not obtain one trustworthy numeric default value." \
           "run 'lssec -f /etc/security/user -s default -a minage' as root, resolve the evidence problem, and rerun." \
           "cis-l2"
       ;;
@@ -11929,7 +11536,7 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_maxulogs "Simultaneous login limit" FAIL high \
           "$PW_MAXULOGS_OBSERVED" \
           "Accounts inheriting the default stanza receive a weaker maxulogs policy." \
-          "after access-impact review, set maxulogs to the boundary with 'chsec -f /etc/security/user -s default -a maxulogs=10'; AIXray only recommends this command." \
+          "after access-impact review, set maxulogs to the boundary with 'chsec -f /etc/security/user -s default -a maxulogs=10'; PTxray only recommends this command." \
           ""
       ;;
     NOT_APPLICABLE)
@@ -11941,7 +11548,7 @@ _AIXRAY_SESSION_KEYS=""
     *)
       add security pw_maxulogs "Simultaneous login limit" NOT_ASSESSED high \
           "not assessed — lssec maxulogs $PW_MAXULOGS_REASON" \
-          "AIXray did not obtain one trustworthy numeric default value." \
+          "PTxray did not obtain one trustworthy numeric default value." \
           "run 'lssec -f /etc/security/user -s default -a maxulogs' as root, resolve the evidence problem, and rerun." \
           ""
       ;;
@@ -12043,13 +11650,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_loginretries "Failed login retry limit" FAIL high \
           "$PW_LOGINRETRIES_OBSERVED" \
           "Accounts inheriting the default stanza receive a weaker loginretries policy." \
-          "after access-impact review, set loginretries to the boundary with 'chsec -f /etc/security/user -s default -a loginretries=3'; AIXray only recommends this command." \
+          "after access-impact review, set loginretries to the boundary with 'chsec -f /etc/security/user -s default -a loginretries=3'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_loginretries "Failed login retry limit" NOT_ASSESSED high \
           "not assessed — lssec loginretries $PW_LOGINRETRIES_REASON" \
-          "AIXray did not obtain one trustworthy numeric default value." \
+          "PTxray did not obtain one trustworthy numeric default value." \
           "run 'lssec -f /etc/security/user -s default -a loginretries' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -12163,14 +11770,14 @@ _AIXRAY_SESSION_KEYS=""
       fi
       add security pw_dictionlist "Password dictionary enforcement" FAIL high \
           "$PW_DICT_OBSERVED" "$PW_DICT_MEANING" \
-          "configure one or more root-protected dictionaries with 'chsec -f /etc/security/user -s default -a dictionlist=/absolute/path[,/absolute/path...]'; AIXray only recommends this command and never executes it." \
+          "configure one or more root-protected dictionaries with 'chsec -f /etc/security/user -s default -a dictionlist=/absolute/path[,/absolute/path...]'; PTxray only recommends this command and never executes it." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_dictionlist "Password dictionary enforcement" NOT_ASSESSED high \
           "not assessed — lssec dictionlist $PW_DICT_REASON" \
-          "AIXray did not obtain one trustworthy default-stanza dictionlist value, so it cannot claim that password dictionary enforcement is configured." \
-          "run 'lssec -f /etc/security/user -s default -a dictionlist' as root, verify the output, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy default-stanza dictionlist value, so it cannot claim that password dictionary enforcement is configured." \
+          "run 'lssec -f /etc/security/user -s default -a dictionlist' as root, verify the output, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -12263,8 +11870,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$PW_MA_REASON" ]; then
     add security pw_minalpha "Password alphabetic minimum" NOT_ASSESSED high \
         "not assessed — minalpha $PW_MA_REASON" \
-        "AIXray did not obtain one trustworthy numeric minalpha value or a proved absent assignment." \
-        "inspect the default minalpha attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric minalpha value or a proved absent assignment." \
+        "inspect the default minalpha attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1 ffiec:II.C.15"
   elif [ "$PW_MA_STATUS" = "PASS" ]; then
     add security pw_minalpha "Password alphabetic minimum" PASS high \
@@ -12275,7 +11882,7 @@ _AIXRAY_SESSION_KEYS=""
     add security pw_minalpha "Password alphabetic minimum" FAIL high \
         "$PW_MA_FAILURE" \
         "The alphabetic-character minimum is disabled, below three, or outside the valid AIX range." \
-        "set the default minalpha attribute to an integer from 3 through 8 after validating password policy; AIXray only recommends this change." \
+        "set the default minalpha attribute to an integer from 3 through 8 after validating password policy; PTxray only recommends this change." \
         "cis-l1 ffiec:II.C.15"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -12367,8 +11974,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$PW_MO_REASON" ]; then
     add security pw_minother "Password non-alphabetic minimum" NOT_ASSESSED high \
         "not assessed — minother $PW_MO_REASON" \
-        "AIXray did not obtain one trustworthy numeric minother value or a proved absent assignment." \
-        "inspect the default minother attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric minother value or a proved absent assignment." \
+        "inspect the default minother attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1 ffiec:II.C.15"
   elif [ "$PW_MO_STATUS" = "PASS" ]; then
     add security pw_minother "Password non-alphabetic minimum" PASS high \
@@ -12379,7 +11986,7 @@ _AIXRAY_SESSION_KEYS=""
     add security pw_minother "Password non-alphabetic minimum" FAIL high \
         "$PW_MO_FAILURE" \
         "The non-alphabetic-character minimum is disabled, below three, or outside the valid AIX range." \
-        "set the default minother attribute to an integer from 3 through 8 after validating password policy; AIXray only recommends this change." \
+        "set the default minother attribute to an integer from 3 through 8 after validating password policy; PTxray only recommends this change." \
         "cis-l1 ffiec:II.C.15"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -12531,14 +12138,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_histexpire "Password history expiration" FAIL high \
           "$PW_HEX_OBSERVED" \
           "The password-history reuse window is below fifty-two weeks, absent with a weak default, or numerically invalid." \
-          "set the /etc/security/user default-stanza histexpire attribute to an integer from 52 through 260 after validating policy; AIXray only recommends this change." \
+          "set the /etc/security/user default-stanza histexpire attribute to an integer from 52 through 260 after validating policy; PTxray only recommends this change." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_histexpire "Password history expiration" NOT_ASSESSED high \
           "not assessed — histexpire $PW_HEX_REASON" \
-          "AIXray did not obtain one trustworthy histexpire value or a release-qualified documented default." \
-          "inspect the default histexpire attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy histexpire value or a release-qualified documented default." \
+          "inspect the default histexpire attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -12675,14 +12282,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_histsize "Password history size" FAIL high \
           "$PW_HSZ_OBSERVED" \
           "The password-history count is below twenty, absent with a weak default, or numerically invalid." \
-          "set the /etc/security/user default-stanza histsize attribute to an integer from 20 through 50 after validating policy; AIXray only recommends this change." \
+          "set the /etc/security/user default-stanza histsize attribute to an integer from 20 through 50 after validating policy; PTxray only recommends this change." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_histsize "Password history size" NOT_ASSESSED high \
           "not assessed — histsize $PW_HSZ_REASON" \
-          "AIXray did not obtain one trustworthy histsize value or a release-qualified documented default." \
-          "inspect the default histsize attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy histsize value or a release-qualified documented default." \
+          "inspect the default histsize attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -12765,14 +12372,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_maxrepeats "Repeated password characters" FAIL high \
           "$PW_MXR_OBSERVED" \
           "The maxrepeats setting is absent, ineffective, invalid, or exceeds the CIS ceiling of four." \
-          "set the /etc/security/user default-stanza maxrepeats attribute to 4 after validating password policy; AIXray only recommends this change." \
+          "set the /etc/security/user default-stanza maxrepeats attribute to 4 after validating password policy; PTxray only recommends this change." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_maxrepeats "Repeated password characters" NOT_ASSESSED high \
           "not assessed — maxrepeats $PW_MXR_REASON" \
-          "AIXray did not obtain one trustworthy decimal maxrepeats value or a proved absent assignment." \
-          "inspect the default maxrepeats attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy decimal maxrepeats value or a proved absent assignment." \
+          "inspect the default maxrepeats attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -12855,14 +12462,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_mindiff "Password change difference" FAIL high \
           "$PW_MDF_OBSERVED" \
           "The default password policy permits a new password with fewer than six characters changed, or contains an invalid numeric setting." \
-          "set the /etc/security/user default-stanza mindiff attribute to at least 6 within the password algorithm's supported length; AIXray only recommends this change." \
+          "set the /etc/security/user default-stanza mindiff attribute to at least 6 within the password algorithm's supported length; PTxray only recommends this change." \
           "cis-l1 ffiec:II.C.15"
       ;;
     *)
       add security pw_mindiff "Password change difference" NOT_ASSESSED high \
           "not assessed — mindiff $PW_MDF_REASON" \
-          "AIXray did not obtain one trustworthy decimal mindiff value or a proved absent assignment." \
-          "inspect the default mindiff attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy decimal mindiff value or a proved absent assignment." \
+          "inspect the default mindiff attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
           "cis-l1 ffiec:II.C.15"
       ;;
   esac
@@ -12942,13 +12549,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_minlen "Minimum password length" FAIL high \
           "$PW_MLN_OBSERVED" \
           "Accounts inheriting the default stanza may set passwords shorter than the CIS baseline of 14 characters." \
-          "after password-policy review, set the default minlen attribute with 'chsec -f /etc/security/user -s default -a minlen=14'; a minlen above 8 requires a non-crypt pwd_algorithm in /etc/security/login.cfg; AIXray only recommends these commands." \
+          "after password-policy review, set the default minlen attribute with 'chsec -f /etc/security/user -s default -a minlen=14'; a minlen above 8 requires a non-crypt pwd_algorithm in /etc/security/login.cfg; PTxray only recommends these commands." \
           "cis-l1"
       ;;
     *)
       add security pw_minlen "Minimum password length" NOT_ASSESSED high \
           "not assessed — minlen $PW_MLN_REASON" \
-          "AIXray did not obtain one trustworthy decimal minlen value or a proved absent assignment." \
+          "PTxray did not obtain one trustworthy decimal minlen value or a proved absent assignment." \
           "run 'lssec -f /etc/security/user -s default -a minlen' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13029,13 +12636,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_mindigit "Password digit requirement" FAIL high \
           "$PW_MDG_OBSERVED" \
           "Accounts inheriting the default stanza may set passwords containing no digit." \
-          "after password-policy review, set the default mindigit attribute with 'chsec -f /etc/security/user -s default -a mindigit=1'; AIXray only recommends this command." \
+          "after password-policy review, set the default mindigit attribute with 'chsec -f /etc/security/user -s default -a mindigit=1'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_mindigit "Password digit requirement" NOT_ASSESSED high \
           "not assessed — mindigit $PW_MDG_REASON" \
-          "AIXray did not obtain one trustworthy decimal mindigit value or a proved absent assignment." \
+          "PTxray did not obtain one trustworthy decimal mindigit value or a proved absent assignment." \
           "run 'lssec -f /etc/security/user -s default -a mindigit' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13116,13 +12723,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_minloweralpha "Password lower-case requirement" FAIL high \
           "$PW_MLA_OBSERVED" \
           "Accounts inheriting the default stanza may set passwords containing no lower-case letter." \
-          "after password-policy review, set the default minloweralpha attribute with 'chsec -f /etc/security/user -s default -a minloweralpha=1'; AIXray only recommends this command." \
+          "after password-policy review, set the default minloweralpha attribute with 'chsec -f /etc/security/user -s default -a minloweralpha=1'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_minloweralpha "Password lower-case requirement" NOT_ASSESSED high \
           "not assessed — minloweralpha $PW_MLA_REASON" \
-          "AIXray did not obtain one trustworthy decimal minloweralpha value or a proved absent assignment." \
+          "PTxray did not obtain one trustworthy decimal minloweralpha value or a proved absent assignment." \
           "run 'lssec -f /etc/security/user -s default -a minloweralpha' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13203,13 +12810,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_minupperalpha "Password upper-case requirement" FAIL high \
           "$PW_MUA_OBSERVED" \
           "Accounts inheriting the default stanza may set passwords containing no upper-case letter." \
-          "after password-policy review, set the default minupperalpha attribute with 'chsec -f /etc/security/user -s default -a minupperalpha=1'; AIXray only recommends this command." \
+          "after password-policy review, set the default minupperalpha attribute with 'chsec -f /etc/security/user -s default -a minupperalpha=1'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_minupperalpha "Password upper-case requirement" NOT_ASSESSED high \
           "not assessed — minupperalpha $PW_MUA_REASON" \
-          "AIXray did not obtain one trustworthy decimal minupperalpha value or a proved absent assignment." \
+          "PTxray did not obtain one trustworthy decimal minupperalpha value or a proved absent assignment." \
           "run 'lssec -f /etc/security/user -s default -a minupperalpha' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13290,13 +12897,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_minspecialchar "Password special-character requirement" FAIL high \
           "$PW_MSC_OBSERVED" \
           "Accounts inheriting the default stanza may set passwords containing no special character." \
-          "after password-policy review, set the default minspecialchar attribute with 'chsec -f /etc/security/user -s default -a minspecialchar=1'; AIXray only recommends this command." \
+          "after password-policy review, set the default minspecialchar attribute with 'chsec -f /etc/security/user -s default -a minspecialchar=1'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_minspecialchar "Password special-character requirement" NOT_ASSESSED high \
           "not assessed — minspecialchar $PW_MSC_REASON" \
-          "AIXray did not obtain one trustworthy decimal minspecialchar value or a proved absent assignment." \
+          "PTxray did not obtain one trustworthy decimal minspecialchar value or a proved absent assignment." \
           "run 'lssec -f /etc/security/user -s default -a minspecialchar' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13371,13 +12978,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_nocheck "Password rules bypass (NOCHECK)" FAIL high \
           "$PW_NCK_OBSERVED" \
           "Accounts flagged NOCHECK bypass every password restriction and are far easier to compromise." \
-          "after access-impact review, clear the flag per account with 'pwdadm -c <user>' and require a reset with 'pwdadm -f ADMCHG <user>'; AIXray only recommends these commands." \
+          "after access-impact review, clear the flag per account with 'pwdadm -c <user>' and require a reset with 'pwdadm -f ADMCHG <user>'; PTxray only recommends these commands." \
           "cis-l1"
       ;;
     *)
       add security pw_nocheck "Password rules bypass (NOCHECK)" NOT_ASSESSED high \
           "not assessed — NOCHECK scan $PW_NCK_REASON" \
-          "AIXray could not scan /etc/security/passwd stanza flags trustworthily." \
+          "PTxray could not scan /etc/security/passwd stanza flags trustworthily." \
           "verify /etc/security/passwd is readable as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13453,13 +13060,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_stored_hash "Legacy crypt password hashes" FAIL high \
           "$PW_SHH_OBSERVED" \
           "Accounts listed still store crypt-hashed passwords, which offer only 56-bit protection regardless of the configured pwd_algorithm." \
-          "confirm /etc/security/login.cfg pwd_algorithm is a strong algorithm (ssha512 recommended), then force a reset per account with 'pwdadm -c <user>' and 'pwdadm -f ADMCHG <user>' so a new hash is stored; AIXray only recommends these commands." \
+          "confirm /etc/security/login.cfg pwd_algorithm is a strong algorithm (ssha512 recommended), then force a reset per account with 'pwdadm -c <user>' and 'pwdadm -f ADMCHG <user>' so a new hash is stored; PTxray only recommends these commands." \
           "cis-l1"
       ;;
     *)
       add security pw_stored_hash "Legacy crypt password hashes" NOT_ASSESSED high \
           "not assessed — crypt-hash scan $PW_SHH_REASON" \
-          "AIXray could not scan /etc/security/passwd stored password hashes trustworthily." \
+          "PTxray could not scan /etc/security/passwd stored password hashes trustworthily." \
           "verify /etc/security/passwd is readable as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -13481,8 +13088,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$CORE_PC_RC" -ne 0 ]; then
     add security core_pathconf "Core file path and naming" NOT_ASSESSED med \
         "not assessed — lscore -d returned exit code $CORE_PC_RC" \
-        "AIXray did not obtain one trustworthy complete set of default core path and naming fields." \
-        "run 'lscore -d' with system authority, verify all four rows, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy complete set of default core path and naming fields." \
+        "run 'lscore -d' with system authority, verify all four rows, and rerun PTxray." \
         ""
   else
     # Parse the four required rows. Output format: OK<TAB>X<TAB>X<TAB>X<TAB>X
@@ -13543,8 +13150,8 @@ EOF
       BAD)
         add security core_pathconf "Core file path and naming" NOT_ASSESSED med \
             "not assessed — lscore -d output was unparseable (rc=0)" \
-            "AIXray did not obtain one trustworthy complete set of default core path and naming fields." \
-            "run 'lscore -d' with system authority, verify all four rows, and rerun AIXray." \
+            "PTxray did not obtain one trustworthy complete set of default core path and naming fields." \
+            "run 'lscore -d' with system authority, verify all four rows, and rerun PTxray." \
             ""
         ;;
       OK)
@@ -13553,14 +13160,14 @@ EOF
           add security core_pathconf "Core file path and naming" FAIL med \
               "path specification $_PC_PATH; corefile location $_PC_LOCATION; naming specification $_PC_NAMING" \
               "AIX process core files are not fully controlled by both a dedicated absolute path and unique naming, risking misplaced or overwritten diagnostic evidence." \
-              "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; AIXray only recommends this command." \
+              "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; PTxray only recommends this command." \
               ""
         elif [ "$_PC_LOCATION" = "default" ] || [ "$_PC_LOCATION" = "/" ] || \
              [ -z "$_PC_LOCATION" ]; then
           add security core_pathconf "Core file path and naming" FAIL med \
               "path specification $_PC_PATH; corefile location $_PC_LOCATION; naming specification $_PC_NAMING" \
               "AIX process core files are not fully controlled by both a dedicated absolute path and unique naming, risking misplaced or overwritten diagnostic evidence." \
-              "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; AIXray only recommends this command." \
+              "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; PTxray only recommends this command." \
               ""
         else
           case "$_PC_LOCATION" in
@@ -13576,7 +13183,7 @@ EOF
                 add security core_pathconf "Core file path and naming" FAIL med \
                     "path specification $_PC_PATH; corefile location $_PC_LOCATION; naming specification $_PC_NAMING" \
                     "AIX process core files are not fully controlled by both a dedicated absolute path and unique naming, risking misplaced or overwritten diagnostic evidence." \
-                    "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; AIXray only recommends this command." \
+                    "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; PTxray only recommends this command." \
                     ""
               fi
               ;;
@@ -13585,7 +13192,7 @@ EOF
               add security core_pathconf "Core file path and naming" FAIL med \
                   "path specification $_PC_PATH; corefile location $_PC_LOCATION; naming specification $_PC_NAMING" \
                   "AIX process core files are not fully controlled by both a dedicated absolute path and unique naming, risking misplaced or overwritten diagnostic evidence." \
-                  "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; AIXray only recommends this command." \
+                  "configure persistent system defaults with 'chcore -p on -l /approved/core/path -n on -d' after choosing and protecting an appropriately sized directory; PTxray only recommends this command." \
                   ""
               ;;
           esac
@@ -13600,8 +13207,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_LGT_REASON
   SSH_LGT_STATUS=NOT_ASSESSED
   SSH_LGT_OBSERVED=''
-  SSH_LGT_MEANING='AIXray did not obtain one trustworthy global effective LoginGraceTime value, so it cannot establish the pre-authentication deadline.'
-  SSH_LGT_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_LGT_MEANING='PTxray did not obtain one trustworthy global effective LoginGraceTime value, so it cannot establish the pre-authentication deadline.'
+  SSH_LGT_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_LGT_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -13650,7 +13257,7 @@ _AIXRAY_SESSION_KEYS=""
             SSH_LGT_STATUS=FAIL
             SSH_LGT_OBSERVED="LoginGraceTime $SSH_LGT_VALUE seconds"
             SSH_LGT_MEANING='The global effective SSH pre-authentication window is disabled or exceeds 60 seconds, leaving unauthenticated connections open too long.'
-            SSH_LGT_FIX="set 'LoginGraceTime 60' or a lower nonzero duration in sshd_config, validate the global effective seconds with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+            SSH_LGT_FIX="set 'LoginGraceTime 60' or a lower nonzero duration in sshd_config, validate the global effective seconds with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           fi
           ;;
       esac
@@ -13677,12 +13284,12 @@ _AIXRAY_SESSION_KEYS=""
         NOT_ASSESSED low \
         "not assessed — TMOUT/TIMEOUT capture failed (rc=$ST_RC)" \
         "Could not read TMOUT/TIMEOUT evidence from /etc/profile and /etc/environment, so idle-shell enforcement is unknown." \
-        "restore read access to /etc/profile and /etc/environment, then rerun AIXray." "cis-l1"
+        "restore read access to /etc/profile and /etc/environment, then rerun PTxray." "cis-l1"
   elif [ "$ST_RC" -eq 1 ]; then
     add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
         "no active TMOUT/TIMEOUT match (grep rc=1)" \
         "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-        "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun AIXray." "cis-l1"
+        "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun PTxray." "cis-l1"
   else
     # A leading comment is not evidence; a shell-style trailing comment is
     # removed before the numeric shape check. Because assignments are
@@ -13832,26 +13439,26 @@ _AIXRAY_SESSION_KEYS=""
       assignment_unset_conflict)
         add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
             "not assessed — TMOUT/TIMEOUT assignment conflicts with unset directive" \
-            "AIXray observed both an assignment and an unset directive, but concatenated grep output from two files does not establish effective shell precedence." \
-            "inspect active TMOUT/TIMEOUT directives in /etc/profile and /etc/environment, remove the conflict, and rerun AIXray." "cis-l1"
+            "PTxray observed both an assignment and an unset directive, but concatenated grep output from two files does not establish effective shell precedence." \
+            "inspect active TMOUT/TIMEOUT directives in /etc/profile and /etc/environment, remove the conflict, and rerun PTxray." "cis-l1"
         ;;
       value_conflict)
         add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
             "not assessed — conflicting TMOUT/TIMEOUT assignments (values: $ST_DETAIL)" \
-            "AIXray observed different timeout values, but concatenated grep output from two files does not establish which assignment is effective." \
-            "converge /etc/profile and /etc/environment on one bounded value from 1 through 900, then rerun AIXray." "cis-l1"
+            "PTxray observed different timeout values, but concatenated grep output from two files does not establish which assignment is effective." \
+            "converge /etc/profile and /etc/environment on one bounded value from 1 through 900, then rerun PTxray." "cis-l1"
         ;;
       invalid)
         add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
             "not assessed — TMOUT/TIMEOUT capture unparseable (rc=0)" \
-            "AIXray did not obtain one active numeric TMOUT/TIMEOUT assignment, so it cannot claim an idle-shell timeout is enforced." \
-            "inspect active TMOUT/TIMEOUT assignments in /etc/profile and /etc/environment, correct malformed or commented settings, and rerun AIXray." "cis-l1"
+            "PTxray did not obtain one active numeric TMOUT/TIMEOUT assignment, so it cannot claim an idle-shell timeout is enforced." \
+            "inspect active TMOUT/TIMEOUT assignments in /etc/profile and /etc/environment, correct malformed or commented settings, and rerun PTxray." "cis-l1"
         ;;
       empty)
         add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
             "no active TMOUT/TIMEOUT directive in successful capture (rc=0)" \
             "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-            "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun AIXray." "cis-l1"
+            "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun PTxray." "cis-l1"
         ;;
       unset)
         add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
@@ -13879,8 +13486,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset CA_STATUS CA_OBSERVED CA_MEANING CA_FIX CA_REASON CA_TOTAL
   CA_STATUS=NOT_ASSESSED
   CA_OBSERVED=''
-  CA_MEANING='AIXray did not obtain one trustworthy global effective ClientAlive policy, so it cannot establish an idle-session timeout.'
-  CA_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  CA_MEANING='PTxray did not obtain one trustworthy global effective ClientAlive policy, so it cannot establish an idle-session timeout.'
+  CA_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   CA_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -13928,7 +13535,7 @@ _AIXRAY_SESSION_KEYS=""
             CA_STATUS=FAIL
             CA_OBSERVED='ClientAliveInterval 0 (disabled)'
             CA_MEANING='ClientAliveInterval 0 disables idle-session timeout entirely — abandoned SSH sessions remain open indefinitely.'
-            CA_FIX="set global 'ClientAliveInterval' and 'ClientAliveCountMax' values whose effective timeout is 900 seconds or less, validate them with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+            CA_FIX="set global 'ClientAliveInterval' and 'ClientAliveCountMax' values whose effective timeout is 900 seconds or less, validate them with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           elif [ "${#CAI_VAL}" -le 3 ] && [ "$CAI_VAL" -le 900 ]; then
             CA_MAX_COUNT=$((900 / CAI_VAL - 1))
             if [ "${#CAM_VAL}" -le 3 ] &&
@@ -13942,13 +13549,13 @@ _AIXRAY_SESSION_KEYS=""
               CA_STATUS=WARN
               CA_OBSERVED="ClientAliveInterval $CAI_VAL, ClientAliveCountMax $CAM_VAL"
               CA_MEANING='The global effective ClientAlive values permit an idle timeout that exceeds the 900-second limit.'
-              CA_FIX="reduce global 'ClientAliveInterval' and/or 'ClientAliveCountMax', validate the result with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+              CA_FIX="reduce global 'ClientAliveInterval' and/or 'ClientAliveCountMax', validate the result with 'sshd -T', and restart sshd; PTxray only recommends these actions."
             fi
           else
             CA_STATUS=WARN
             CA_OBSERVED="ClientAliveInterval $CAI_VAL, ClientAliveCountMax $CAM_VAL"
             CA_MEANING='The global effective ClientAlive values permit an idle timeout that exceeds the 900-second limit.'
-            CA_FIX="reduce global 'ClientAliveInterval' and/or 'ClientAliveCountMax', validate the result with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+            CA_FIX="reduce global 'ClientAliveInterval' and/or 'ClientAliveCountMax', validate the result with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           fi
           ;;
       esac
@@ -13986,14 +13593,14 @@ _AIXRAY_SESSION_KEYS=""
       add security failed_logins "Failed login attempts" NOT_ASSESSED med \
           "not assessed — failed-login count capture failed (rc=$RC)" \
           "The failed-login log exists, but its streamed count did not complete successfully; zero cannot be inferred from failed evidence." \
-          "run 'who /etc/security/failedlogin | wc -l' manually, check that the log is readable, and rerun AIXray."
+          "run 'who /etc/security/failedlogin | wc -l' manually, check that the log is readable, and rerun PTxray."
     else
       case "$N" in
         ''|0*|*[!0-9]*)
           add security failed_logins "Failed login attempts" NOT_ASSESSED med \
               "not assessed — failed-login count capture was empty or invalid" \
               "The failed-login log exists, but its streamed count was not a valid positive integer; zero cannot be inferred from empty or invalid evidence." \
-              "run 'who /etc/security/failedlogin | wc -l' manually, check that the log is readable, and rerun AIXray."
+              "run 'who /etc/security/failedlogin | wc -l' manually, check that the log is readable, and rerun PTxray."
           ;;
         *)
           # /etc/security/failedlogin is never auto-trimmed, so a large lifetime total is
@@ -14075,8 +13682,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_H_REASON" ]; then
     add security login_herald "Login banner" NOT_ASSESSED med \
         "not assessed — herald $LOGIN_H_REASON" \
-        "AIXray did not obtain one trustworthy herald value." \
-        "inspect the default herald attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy herald value." \
+        "inspect the default herald attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1"
   elif [ "$LOGIN_H_STATUS" = "PASS" ]; then
     add security login_herald "Login banner" PASS med \
@@ -14187,8 +13794,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_LD_REASON" ]; then
     add security login_logindelay "Terminal login prompt delay" NOT_ASSESSED med \
         "not assessed — logindelay $LOGIN_LD_REASON" \
-        "AIXray did not obtain one trustworthy numeric logindelay value." \
-        "inspect the default logindelay attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric logindelay value." \
+        "inspect the default logindelay attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1"
   elif [ "$LOGIN_LD_STATUS" = "PASS" ]; then
     add security login_logindelay "Terminal login prompt delay" PASS med \
@@ -14298,8 +13905,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_RT_REASON" ]; then
     add security login_retries "Account login retry limit" NOT_ASSESSED med \
         "not assessed — loginretries $LOGIN_RT_REASON" \
-        "AIXray did not obtain one trustworthy numeric loginretries value." \
-        "inspect the default loginretries attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric loginretries value." \
+        "inspect the default loginretries attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1"
   elif [ "$LOGIN_RT_STATUS" = "PASS" ]; then
     add security login_retries "Account login retry limit" PASS med \
@@ -14413,8 +14020,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_TO_REASON" ]; then
     add security login_timeout "Login prompt timeout" NOT_ASSESSED med \
         "not assessed — logintimeout $LOGIN_TO_REASON" \
-        "AIXray did not obtain one trustworthy numeric logintimeout value." \
-        "inspect the usw logintimeout attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric logintimeout value." \
+        "inspect the usw logintimeout attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1"
   elif [ "$LOGIN_TO_STATUS" = "PASS" ]; then
     add security login_timeout "Login prompt timeout" PASS med \
@@ -14522,8 +14129,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_LD_REASON" ]; then
     add security login_logindisable "Terminal failed-login lock threshold" NOT_ASSESSED med \
         "not assessed — logindisable $LOGIN_LD_REASON" \
-        "AIXray did not obtain one trustworthy numeric logindisable value or a proved absent assignment." \
-        "inspect the default logindisable attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric logindisable value or a proved absent assignment." \
+        "inspect the default logindisable attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         ""
   elif [ "$LOGIN_LD_STATUS" = "PASS" ]; then
     add security login_logindisable "Terminal failed-login lock threshold" PASS med \
@@ -14534,7 +14141,7 @@ _AIXRAY_SESSION_KEYS=""
     add security login_logindisable "Terminal failed-login lock threshold" FAIL med \
         "$LOGIN_LD_FAILURE" \
         "An absent logindisable attribute assumes the documented AIX default 0; that default, an explicit disabled or invalid value, or a value above ten leaves the TTY port-lock threshold out of policy." \
-        "set the default logindisable attribute to a positive integer no greater than 10 after validating console availability; AIXray only recommends this change." \
+        "set the default logindisable attribute to a positive integer no greater than 10 after validating console availability; PTxray only recommends this change." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -14631,8 +14238,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_LI_REASON" ]; then
     add security login_logininterval "Terminal failed-login interval" NOT_ASSESSED med \
         "not assessed — logininterval $LOGIN_LI_REASON" \
-        "AIXray did not obtain one trustworthy numeric logininterval value or a proved absent assignment." \
-        "inspect the default logininterval attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric logininterval value or a proved absent assignment." \
+        "inspect the default logininterval attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         ""
   elif [ "$LOGIN_LI_STATUS" = "PASS" ]; then
     add security login_logininterval "Terminal failed-login interval" PASS med \
@@ -14643,7 +14250,7 @@ _AIXRAY_SESSION_KEYS=""
     add security login_logininterval "Terminal failed-login interval" FAIL med \
         "$LOGIN_LI_FAILURE" \
         "An absent logininterval attribute assumes the documented AIX default 0; that no-interval default, an explicit disabled or invalid value, or a value above 300 seconds leaves the TTY counting window out of policy." \
-        "set the default logininterval attribute to a positive integer no greater than 300 after validating console availability; AIXray only recommends this change." \
+        "set the default logininterval attribute to a positive integer no greater than 300 after validating console availability; PTxray only recommends this change." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -14735,8 +14342,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$LOGIN_LR_REASON" ]; then
     add security login_loginreenable "Terminal automatic re-enable delay" NOT_ASSESSED med \
         "not assessed — loginreenable $LOGIN_LR_REASON" \
-        "AIXray did not obtain one trustworthy numeric loginreenable value or a proved absent assignment." \
-        "inspect the default loginreenable attribute with lssec as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy numeric loginreenable value or a proved absent assignment." \
+        "inspect the default loginreenable attribute with lssec as root, correct capture ambiguity, and rerun PTxray." \
         ""
   elif [ "$LOGIN_LR_STATUS" = "PASS" ]; then
     add security login_loginreenable "Terminal automatic re-enable delay" PASS med \
@@ -14747,7 +14354,7 @@ _AIXRAY_SESSION_KEYS=""
     add security login_loginreenable "Terminal automatic re-enable delay" FAIL med \
         "$LOGIN_LR_FAILURE" \
         "The default TTY automatic re-enable setting does not contain the CIS-required positive delay of at least 360 minutes." \
-        "set the default loginreenable attribute to an integer of at least 360 after validating console recovery procedures; AIXray only recommends this change." \
+        "set the default loginreenable attribute to an integer of at least 360 after validating console recovery procedures; PTxray only recommends this change." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -14831,8 +14438,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$CIS_SERVICES_READY" -ne 1 ]; then
     add security writesrv "writesrv service" NOT_ASSESSED low \
         "not assessed - writesrv SRC inventory $CIS_SERVICES_REASON" \
-        "AIXray did not obtain one trustworthy complete SRC inventory." \
-        "make 'lssrc -a' return a complete readable inventory, then rerun AIXray." \
+        "PTxray did not obtain one trustworthy complete SRC inventory." \
+        "make 'lssrc -a' return a complete readable inventory, then rerun PTxray." \
         "cis-l1"
   else
     WRITESRV_MATCH=$(printf '%s\n' "$CIS_SERVICES_ROWS" | awk -F'|' '$1=="writesrv"{print $2}')
@@ -14840,8 +14447,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$WRITESRV_COUNT" -gt 1 ]; then
       add security writesrv "writesrv service" NOT_ASSESSED low \
           "not assessed - writesrv has duplicate SRC inventory rows" \
-          "AIXray obtained contradictory or duplicated evidence for the writesrv subsystem." \
-          "inspect 'lssrc -a' output for duplicate writesrv rows, then rerun AIXray." \
+          "PTxray obtained contradictory or duplicated evidence for the writesrv subsystem." \
+          "inspect 'lssrc -a' output for duplicate writesrv rows, then rerun PTxray." \
           "cis-l1"
     elif [ "$WRITESRV_COUNT" -eq 0 ]; then
       add security writesrv "writesrv service" PASS low \
@@ -14853,7 +14460,7 @@ _AIXRAY_SESSION_KEYS=""
         add security writesrv "writesrv service" FAIL high \
             "writesrv active in the SRC inventory" \
             "The writesrv subsystem is active and adds avoidable service exposure." \
-            "after service-owner approval, stop writesrv and disable its startup; AIXray only recommends these actions." \
+            "after service-owner approval, stop writesrv and disable its startup; PTxray only recommends these actions." \
             "cis-l1"
       else
         add security writesrv "writesrv service" PASS low \
@@ -14867,8 +14474,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${CIS_SERVICES_RC:-1}" -ne 0 ] || [ "$CIS_SERVICES_READY" -ne 1 ]; then
     add security dt "dt service" NOT_ASSESSED low \
         "not assessed - dt SRC inventory $CIS_SERVICES_REASON" \
-        "AIXray did not obtain one trustworthy complete SRC inventory." \
-        "make 'lssrc -a' return a complete readable inventory, then rerun AIXray." \
+        "PTxray did not obtain one trustworthy complete SRC inventory." \
+        "make 'lssrc -a' return a complete readable inventory, then rerun PTxray." \
         "cis-l1"
   else
     DT_MATCH=$(printf '%s\n' "$CIS_SERVICES_ROWS" | awk -F'|' '$1=="dt"{print $2}')
@@ -14876,15 +14483,15 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$DT_MATCH_RC" -ne 0 ]; then
       add security dt "dt service" NOT_ASSESSED low \
           "not assessed - dt SRC inventory filter failed (rc=$DT_MATCH_RC)" \
-          "AIXray could not safely filter the normalized SRC inventory." \
-          "make 'awk' available and rerun AIXray." "cis-l1"
+          "PTxray could not safely filter the normalized SRC inventory." \
+          "make 'awk' available and rerun PTxray." "cis-l1"
     else
       DT_COUNT=$(printf '%s\n' "$DT_MATCH" | awk 'NF{n++} END{print n+0}')
       if [ "$DT_COUNT" -gt 1 ]; then
         add security dt "dt service" NOT_ASSESSED low \
             "not assessed - dt has duplicate SRC inventory rows" \
-            "AIXray obtained contradictory or duplicated evidence for the dt subsystem." \
-            "inspect 'lssrc -a' output for duplicate dt rows, then rerun AIXray." \
+            "PTxray obtained contradictory or duplicated evidence for the dt subsystem." \
+            "inspect 'lssrc -a' output for duplicate dt rows, then rerun PTxray." \
             "cis-l1"
       elif [ "$DT_COUNT" -eq 0 ]; then
         add security dt "dt service" PASS low \
@@ -14896,7 +14503,7 @@ _AIXRAY_SESSION_KEYS=""
           add security dt "dt service" FAIL high \
               "dt active in the SRC inventory" \
               "The dt subsystem is active and adds avoidable service exposure." \
-              "after service-owner approval, stop dt and disable its startup; AIXray only recommends these actions." \
+              "after service-owner approval, stop dt and disable its startup; PTxray only recommends these actions." \
               "cis-l1"
         else
           add security dt "dt service" PASS low \
@@ -14911,23 +14518,23 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${CIS_SERVICES_RC:-1}" -ne 0 ] || [ "$CIS_SERVICES_READY" -ne 1 ]; then
     add security piobe "piobe service" NOT_ASSESSED low \
         "not assessed - piobe SRC inventory $CIS_SERVICES_REASON" \
-        "AIXray did not obtain one trustworthy complete SRC inventory." \
-        "make 'lssrc -a' return a complete readable inventory, then rerun AIXray." "cis-l1"
+        "PTxray did not obtain one trustworthy complete SRC inventory." \
+        "make 'lssrc -a' return a complete readable inventory, then rerun PTxray." "cis-l1"
   else
     PIOBE_MATCH=$(printf '%s\n' "$CIS_SERVICES_ROWS" | awk -F'|' '$1=="piobe"{print $2}')
     PIOBE_MATCH_RC=$?
     if [ "$PIOBE_MATCH_RC" -ne 0 ]; then
       add security piobe "piobe service" NOT_ASSESSED low \
           "not assessed - piobe SRC inventory filter failed (rc=$PIOBE_MATCH_RC)" \
-          "AIXray could not safely filter the normalized SRC inventory." \
-          "make 'awk' available and rerun AIXray." "cis-l1"
+          "PTxray could not safely filter the normalized SRC inventory." \
+          "make 'awk' available and rerun PTxray." "cis-l1"
     else
       PIOBE_COUNT=$(printf '%s\n' "$PIOBE_MATCH" | awk 'NF{n++} END{print n+0}')
       if [ "$PIOBE_COUNT" -gt 1 ]; then
         add security piobe "piobe service" NOT_ASSESSED low \
             "not assessed - piobe has duplicate SRC inventory rows" \
-            "AIXray obtained contradictory or duplicated evidence for the piobe subsystem." \
-            "inspect 'lssrc -a' output for duplicate piobe rows, then rerun AIXray." "cis-l1"
+            "PTxray obtained contradictory or duplicated evidence for the piobe subsystem." \
+            "inspect 'lssrc -a' output for duplicate piobe rows, then rerun PTxray." "cis-l1"
       elif [ "$PIOBE_COUNT" -eq 0 ]; then
         add security piobe "piobe service" PASS low \
             "piobe not defined in the complete SRC inventory" \
@@ -14938,7 +14545,7 @@ _AIXRAY_SESSION_KEYS=""
           add security piobe "piobe service" FAIL high \
               "piobe active in the SRC inventory" \
               "The piobe subsystem is active and adds avoidable service exposure." \
-              "after service-owner approval, stop piobe and disable its startup; AIXray only recommends these actions." "cis-l1"
+              "after service-owner approval, stop piobe and disable its startup; PTxray only recommends these actions." "cis-l1"
         else
           add security piobe "piobe service" PASS low \
               "piobe inoperative in the SRC inventory" \
@@ -14952,23 +14559,23 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${CIS_SERVICES_RC:-1}" -ne 0 ] || [ "$CIS_SERVICES_READY" -ne 1 ]; then
     add security qdaemon "qdaemon service" NOT_ASSESSED low \
         "not assessed - qdaemon SRC inventory $CIS_SERVICES_REASON" \
-        "AIXray did not obtain one trustworthy complete SRC inventory." \
-        "make 'lssrc -a' return a complete readable inventory, then rerun AIXray." "cis-l1"
+        "PTxray did not obtain one trustworthy complete SRC inventory." \
+        "make 'lssrc -a' return a complete readable inventory, then rerun PTxray." "cis-l1"
   else
     QDAEMON_MATCH=$(printf '%s\n' "$CIS_SERVICES_ROWS" | awk -F'|' '$1=="qdaemon"{print $2}')
     QDAEMON_MATCH_RC=$?
     if [ "$QDAEMON_MATCH_RC" -ne 0 ]; then
       add security qdaemon "qdaemon service" NOT_ASSESSED low \
           "not assessed - qdaemon SRC inventory filter failed (rc=$QDAEMON_MATCH_RC)" \
-          "AIXray could not safely filter the normalized SRC inventory." \
-          "make 'awk' available and rerun AIXray." "cis-l1"
+          "PTxray could not safely filter the normalized SRC inventory." \
+          "make 'awk' available and rerun PTxray." "cis-l1"
     else
       QDAEMON_COUNT=$(printf '%s\n' "$QDAEMON_MATCH" | awk 'NF{n++} END{print n+0}')
       if [ "$QDAEMON_COUNT" -gt 1 ]; then
         add security qdaemon "qdaemon service" NOT_ASSESSED low \
             "not assessed - qdaemon has duplicate SRC inventory rows" \
-            "AIXray obtained contradictory or duplicated evidence for the qdaemon subsystem." \
-            "inspect 'lssrc -a' output for duplicate qdaemon rows, then rerun AIXray." "cis-l1"
+            "PTxray obtained contradictory or duplicated evidence for the qdaemon subsystem." \
+            "inspect 'lssrc -a' output for duplicate qdaemon rows, then rerun PTxray." "cis-l1"
       elif [ "$QDAEMON_COUNT" -eq 0 ]; then
         add security qdaemon "qdaemon service" PASS low \
             "qdaemon not defined in the complete SRC inventory" \
@@ -14979,7 +14586,7 @@ _AIXRAY_SESSION_KEYS=""
           add security qdaemon "qdaemon service" FAIL high \
               "qdaemon active in the SRC inventory" \
               "The qdaemon subsystem is active and adds avoidable service exposure." \
-              "after service-owner approval, stop qdaemon and disable its startup; AIXray only recommends these actions." "cis-l1"
+              "after service-owner approval, stop qdaemon and disable its startup; PTxray only recommends these actions." "cis-l1"
         else
           add security qdaemon "qdaemon service" PASS low \
               "qdaemon inoperative in the SRC inventory" \
@@ -15058,8 +14665,8 @@ _AIXRAY_SESSION_KEYS=""
     SNAPP_STATUS=NOT_ASSESSED
     SNAPP_SEVERITY=low
     SNAPP_OBSERVED="not assessed - lslpp -qcL $CIS_PACKAGE_REASON"
-    SNAPP_MEANING="AIXray did not obtain a trustworthy installed-fileset inventory."
-    SNAPP_FIX="make 'lslpp -qcL' return a complete readable inventory, then rerun AIXray."
+    SNAPP_MEANING="PTxray did not obtain a trustworthy installed-fileset inventory."
+    SNAPP_FIX="make 'lslpp -qcL' return a complete readable inventory, then rerun PTxray."
   else
     SNAPP_MATCH_COUNT=$(printf '%s\n' "$CIS_PACKAGE_ROWS" |
       awk '$0=="bos.net.snapp"{n++} END{print n+0}')
@@ -15068,20 +14675,20 @@ _AIXRAY_SESSION_KEYS=""
       SNAPP_STATUS=NOT_ASSESSED
       SNAPP_SEVERITY=low
       SNAPP_OBSERVED="not assessed - snapp inventory filter failed (rc=$SNAPP_MATCH_RC)"
-      SNAPP_MEANING="AIXray could not safely filter the normalized installed-fileset inventory."
-      SNAPP_FIX="make 'awk' available and rerun AIXray."
+      SNAPP_MEANING="PTxray could not safely filter the normalized installed-fileset inventory."
+      SNAPP_FIX="make 'awk' available and rerun PTxray."
     elif [ "$SNAPP_MATCH_COUNT" -gt 0 ]; then
       SNAPP_STATUS=FAIL
       SNAPP_SEVERITY=high
       SNAPP_OBSERVED="bos.net.snapp installed ($SNAPP_MATCH_COUNT inventory row(s))"
       SNAPP_MEANING="The snapp fileset is present on this system."
-      SNAPP_FIX="after application-owner approval, remove the unused snapp fileset; AIXray only recommends this action."
+      SNAPP_FIX="after application-owner approval, remove the unused snapp fileset; PTxray only recommends this action."
     elif [ "$CIS_PACKAGE_CLEAN" -ne 1 ]; then
       SNAPP_STATUS=NOT_ASSESSED
       SNAPP_SEVERITY=low
       SNAPP_OBSERVED="not assessed - lslpp -qcL $CIS_PACKAGE_REASON"
       SNAPP_MEANING="Malformed inventory rows prevent a trustworthy absence result."
-      SNAPP_FIX="capture complete, parseable 'lslpp -qcL' output and rerun AIXray."
+      SNAPP_FIX="capture complete, parseable 'lslpp -qcL' output and rerun PTxray."
     else
       SNAPP_STATUS=PASS
       SNAPP_SEVERITY=low
@@ -15101,8 +14708,8 @@ _AIXRAY_SESSION_KEYS=""
     NIM_MASTER_STATUS=NOT_ASSESSED
     NIM_MASTER_SEVERITY=low
     NIM_MASTER_OBSERVED="not assessed - lslpp -qcL $CIS_PACKAGE_REASON"
-    NIM_MASTER_MEANING="AIXray did not obtain a trustworthy installed-fileset inventory."
-    NIM_MASTER_FIX="make 'lslpp -qcL' return a complete readable inventory, then rerun AIXray."
+    NIM_MASTER_MEANING="PTxray did not obtain a trustworthy installed-fileset inventory."
+    NIM_MASTER_FIX="make 'lslpp -qcL' return a complete readable inventory, then rerun PTxray."
   else
     NIM_MASTER_MATCH_COUNT=$(printf '%s\n' "$CIS_PACKAGE_ROWS" |
       awk '$0=="bos.sysmgt.nim.master"{n++} END{print n+0}')
@@ -15111,20 +14718,20 @@ _AIXRAY_SESSION_KEYS=""
       NIM_MASTER_STATUS=NOT_ASSESSED
       NIM_MASTER_SEVERITY=low
       NIM_MASTER_OBSERVED="not assessed - NIM master inventory filter failed (rc=$NIM_MASTER_MATCH_RC)"
-      NIM_MASTER_MEANING="AIXray could not safely filter the normalized installed-fileset inventory."
-      NIM_MASTER_FIX="make 'awk' available and rerun AIXray."
+      NIM_MASTER_MEANING="PTxray could not safely filter the normalized installed-fileset inventory."
+      NIM_MASTER_FIX="make 'awk' available and rerun PTxray."
     elif [ "$NIM_MASTER_MATCH_COUNT" -gt 0 ]; then
       NIM_MASTER_STATUS=FAIL
       NIM_MASTER_SEVERITY=high
       NIM_MASTER_OBSERVED="bos.sysmgt.nim.master installed ($NIM_MASTER_MATCH_COUNT inventory row(s))"
       NIM_MASTER_MEANING="The NIM master fileset is present on this system."
-      NIM_MASTER_FIX="after infrastructure-owner approval, migrate any required NIM master role and remove the unused master fileset; AIXray only recommends these actions."
+      NIM_MASTER_FIX="after infrastructure-owner approval, migrate any required NIM master role and remove the unused master fileset; PTxray only recommends these actions."
     elif [ "$CIS_PACKAGE_CLEAN" -ne 1 ]; then
       NIM_MASTER_STATUS=NOT_ASSESSED
       NIM_MASTER_SEVERITY=low
       NIM_MASTER_OBSERVED="not assessed - lslpp -qcL $CIS_PACKAGE_REASON"
       NIM_MASTER_MEANING="Malformed inventory rows prevent a trustworthy absence result."
-      NIM_MASTER_FIX="capture complete, parseable 'lslpp -qcL' output and rerun AIXray."
+      NIM_MASTER_FIX="capture complete, parseable 'lslpp -qcL' output and rerun PTxray."
     else
       NIM_MASTER_STATUS=PASS
       NIM_MASTER_SEVERITY=low
@@ -15222,7 +14829,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_DHCPCD_SEV=high
     RT_DHCPCD_OBS="dhcp client (dhcpcd/dhcpcd6) $RT_DHCPCD_DETAIL"
     RT_DHCPCD_MEAN="A dhcp client daemon is in use; a statically addressed server should not accept dynamic address configuration."
-    RT_DHCPCD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcpcd', 'chrctcp -d dhcpcd6') and stop the subsystem ('stopsrc -s dhcpcd', 'stopsrc -s dhcpcd6'); AIXray only recommends these actions."
+    RT_DHCPCD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcpcd', 'chrctcp -d dhcpcd6') and stop the subsystem ('stopsrc -s dhcpcd', 'stopsrc -s dhcpcd6'); PTxray only recommends these actions."
   elif [ "$RT_DHCPCD_BOOT" = unknown ] || [ "$RT_DHCPCD_SRC" = unknown ] || [ "$RT_DHCPCD_SRC" = duplicate ]; then
     RT_DHCPCD_STATUS=NOT_ASSESSED
     RT_DHCPCD_SEV=low
@@ -15233,8 +14840,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_DHCPCD_OBS="not assessed - dhcpcd SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_DHCPCD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_DHCPCD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_DHCPCD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_DHCPCD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_DHCPCD_STATUS=PASS
     RT_DHCPCD_SEV=low
@@ -15295,7 +14902,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_DHCPRD_SEV=high
     RT_DHCPRD_OBS="dhcprd $RT_DHCPRD_DETAIL"
     RT_DHCPRD_MEAN="The dhcprd relay daemon forwards BOOTP/DHCP broadcasts and should not run on a server that is not a DHCP relay."
-    RT_DHCPRD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcprd') and stop the subsystem ('stopsrc -s dhcprd'); AIXray only recommends these actions."
+    RT_DHCPRD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcprd') and stop the subsystem ('stopsrc -s dhcprd'); PTxray only recommends these actions."
   elif [ "$RT_DHCPRD_BOOT" = unknown ] || [ "$RT_DHCPRD_SRC" = unknown ] || [ "$RT_DHCPRD_SRC" = duplicate ]; then
     RT_DHCPRD_STATUS=NOT_ASSESSED
     RT_DHCPRD_SEV=low
@@ -15306,8 +14913,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_DHCPRD_OBS="not assessed - dhcprd SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_DHCPRD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_DHCPRD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_DHCPRD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_DHCPRD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_DHCPRD_STATUS=PASS
     RT_DHCPRD_SEV=low
@@ -15368,7 +14975,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_DHCPSD_SEV=high
     RT_DHCPSD_OBS="dhcpsd $RT_DHCPSD_DETAIL"
     RT_DHCPSD_MEAN="The dhcpsd daemon serves DHCP addresses and configuration and should not run on a server that is not a DHCP server."
-    RT_DHCPSD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcpsd') and stop the subsystem ('stopsrc -s dhcpsd'); AIXray only recommends these actions."
+    RT_DHCPSD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d dhcpsd') and stop the subsystem ('stopsrc -s dhcpsd'); PTxray only recommends these actions."
   elif [ "$RT_DHCPSD_BOOT" = unknown ] || [ "$RT_DHCPSD_SRC" = unknown ] || [ "$RT_DHCPSD_SRC" = duplicate ]; then
     RT_DHCPSD_STATUS=NOT_ASSESSED
     RT_DHCPSD_SEV=low
@@ -15379,8 +14986,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_DHCPSD_OBS="not assessed - dhcpsd SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_DHCPSD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_DHCPSD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_DHCPSD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_DHCPSD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_DHCPSD_STATUS=PASS
     RT_DHCPSD_SEV=low
@@ -15441,7 +15048,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_GATED_SEV=high
     RT_GATED_OBS="gated $RT_GATED_DETAIL"
     RT_GATED_MEAN="The gated daemon provides legacy RIP/OSPF/BGP gateway routing and should not run on a server that is not a network router."
-    RT_GATED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d gated') and stop the subsystem ('stopsrc -s gated'); AIXray only recommends these actions."
+    RT_GATED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d gated') and stop the subsystem ('stopsrc -s gated'); PTxray only recommends these actions."
   elif [ "$RT_GATED_BOOT" = unknown ] || [ "$RT_GATED_SRC" = unknown ] || [ "$RT_GATED_SRC" = duplicate ]; then
     RT_GATED_STATUS=NOT_ASSESSED
     RT_GATED_SEV=low
@@ -15452,8 +15059,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_GATED_OBS="not assessed - gated SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_GATED_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_GATED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_GATED_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_GATED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_GATED_STATUS=PASS
     RT_GATED_SEV=low
@@ -15514,7 +15121,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_HOSTMIBD_SEV=high
     RT_HOSTMIBD_OBS="hostmibd $RT_HOSTMIBD_DETAIL"
     RT_HOSTMIBD_MEAN="The hostmibd dpi2 SNMP sub-agent serves RFC 2790 MIB variables and adds avoidable exposure where SNMP is not required."
-    RT_HOSTMIBD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d hostmibd') and stop the subsystem ('stopsrc -s hostmibd'); AIXray only recommends these actions."
+    RT_HOSTMIBD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d hostmibd') and stop the subsystem ('stopsrc -s hostmibd'); PTxray only recommends these actions."
   elif [ "$RT_HOSTMIBD_BOOT" = unknown ] || [ "$RT_HOSTMIBD_SRC" = unknown ] || [ "$RT_HOSTMIBD_SRC" = duplicate ]; then
     RT_HOSTMIBD_STATUS=NOT_ASSESSED
     RT_HOSTMIBD_SEV=low
@@ -15525,8 +15132,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_HOSTMIBD_OBS="not assessed - hostmibd SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_HOSTMIBD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_HOSTMIBD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_HOSTMIBD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_HOSTMIBD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_HOSTMIBD_STATUS=PASS
     RT_HOSTMIBD_SEV=low
@@ -15587,7 +15194,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_INETD_SEV=med
     RT_INETD_OBS="inetd $RT_INETD_DETAIL - CIS permits inetd only while a required inetd service remains"
     RT_INETD_MEAN="The inetd super-daemon is in use. CIS requires it disabled only when no inetd-managed service is required, so this needs operator review; individual inetd services are assessed separately."
-    RT_INETD_FIX="review the active inetd services ('lssrc -ls inetd'); if none is required, disable with 'chrctcp -d inetd' and 'stopsrc -s inetd'; AIXray only recommends these actions."
+    RT_INETD_FIX="review the active inetd services ('lssrc -ls inetd'); if none is required, disable with 'chrctcp -d inetd' and 'stopsrc -s inetd'; PTxray only recommends these actions."
   elif [ "$RT_INETD_BOOT" = unknown ] || [ "$RT_INETD_SRC" = unknown ] || [ "$RT_INETD_SRC" = duplicate ]; then
     RT_INETD_STATUS=NOT_ASSESSED
     RT_INETD_SEV=low
@@ -15598,8 +15205,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_INETD_OBS="not assessed - inetd SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_INETD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_INETD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_INETD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_INETD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_INETD_STATUS=PASS
     RT_INETD_SEV=low
@@ -15660,7 +15267,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_NAMED_SEV=high
     RT_NAMED_OBS="named $RT_NAMED_DETAIL"
     RT_NAMED_MEAN="The named daemon answers DNS for clients and should not run on a server that is not a designated DNS server."
-    RT_NAMED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d named') and stop the subsystem ('stopsrc -s named'); AIXray only recommends these actions."
+    RT_NAMED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d named') and stop the subsystem ('stopsrc -s named'); PTxray only recommends these actions."
   elif [ "$RT_NAMED_BOOT" = unknown ] || [ "$RT_NAMED_SRC" = unknown ] || [ "$RT_NAMED_SRC" = duplicate ]; then
     RT_NAMED_STATUS=NOT_ASSESSED
     RT_NAMED_SEV=low
@@ -15671,8 +15278,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_NAMED_OBS="not assessed - named SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_NAMED_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_NAMED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_NAMED_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_NAMED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_NAMED_STATUS=PASS
     RT_NAMED_SEV=low
@@ -15733,7 +15340,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_PORTMAP_SEV=med
     RT_PORTMAP_OBS="portmap $RT_PORTMAP_DETAIL - CIS permits portmap only where RPC is required"
     RT_PORTMAP_MEAN="The portmap RPC mapper is in use. CIS permits it only where RPC is required (NFS server, NIS, CDE, or RPC-dependent software), so this needs operator review."
-    RT_PORTMAP_FIX="review registered RPC services ('rpcinfo -p localhost'); if none is required, disable with 'chrctcp -d portmap' and 'stopsrc -s portmap'; AIXray only recommends these actions."
+    RT_PORTMAP_FIX="review registered RPC services ('rpcinfo -p localhost'); if none is required, disable with 'chrctcp -d portmap' and 'stopsrc -s portmap'; PTxray only recommends these actions."
   elif [ "$RT_PORTMAP_BOOT" = unknown ] || [ "$RT_PORTMAP_SRC" = unknown ] || [ "$RT_PORTMAP_SRC" = duplicate ]; then
     RT_PORTMAP_STATUS=NOT_ASSESSED
     RT_PORTMAP_SEV=low
@@ -15744,8 +15351,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_PORTMAP_OBS="not assessed - portmap SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_PORTMAP_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_PORTMAP_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_PORTMAP_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_PORTMAP_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_PORTMAP_STATUS=PASS
     RT_PORTMAP_SEV=low
@@ -15806,7 +15413,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_ROUTED_SEV=high
     RT_ROUTED_OBS="routed $RT_ROUTED_DETAIL"
     RT_ROUTED_MEAN="The routed daemon manages kernel routing tables over the obsolete RIP1 protocol and should not run on a non-router."
-    RT_ROUTED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d routed') and stop the subsystem ('stopsrc -s routed'); AIXray only recommends these actions."
+    RT_ROUTED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d routed') and stop the subsystem ('stopsrc -s routed'); PTxray only recommends these actions."
   elif [ "$RT_ROUTED_BOOT" = unknown ] || [ "$RT_ROUTED_SRC" = unknown ] || [ "$RT_ROUTED_SRC" = duplicate ]; then
     RT_ROUTED_STATUS=NOT_ASSESSED
     RT_ROUTED_SEV=low
@@ -15817,8 +15424,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_ROUTED_OBS="not assessed - routed SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_ROUTED_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_ROUTED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_ROUTED_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_ROUTED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_ROUTED_STATUS=PASS
     RT_ROUTED_SEV=low
@@ -15879,7 +15486,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_RWHOD_SEV=high
     RT_RWHOD_OBS="rwhod $RT_RWHOD_DETAIL"
     RT_RWHOD_MEAN="The rwhod daemon broadcasts remote-WHO status to the network and is rarely required."
-    RT_RWHOD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d rwhod') and stop the subsystem ('stopsrc -s rwhod'); AIXray only recommends these actions."
+    RT_RWHOD_FIX="after service-owner approval, disable the boot entry ('chrctcp -d rwhod') and stop the subsystem ('stopsrc -s rwhod'); PTxray only recommends these actions."
   elif [ "$RT_RWHOD_BOOT" = unknown ] || [ "$RT_RWHOD_SRC" = unknown ] || [ "$RT_RWHOD_SRC" = duplicate ]; then
     RT_RWHOD_STATUS=NOT_ASSESSED
     RT_RWHOD_SEV=low
@@ -15890,8 +15497,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_RWHOD_OBS="not assessed - rwhod SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_RWHOD_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_RWHOD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_RWHOD_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_RWHOD_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_RWHOD_STATUS=PASS
     RT_RWHOD_SEV=low
@@ -15954,7 +15561,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_SENDMAIL_SEV=high
     RT_SENDMAIL_OBS="sendmail $RT_SENDMAIL_DETAIL" # network-lint: allow -- prose finding text, no network call
     RT_SENDMAIL_MEAN="The sendmail daemon is listening as a mail server; it has a long vulnerability history and should be disabled on non-mail servers." # network-lint: allow -- prose finding text, no network call
-    RT_SENDMAIL_FIX="after service-owner approval, disable the boot entry ('chrctcp -d sendmail') and stop the subsystem ('stopsrc -s sendmail'); AIXray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+    RT_SENDMAIL_FIX="after service-owner approval, disable the boot entry ('chrctcp -d sendmail') and stop the subsystem ('stopsrc -s sendmail'); PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
   elif [ "$RT_SENDMAIL_BOOT" = unknown ] || [ "$RT_SENDMAIL_SRC" = unknown ] || [ "$RT_SENDMAIL_SRC" = duplicate ]; then
     RT_SENDMAIL_STATUS=NOT_ASSESSED
     RT_SENDMAIL_SEV=low
@@ -15965,8 +15572,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_SENDMAIL_OBS="not assessed - sendmail SRC inventory $CIS_SERVICES_REASON" # network-lint: allow -- prose finding text, no network call
     fi
-    RT_SENDMAIL_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_SENDMAIL_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_SENDMAIL_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_SENDMAIL_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_SENDMAIL_STATUS=PASS
     RT_SENDMAIL_SEV=low
@@ -16028,7 +15635,7 @@ _AIXRAY_SESSION_KEYS=""
     RT_TIMED_SEV=high
     RT_TIMED_OBS="timed $RT_TIMED_DETAIL"
     RT_TIMED_MEAN="The timed daemon implements the obsolete UNIX time service, replaced by NTP."
-    RT_TIMED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d timed') and stop the subsystem ('stopsrc -s timed'); AIXray only recommends these actions."
+    RT_TIMED_FIX="after service-owner approval, disable the boot entry ('chrctcp -d timed') and stop the subsystem ('stopsrc -s timed'); PTxray only recommends these actions."
   elif [ "$RT_TIMED_BOOT" = unknown ] || [ "$RT_TIMED_SRC" = unknown ] || [ "$RT_TIMED_SRC" = duplicate ]; then
     RT_TIMED_STATUS=NOT_ASSESSED
     RT_TIMED_SEV=low
@@ -16039,8 +15646,8 @@ _AIXRAY_SESSION_KEYS=""
     else
       RT_TIMED_OBS="not assessed - timed SRC inventory $CIS_SERVICES_REASON"
     fi
-    RT_TIMED_MEAN="AIXray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
-    RT_TIMED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun AIXray."
+    RT_TIMED_MEAN="PTxray did not obtain trustworthy service evidence from both /etc/rc.tcpip and the SRC inventory."
+    RT_TIMED_FIX="make /etc/rc.tcpip readable and 'lssrc -a' return one complete inventory, then rerun PTxray."
   else
     RT_TIMED_STATUS=PASS
     RT_TIMED_SEV=low
@@ -16082,12 +15689,12 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_client_mounts_disabled "NFS client mount configuration" NOT_ASSESSED high \
           "not assessed - /etc/filesystems read failed (exit=$NCM_RC)" \
           "The file exists but its NFS client mount configuration could not be read." \
-          "restore read access to /etc/filesystems and rerun AIXray." "cis-l1"
+          "restore read access to /etc/filesystems and rerun PTxray." "cis-l1"
     else
       add security nfs_client_mounts_disabled "NFS client mount configuration" NOT_ASSESSED high \
           "not assessed - /etc/filesystems existence and read state could not be established (existence exit=$NCM_EXISTS_RC; read exit=$NCM_RC)" \
-          "AIXray could not distinguish an absent file from unreadable configuration." \
-          "verify that /etc/filesystems exists and is readable, then rerun AIXray." "cis-l1"
+          "PTxray could not distinguish an absent file from unreadable configuration." \
+          "verify that /etc/filesystems exists and is readable, then rerun PTxray." "cis-l1"
     fi
   else
     NCM_PARSE=$(printf '%s\n' "$NCM_RAW" | awk '
@@ -16140,7 +15747,7 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_client_mounts_disabled "NFS client mount configuration" NOT_ASSESSED high \
           "not assessed - /etc/filesystems contained unparseable non-comment evidence" \
           "The complete configured mount set could not be classified safely." \
-          "inspect malformed or conflicting /etc/filesystems stanzas and rerun AIXray." "cis-l1"
+          "inspect malformed or conflicting /etc/filesystems stanzas and rerun PTxray." "cis-l1"
     else
       NCM_PATHS=$(printf '%s\n' "$NCM_PARSE" | awk -F '\t' '$1=="NFS"{print $2}')
       NCM_COUNT=$(printf '%s\n' "$NCM_PATHS" | awk 'NF{n++} END{print n+0}')
@@ -16150,7 +15757,7 @@ _AIXRAY_SESSION_KEYS=""
         add security nfs_client_mounts_disabled "NFS client mount configuration" FAIL high \
             "$NCM_OBS" \
             "One or more NFS client mount definitions remain configured." \
-            "remove unneeded NFS client stanzas from /etc/filesystems through the approved change process, then rerun AIXray." "cis-l1"
+            "remove unneeded NFS client stanzas from /etc/filesystems through the approved change process, then rerun PTxray." "cis-l1"
       else
         add security nfs_client_mounts_disabled "NFS client mount configuration" PASS high \
             "no NFS client mounts configured in /etc/filesystems" \
@@ -16178,12 +15785,12 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_client_mount_options "NFS client mount options" NOT_ASSESSED high \
           "not assessed - /etc/filesystems read failed (exit=$NCO_RC)" \
           "The file exists but its NFS client mount options could not be read." \
-          "restore read access to /etc/filesystems and rerun AIXray." "cis-l1"
+          "restore read access to /etc/filesystems and rerun PTxray." "cis-l1"
     else
       add security nfs_client_mount_options "NFS client mount options" NOT_ASSESSED high \
           "not assessed - /etc/filesystems existence and read state could not be established (existence exit=$NCO_EXISTS_RC; read exit=$NCO_RC)" \
-          "AIXray could not distinguish an absent file from unreadable configuration." \
-          "verify that /etc/filesystems exists and is readable, then rerun AIXray." "cis-l1"
+          "PTxray could not distinguish an absent file from unreadable configuration." \
+          "verify that /etc/filesystems exists and is readable, then rerun PTxray." "cis-l1"
     fi
   else
     NCO_PARSE=$(printf '%s\n' "$NCO_RAW" | awk '
@@ -16256,7 +15863,7 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_client_mount_options "NFS client mount options" NOT_ASSESSED high \
           "not assessed - /etc/filesystems contained unparseable non-comment evidence" \
           "The complete NFS client option set could not be classified safely." \
-          "inspect malformed or conflicting /etc/filesystems stanzas and rerun AIXray." "cis-l1"
+          "inspect malformed or conflicting /etc/filesystems stanzas and rerun PTxray." "cis-l1"
     else
       NCO_TOTAL=$(printf '%s\n' "$NCO_PARSE" | awk -F '\t' '$1=="PASS" || $1=="FAIL"{n++} END{print n+0}')
       NCO_FAIL_COUNT=$(printf '%s\n' "$NCO_PARSE" | awk -F '\t' '$1=="FAIL"{n++} END{print n+0}')
@@ -16268,7 +15875,7 @@ _AIXRAY_SESSION_KEYS=""
         add security nfs_client_mount_options "NFS client mount options" FAIL high \
             "$NCO_OBS" \
             "One or more configured NFS client mounts allow device files or set-ID semantics." \
-            "add both nosuid and nodev to every NFS client stanza through the approved change process, then rerun AIXray." "cis-l1"
+            "add both nosuid and nodev to every NFS client stanza through the approved change process, then rerun PTxray." "cis-l1"
       elif [ "$NCO_TOTAL" -eq 0 ]; then
         add security nfs_client_mount_options "NFS client mount options" PASS high \
             "no NFS client mounts configured in /etc/filesystems" \
@@ -16307,12 +15914,12 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_localhost_aliases "NFS localhost aliases" NOT_ASSESSED high \
           "not assessed — /etc/exports read failed (rc=$NFS_LA_CONFIG_RC)" \
           "The existing export configuration is unreadable, so the absence of localhost aliases could not be assessed." \
-          "restore read access to /etc/exports and re-run AIXray." "cis-l1"
+          "restore read access to /etc/exports and re-run PTxray." "cis-l1"
     else
       add security nfs_localhost_aliases "NFS localhost aliases" NOT_ASSESSED high \
           "not assessed — /etc/exports existence and read state could not be established (existence rc=$NFS_LA_CONFIG_EXISTS_RC; read rc=$NFS_LA_CONFIG_RC)" \
-          "AIXray could not distinguish an absent file from unreadable configuration." \
-          "verify that /etc/exports exists and is readable, then re-run AIXray." "cis-l1"
+          "PTxray could not distinguish an absent file from unreadable configuration." \
+          "verify that /etc/exports exists and is readable, then re-run PTxray." "cis-l1"
     fi
   else
     # Extract uncommented lines and scan for localhost aliases (localhost, 127.0.0.1, ::1)
@@ -16446,7 +16053,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_BOOTPS_STATUS=FAIL
         ID_BOOTPS_OBSERVED="bootps active in /etc/inetd.conf"
         ID_BOOTPS_MEANING="The legacy bootps service is exposed through inetd and adds avoidable remote attack surface."
-        ID_BOOTPS_FIX="after service-owner approval, comment the exact bootps definition and refresh inetd; AIXray only recommends these actions."
+        ID_BOOTPS_FIX="after service-owner approval, comment the exact bootps definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_BOOTPS_STATUS=NOT_ASSESSED
         case "$ID_BOOTPS_PARSED" in
@@ -16457,8 +16064,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_BOOTPS_OBSERVED="not assessed - bootps inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_BOOTPS_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_BOOTPS_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -16470,15 +16077,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_BOOTPS_STATUS=NOT_ASSESSED
         ID_BOOTPS_OBSERVED="not assessed - bootps inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_BOOTPS_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_BOOTPS_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_BOOTPS_STATUS=NOT_ASSESSED
       ID_BOOTPS_OBSERVED="not assessed - bootps inetd probe grep failed (rc=$ID_BOOTPS_RC)"
-      ID_BOOTPS_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_BOOTPS_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_BOOTPS_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -16544,17 +16151,17 @@ _AIXRAY_SESSION_KEYS=""
         IC_STATUS=FAIL
         IC_OBSERVED="chargen active in /etc/inetd.conf"
         IC_MEANING="This legacy inetd service adds avoidable remote attack surface."
-        IC_FIX="after service-owner approval, comment the exact chargen line and refresh inetd; AIXray only recommends these actions."
+        IC_FIX="after service-owner approval, comment the exact chargen line and refresh inetd; PTxray only recommends these actions."
       elif [ "$IC_MATCH" = "non-chargen-first" ]; then
         IC_STATUS=NOT_ASSESSED
         IC_OBSERVED="not assessed - chargen inetd probe captured output contains non-chargen-first rows"
-        IC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        IC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       else
         IC_STATUS=NOT_ASSESSED
         IC_OBSERVED="not assessed - chargen inetd probe rc=0 but output was empty after grep"
-        IC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        IC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -16567,15 +16174,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         IC_STATUS=NOT_ASSESSED
         IC_OBSERVED="not assessed - chargen inetd probe rc=1 but output was non-empty (contradictory)"
-        IC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        IC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       IC_STATUS=NOT_ASSESSED
       IC_OBSERVED="not assessed - chargen inetd probe grep failed (rc=$IC_RC)"
-      IC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      IC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      IC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -16660,7 +16267,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_COMSAT_STATUS=FAIL
         ID_COMSAT_OBSERVED="comsat active in /etc/inetd.conf"
         ID_COMSAT_MEANING="The legacy comsat service is exposed through inetd and adds avoidable remote attack surface."
-        ID_COMSAT_FIX="after service-owner approval, comment the exact comsat definition and refresh inetd; AIXray only recommends these actions."
+        ID_COMSAT_FIX="after service-owner approval, comment the exact comsat definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_COMSAT_STATUS=NOT_ASSESSED
         case "$ID_COMSAT_PARSED" in
@@ -16671,8 +16278,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_COMSAT_OBSERVED="not assessed - comsat inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_COMSAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_COMSAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -16684,15 +16291,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_COMSAT_STATUS=NOT_ASSESSED
         ID_COMSAT_OBSERVED="not assessed - comsat inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_COMSAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_COMSAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_COMSAT_STATUS=NOT_ASSESSED
       ID_COMSAT_OBSERVED="not assessed - comsat inetd probe grep failed (rc=$ID_COMSAT_RC)"
-      ID_COMSAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_COMSAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_COMSAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -16777,7 +16384,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_DAYTIME_STATUS=FAIL
         ID_DAYTIME_OBSERVED="daytime active in /etc/inetd.conf"
         ID_DAYTIME_MEANING="The legacy daytime service is exposed through inetd and adds avoidable remote attack surface."
-        ID_DAYTIME_FIX="after service-owner approval, comment the exact daytime definition and refresh inetd; AIXray only recommends these actions."
+        ID_DAYTIME_FIX="after service-owner approval, comment the exact daytime definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_DAYTIME_STATUS=NOT_ASSESSED
         case "$ID_DAYTIME_PARSED" in
@@ -16788,8 +16395,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_DAYTIME_OBSERVED="not assessed - daytime inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_DAYTIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_DAYTIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -16801,15 +16408,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_DAYTIME_STATUS=NOT_ASSESSED
         ID_DAYTIME_OBSERVED="not assessed - daytime inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_DAYTIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_DAYTIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_DAYTIME_STATUS=NOT_ASSESSED
       ID_DAYTIME_OBSERVED="not assessed - daytime inetd probe grep failed (rc=$ID_DAYTIME_RC)"
-      ID_DAYTIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_DAYTIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_DAYTIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -16841,17 +16448,17 @@ _AIXRAY_SESSION_KEYS=""
     add security inetd_discard "Legacy inetd discard service" NOT_ASSESSED high \
         "not assessed — /etc/inetd.conf probe failed (rc=$IDISC_RC)" \
         "The grep probe returned an unexpected exit code ($IDISC_RC). On AIX the only other rc is 2 for invalid options; verify the file is readable and rerun." \
-        "inspect /etc/inetd.conf and rerun AIXray." "cis-l1"
+        "inspect /etc/inetd.conf and rerun PTxray." "cis-l1"
   elif [ "$IDISC_RC" -eq 0 ] && [ -n "$IDISC_LINE" ]; then
     add security inetd_discard "Legacy inetd discard service" FAIL high \
         "discard active in /etc/inetd.conf" \
         "This legacy inetd service adds avoidable remote attack surface." \
-        "after service-owner approval, comment the exact discard line and refresh inetd; AIXray only recommends these actions." "cis-l1"
+        "after service-owner approval, comment the exact discard line and refresh inetd; PTxray only recommends these actions." "cis-l1"
   elif [ "$IDISC_RC" -eq 0 ] && [ -z "$IDISC_LINE" ]; then
     add security inetd_discard "Legacy inetd discard service" NOT_ASSESSED high \
         "not assessed — grep returned 0 but produced no well-shaped discard line" \
         "The grep returned success (rc=0) but yielded output that does not contain a well-formed discard entry. This may indicate malformed /etc/inetd.conf content." \
-        "inspect /etc/inetd.conf and rerun AIXray." "cis-l1"
+        "inspect /etc/inetd.conf and rerun PTxray." "cis-l1"
   elif [ "$IDISC_RC" -eq 1 ] && [ -z "$IDISC" ]; then
     add security inetd_discard "Legacy inetd discard service" PASS high \
         "discard not active in /etc/inetd.conf" \
@@ -16861,13 +16468,13 @@ _AIXRAY_SESSION_KEYS=""
     add security inetd_discard "Legacy inetd discard service" NOT_ASSESSED high \
         "not assessed — grep rc=1 but produced output (contradictory signal)" \
         "The grep returned no-match (rc=1) yet captured stdout. This is an unexpected state." \
-        "inspect /etc/inetd.conf and rerun AIXray." "cis-l1"
+        "inspect /etc/inetd.conf and rerun PTxray." "cis-l1"
   else
     # rc=0, empty output — grep found no match but returned 0.
     add security inetd_discard "Legacy inetd discard service" NOT_ASSESSED high \
         "not assessed — /etc/inetd.conf probe returned rc=0 with empty output" \
         "The grep probe returned success (rc=0) but captured no output. This contradicts the normal no-match rc=1 behavior." \
-        "inspect /etc/inetd.conf and rerun AIXray." "cis-l1"
+        "inspect /etc/inetd.conf and rerun PTxray." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
 
@@ -16939,7 +16546,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_ECHO_STATUS=FAIL
         ID_ECHO_OBSERVED="echo active in /etc/inetd.conf"
         ID_ECHO_MEANING="The legacy echo service is exposed through inetd and adds avoidable remote attack surface."
-        ID_ECHO_FIX="after service-owner approval, comment the exact echo definition and refresh inetd; AIXray only recommends these actions."
+        ID_ECHO_FIX="after service-owner approval, comment the exact echo definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_ECHO_STATUS=NOT_ASSESSED
         case "$ID_ECHO_PARSED" in
@@ -16950,8 +16557,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_ECHO_OBSERVED="not assessed - echo inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_ECHO_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_ECHO_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -16963,15 +16570,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_ECHO_STATUS=NOT_ASSESSED
         ID_ECHO_OBSERVED="not assessed - echo inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_ECHO_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_ECHO_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_ECHO_STATUS=NOT_ASSESSED
       ID_ECHO_OBSERVED="not assessed - echo inetd probe grep failed (rc=$ID_ECHO_RC)"
-      ID_ECHO_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_ECHO_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_ECHO_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17056,7 +16663,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_EXEC_STATUS=FAIL
         ID_EXEC_OBSERVED="exec active in /etc/inetd.conf"
         ID_EXEC_MEANING="The legacy exec service is exposed through inetd and adds avoidable remote attack surface."
-        ID_EXEC_FIX="after service-owner approval, comment the exact exec definition and refresh inetd; AIXray only recommends these actions."
+        ID_EXEC_FIX="after service-owner approval, comment the exact exec definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_EXEC_STATUS=NOT_ASSESSED
         case "$ID_EXEC_PARSED" in
@@ -17067,8 +16674,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_EXEC_OBSERVED="not assessed - exec inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_EXEC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_EXEC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17080,15 +16687,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_EXEC_STATUS=NOT_ASSESSED
         ID_EXEC_OBSERVED="not assessed - exec inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_EXEC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_EXEC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_EXEC_STATUS=NOT_ASSESSED
       ID_EXEC_OBSERVED="not assessed - exec inetd probe grep failed (rc=$ID_EXEC_RC)"
-      ID_EXEC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_EXEC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_EXEC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17173,7 +16780,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_FINGER_STATUS=FAIL
         ID_FINGER_OBSERVED="finger active in /etc/inetd.conf"
         ID_FINGER_MEANING="The legacy finger service is exposed through inetd and adds avoidable remote attack surface."
-        ID_FINGER_FIX="after service-owner approval, comment the exact finger definition and refresh inetd; AIXray only recommends these actions."
+        ID_FINGER_FIX="after service-owner approval, comment the exact finger definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_FINGER_STATUS=NOT_ASSESSED
         case "$ID_FINGER_PARSED" in
@@ -17184,8 +16791,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_FINGER_OBSERVED="not assessed - finger inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_FINGER_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_FINGER_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17197,15 +16804,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_FINGER_STATUS=NOT_ASSESSED
         ID_FINGER_OBSERVED="not assessed - finger inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_FINGER_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_FINGER_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_FINGER_STATUS=NOT_ASSESSED
       ID_FINGER_OBSERVED="not assessed - finger inetd probe grep failed (rc=$ID_FINGER_RC)"
-      ID_FINGER_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_FINGER_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_FINGER_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17249,13 +16856,13 @@ _AIXRAY_SESSION_KEYS=""
       if [ -z "$ID_FTPD_RAW" ]; then
         ID_FTPD_STATUS=NOT_ASSESSED
         ID_FTPD_OBSERVED="not assessed - shared inetd.conf capture returned rc=0 with empty output"
-        ID_FTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun AIXray."
+        ID_FTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun PTxray."
       elif [ "$ID_FTPD_PARSED" = active ]; then
         ID_FTPD_STATUS=FAIL
         ID_FTPD_OBSERVED="ftpd active in /etc/inetd.conf"
         ID_FTPD_MEANING="The FTP service is exposed through inetd and adds avoidable clear-text remote attack surface."
-        ID_FTPD_FIX="after service-owner approval, comment the exact ftp/ftpd definition and refresh inetd; AIXray only recommends these actions." # network-lint: allow -- remediation-advice prose, not a network call
+        ID_FTPD_FIX="after service-owner approval, comment the exact ftp/ftpd definition and refresh inetd; PTxray only recommends these actions." # network-lint: allow -- remediation-advice prose, not a network call
       else
         ID_FTPD_STATUS=PASS
         ID_FTPD_OBSERVED="ftpd not active in /etc/inetd.conf"
@@ -17272,15 +16879,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_FTPD_STATUS=NOT_ASSESSED
         ID_FTPD_OBSERVED="not assessed - shared inetd.conf capture rc=1 but output was non-empty"
-        ID_FTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the contradictory capture, and rerun AIXray."
+        ID_FTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the contradictory capture, and rerun PTxray."
       fi
       ;;
     *)
       ID_FTPD_STATUS=NOT_ASSESSED
       ID_FTPD_OBSERVED="not assessed - shared inetd.conf capture failed (rc=$ID_FTPD_RC)"
-      ID_FTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun AIXray."
+      ID_FTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun PTxray."
       ;;
   esac
 
@@ -17358,7 +16965,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_IMAP2_STATUS=FAIL
         ID_IMAP2_OBSERVED="imap2 active in /etc/inetd.conf"
         ID_IMAP2_MEANING="The legacy imap2 service is exposed through inetd and adds avoidable remote attack surface."
-        ID_IMAP2_FIX="after service-owner approval, comment the exact imap2 definition and refresh inetd; AIXray only recommends these actions."
+        ID_IMAP2_FIX="after service-owner approval, comment the exact imap2 definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_IMAP2_STATUS=NOT_ASSESSED
         case "$ID_IMAP2_PARSED" in
@@ -17369,8 +16976,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_IMAP2_OBSERVED="not assessed - imap2 inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_IMAP2_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_IMAP2_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17382,15 +16989,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_IMAP2_STATUS=NOT_ASSESSED
         ID_IMAP2_OBSERVED="not assessed - imap2 inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_IMAP2_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_IMAP2_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_IMAP2_STATUS=NOT_ASSESSED
       ID_IMAP2_OBSERVED="not assessed - imap2 inetd probe grep failed (rc=$ID_IMAP2_RC)"
-      ID_IMAP2_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_IMAP2_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_IMAP2_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17475,7 +17082,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_INSTSRV_STATUS=FAIL
         ID_INSTSRV_OBSERVED="instsrv active in /etc/inetd.conf"
         ID_INSTSRV_MEANING="The legacy instsrv service is exposed through inetd and adds avoidable remote attack surface."
-        ID_INSTSRV_FIX="after service-owner approval, comment the exact instsrv definition and refresh inetd; AIXray only recommends these actions."
+        ID_INSTSRV_FIX="after service-owner approval, comment the exact instsrv definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_INSTSRV_STATUS=NOT_ASSESSED
         case "$ID_INSTSRV_PARSED" in
@@ -17486,8 +17093,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_INSTSRV_OBSERVED="not assessed - instsrv inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_INSTSRV_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_INSTSRV_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17499,15 +17106,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_INSTSRV_STATUS=NOT_ASSESSED
         ID_INSTSRV_OBSERVED="not assessed - instsrv inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_INSTSRV_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_INSTSRV_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_INSTSRV_STATUS=NOT_ASSESSED
       ID_INSTSRV_OBSERVED="not assessed - instsrv inetd probe grep failed (rc=$ID_INSTSRV_RC)"
-      ID_INSTSRV_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_INSTSRV_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_INSTSRV_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17592,7 +17199,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_KLOGIN_STATUS=FAIL
         ID_KLOGIN_OBSERVED="klogin active in /etc/inetd.conf"
         ID_KLOGIN_MEANING="The legacy klogin service is exposed through inetd and adds avoidable remote attack surface."
-        ID_KLOGIN_FIX="after service-owner approval, comment the exact klogin definition and refresh inetd; AIXray only recommends these actions."
+        ID_KLOGIN_FIX="after service-owner approval, comment the exact klogin definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_KLOGIN_STATUS=NOT_ASSESSED
         case "$ID_KLOGIN_PARSED" in
@@ -17603,8 +17210,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_KLOGIN_OBSERVED="not assessed - klogin inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_KLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_KLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17616,15 +17223,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_KLOGIN_STATUS=NOT_ASSESSED
         ID_KLOGIN_OBSERVED="not assessed - klogin inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_KLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_KLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_KLOGIN_STATUS=NOT_ASSESSED
       ID_KLOGIN_OBSERVED="not assessed - klogin inetd probe grep failed (rc=$ID_KLOGIN_RC)"
-      ID_KLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_KLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_KLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17709,7 +17316,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_KSHELL_STATUS=FAIL
         ID_KSHELL_OBSERVED="kshell active in /etc/inetd.conf"
         ID_KSHELL_MEANING="The legacy kshell service is exposed through inetd and adds avoidable remote attack surface."
-        ID_KSHELL_FIX="after service-owner approval, comment the exact kshell definition and refresh inetd; AIXray only recommends these actions."
+        ID_KSHELL_FIX="after service-owner approval, comment the exact kshell definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_KSHELL_STATUS=NOT_ASSESSED
         case "$ID_KSHELL_PARSED" in
@@ -17720,8 +17327,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_KSHELL_OBSERVED="not assessed - kshell inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_KSHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_KSHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17733,15 +17340,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_KSHELL_STATUS=NOT_ASSESSED
         ID_KSHELL_OBSERVED="not assessed - kshell inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_KSHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_KSHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_KSHELL_STATUS=NOT_ASSESSED
       ID_KSHELL_OBSERVED="not assessed - kshell inetd probe grep failed (rc=$ID_KSHELL_RC)"
-      ID_KSHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_KSHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_KSHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17826,7 +17433,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_NETSTAT_STATUS=FAIL
         ID_NETSTAT_OBSERVED="netstat active in /etc/inetd.conf"
         ID_NETSTAT_MEANING="The legacy netstat service is exposed through inetd and adds avoidable remote attack surface."
-        ID_NETSTAT_FIX="after service-owner approval, comment the exact netstat definition and refresh inetd; AIXray only recommends these actions."
+        ID_NETSTAT_FIX="after service-owner approval, comment the exact netstat definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_NETSTAT_STATUS=NOT_ASSESSED
         case "$ID_NETSTAT_PARSED" in
@@ -17837,8 +17444,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_NETSTAT_OBSERVED="not assessed - netstat inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_NETSTAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_NETSTAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17850,15 +17457,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_NETSTAT_STATUS=NOT_ASSESSED
         ID_NETSTAT_OBSERVED="not assessed - netstat inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_NETSTAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_NETSTAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_NETSTAT_STATUS=NOT_ASSESSED
       ID_NETSTAT_OBSERVED="not assessed - netstat inetd probe grep failed (rc=$ID_NETSTAT_RC)"
-      ID_NETSTAT_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_NETSTAT_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_NETSTAT_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -17943,7 +17550,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_NTALK_STATUS=FAIL
         ID_NTALK_OBSERVED="ntalk active in /etc/inetd.conf"
         ID_NTALK_MEANING="The legacy ntalk service is exposed through inetd and adds avoidable remote attack surface."
-        ID_NTALK_FIX="after service-owner approval, comment the exact ntalk definition and refresh inetd; AIXray only recommends these actions."
+        ID_NTALK_FIX="after service-owner approval, comment the exact ntalk definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_NTALK_STATUS=NOT_ASSESSED
         case "$ID_NTALK_PARSED" in
@@ -17954,8 +17561,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_NTALK_OBSERVED="not assessed - ntalk inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_NTALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_NTALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -17967,15 +17574,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_NTALK_STATUS=NOT_ASSESSED
         ID_NTALK_OBSERVED="not assessed - ntalk inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_NTALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_NTALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_NTALK_STATUS=NOT_ASSESSED
       ID_NTALK_OBSERVED="not assessed - ntalk inetd probe grep failed (rc=$ID_NTALK_RC)"
-      ID_NTALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_NTALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_NTALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18060,7 +17667,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_PCNFSD_STATUS=FAIL
         ID_PCNFSD_OBSERVED="pcnfsd active in /etc/inetd.conf"
         ID_PCNFSD_MEANING="The legacy pcnfsd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_PCNFSD_FIX="after service-owner approval, comment the exact pcnfsd definition and refresh inetd; AIXray only recommends these actions."
+        ID_PCNFSD_FIX="after service-owner approval, comment the exact pcnfsd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_PCNFSD_STATUS=NOT_ASSESSED
         case "$ID_PCNFSD_PARSED" in
@@ -18071,8 +17678,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_PCNFSD_OBSERVED="not assessed - pcnfsd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_PCNFSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_PCNFSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18084,15 +17691,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_PCNFSD_STATUS=NOT_ASSESSED
         ID_PCNFSD_OBSERVED="not assessed - pcnfsd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_PCNFSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_PCNFSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_PCNFSD_STATUS=NOT_ASSESSED
       ID_PCNFSD_OBSERVED="not assessed - pcnfsd inetd probe grep failed (rc=$ID_PCNFSD_RC)"
-      ID_PCNFSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_PCNFSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_PCNFSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18177,7 +17784,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_POP3_STATUS=FAIL
         ID_POP3_OBSERVED="pop3 active in /etc/inetd.conf"
         ID_POP3_MEANING="The legacy pop3 service is exposed through inetd and adds avoidable remote attack surface."
-        ID_POP3_FIX="after service-owner approval, comment the exact pop3 definition and refresh inetd; AIXray only recommends these actions."
+        ID_POP3_FIX="after service-owner approval, comment the exact pop3 definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_POP3_STATUS=NOT_ASSESSED
         case "$ID_POP3_PARSED" in
@@ -18188,8 +17795,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_POP3_OBSERVED="not assessed - pop3 inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_POP3_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_POP3_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18201,15 +17808,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_POP3_STATUS=NOT_ASSESSED
         ID_POP3_OBSERVED="not assessed - pop3 inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_POP3_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_POP3_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_POP3_STATUS=NOT_ASSESSED
       ID_POP3_OBSERVED="not assessed - pop3 inetd probe grep failed (rc=$ID_POP3_RC)"
-      ID_POP3_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_POP3_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_POP3_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18294,7 +17901,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_REXD_STATUS=FAIL
         ID_REXD_OBSERVED="rexd active in /etc/inetd.conf"
         ID_REXD_MEANING="The legacy rexd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_REXD_FIX="after service-owner approval, comment the exact rexd definition and refresh inetd; AIXray only recommends these actions."
+        ID_REXD_FIX="after service-owner approval, comment the exact rexd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_REXD_STATUS=NOT_ASSESSED
         case "$ID_REXD_PARSED" in
@@ -18305,8 +17912,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_REXD_OBSERVED="not assessed - rexd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_REXD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_REXD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18318,15 +17925,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_REXD_STATUS=NOT_ASSESSED
         ID_REXD_OBSERVED="not assessed - rexd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_REXD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_REXD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_REXD_STATUS=NOT_ASSESSED
       ID_REXD_OBSERVED="not assessed - rexd inetd probe grep failed (rc=$ID_REXD_RC)"
-      ID_REXD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_REXD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_REXD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18411,7 +18018,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RLOGIN_STATUS=FAIL
         ID_RLOGIN_OBSERVED="rlogin active in /etc/inetd.conf"
         ID_RLOGIN_MEANING="The legacy rlogin service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RLOGIN_FIX="after service-owner approval, comment the exact rlogin definition and refresh inetd; AIXray only recommends these actions."
+        ID_RLOGIN_FIX="after service-owner approval, comment the exact rlogin definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RLOGIN_STATUS=NOT_ASSESSED
         case "$ID_RLOGIN_PARSED" in
@@ -18422,8 +18029,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RLOGIN_OBSERVED="not assessed - rlogin inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18435,15 +18042,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RLOGIN_STATUS=NOT_ASSESSED
         ID_RLOGIN_OBSERVED="not assessed - rlogin inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RLOGIN_STATUS=NOT_ASSESSED
       ID_RLOGIN_OBSERVED="not assessed - rlogin inetd probe grep failed (rc=$ID_RLOGIN_RC)"
-      ID_RLOGIN_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RLOGIN_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RLOGIN_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18528,7 +18135,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RQUOTAD_STATUS=FAIL
         ID_RQUOTAD_OBSERVED="rquotad active in /etc/inetd.conf"
         ID_RQUOTAD_MEANING="The legacy rquotad service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RQUOTAD_FIX="after service-owner approval, comment the exact rquotad definition and refresh inetd; AIXray only recommends these actions."
+        ID_RQUOTAD_FIX="after service-owner approval, comment the exact rquotad definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RQUOTAD_STATUS=NOT_ASSESSED
         case "$ID_RQUOTAD_PARSED" in
@@ -18539,8 +18146,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RQUOTAD_OBSERVED="not assessed - rquotad inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RQUOTAD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RQUOTAD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18552,15 +18159,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RQUOTAD_STATUS=NOT_ASSESSED
         ID_RQUOTAD_OBSERVED="not assessed - rquotad inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RQUOTAD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RQUOTAD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RQUOTAD_STATUS=NOT_ASSESSED
       ID_RQUOTAD_OBSERVED="not assessed - rquotad inetd probe grep failed (rc=$ID_RQUOTAD_RC)"
-      ID_RQUOTAD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RQUOTAD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RQUOTAD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18645,7 +18252,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RSTATD_STATUS=FAIL
         ID_RSTATD_OBSERVED="rstatd active in /etc/inetd.conf"
         ID_RSTATD_MEANING="The legacy rstatd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RSTATD_FIX="after service-owner approval, comment the exact rstatd definition and refresh inetd; AIXray only recommends these actions."
+        ID_RSTATD_FIX="after service-owner approval, comment the exact rstatd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RSTATD_STATUS=NOT_ASSESSED
         case "$ID_RSTATD_PARSED" in
@@ -18656,8 +18263,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RSTATD_OBSERVED="not assessed - rstatd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RSTATD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RSTATD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18669,15 +18276,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RSTATD_STATUS=NOT_ASSESSED
         ID_RSTATD_OBSERVED="not assessed - rstatd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RSTATD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RSTATD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RSTATD_STATUS=NOT_ASSESSED
       ID_RSTATD_OBSERVED="not assessed - rstatd inetd probe grep failed (rc=$ID_RSTATD_RC)"
-      ID_RSTATD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RSTATD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RSTATD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18762,7 +18369,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RSYNC_STATUS=FAIL
         ID_RSYNC_OBSERVED="rsync active in /etc/inetd.conf"
         ID_RSYNC_MEANING="The legacy rsync service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RSYNC_FIX="after service-owner approval, comment the exact rsync definition and refresh inetd; AIXray only recommends these actions."
+        ID_RSYNC_FIX="after service-owner approval, comment the exact rsync definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RSYNC_STATUS=NOT_ASSESSED
         case "$ID_RSYNC_PARSED" in
@@ -18773,8 +18380,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RSYNC_OBSERVED="not assessed - rsync inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RSYNC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RSYNC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18786,15 +18393,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RSYNC_STATUS=NOT_ASSESSED
         ID_RSYNC_OBSERVED="not assessed - rsync inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RSYNC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RSYNC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RSYNC_STATUS=NOT_ASSESSED
       ID_RSYNC_OBSERVED="not assessed - rsync inetd probe grep failed (rc=$ID_RSYNC_RC)"
-      ID_RSYNC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RSYNC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RSYNC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18879,7 +18486,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RUSERSD_STATUS=FAIL
         ID_RUSERSD_OBSERVED="rusersd active in /etc/inetd.conf"
         ID_RUSERSD_MEANING="The legacy rusersd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RUSERSD_FIX="after service-owner approval, comment the exact rusersd definition and refresh inetd; AIXray only recommends these actions."
+        ID_RUSERSD_FIX="after service-owner approval, comment the exact rusersd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RUSERSD_STATUS=NOT_ASSESSED
         case "$ID_RUSERSD_PARSED" in
@@ -18890,8 +18497,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RUSERSD_OBSERVED="not assessed - rusersd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RUSERSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RUSERSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -18903,15 +18510,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RUSERSD_STATUS=NOT_ASSESSED
         ID_RUSERSD_OBSERVED="not assessed - rusersd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RUSERSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RUSERSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RUSERSD_STATUS=NOT_ASSESSED
       ID_RUSERSD_OBSERVED="not assessed - rusersd inetd probe grep failed (rc=$ID_RUSERSD_RC)"
-      ID_RUSERSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RUSERSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RUSERSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -18996,7 +18603,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_RWALLD_STATUS=FAIL
         ID_RWALLD_OBSERVED="rwalld active in /etc/inetd.conf"
         ID_RWALLD_MEANING="The legacy rwalld service is exposed through inetd and adds avoidable remote attack surface."
-        ID_RWALLD_FIX="after service-owner approval, comment the exact rwalld definition and refresh inetd; AIXray only recommends these actions."
+        ID_RWALLD_FIX="after service-owner approval, comment the exact rwalld definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_RWALLD_STATUS=NOT_ASSESSED
         case "$ID_RWALLD_PARSED" in
@@ -19007,8 +18614,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_RWALLD_OBSERVED="not assessed - rwalld inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_RWALLD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RWALLD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19020,15 +18627,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_RWALLD_STATUS=NOT_ASSESSED
         ID_RWALLD_OBSERVED="not assessed - rwalld inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_RWALLD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_RWALLD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_RWALLD_STATUS=NOT_ASSESSED
       ID_RWALLD_OBSERVED="not assessed - rwalld inetd probe grep failed (rc=$ID_RWALLD_RC)"
-      ID_RWALLD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_RWALLD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_RWALLD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19113,7 +18720,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_SHELL_STATUS=FAIL
         ID_SHELL_OBSERVED="shell active in /etc/inetd.conf"
         ID_SHELL_MEANING="The legacy shell service is exposed through inetd and adds avoidable remote attack surface."
-        ID_SHELL_FIX="after service-owner approval, comment the exact shell definition and refresh inetd; AIXray only recommends these actions."
+        ID_SHELL_FIX="after service-owner approval, comment the exact shell definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_SHELL_STATUS=NOT_ASSESSED
         case "$ID_SHELL_PARSED" in
@@ -19124,8 +18731,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_SHELL_OBSERVED="not assessed - shell inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_SHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_SHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19137,15 +18744,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_SHELL_STATUS=NOT_ASSESSED
         ID_SHELL_OBSERVED="not assessed - shell inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_SHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_SHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_SHELL_STATUS=NOT_ASSESSED
       ID_SHELL_OBSERVED="not assessed - shell inetd probe grep failed (rc=$ID_SHELL_RC)"
-      ID_SHELL_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_SHELL_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_SHELL_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19223,7 +18830,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_SPRAYD_STATUS=FAIL
         ID_SPRAYD_OBSERVED="sprayd active in /etc/inetd.conf"
         ID_SPRAYD_MEANING="The legacy sprayd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_SPRAYD_FIX="after service-owner approval, comment the exact sprayd definition and refresh inetd; AIXray only recommends these actions."
+        ID_SPRAYD_FIX="after service-owner approval, comment the exact sprayd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_SPRAYD_STATUS=NOT_ASSESSED
         case "$ID_SPRAYD_PARSED" in
@@ -19232,8 +18839,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_SPRAYD_OBSERVED="not assessed - sprayd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_SPRAYD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_SPRAYD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19245,15 +18852,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_SPRAYD_STATUS=NOT_ASSESSED
         ID_SPRAYD_OBSERVED="not assessed - sprayd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_SPRAYD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_SPRAYD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_SPRAYD_STATUS=NOT_ASSESSED
       ID_SPRAYD_OBSERVED="not assessed - sprayd inetd probe grep failed (rc=$ID_SPRAYD_RC)"
-      ID_SPRAYD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_SPRAYD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_SPRAYD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19331,7 +18938,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_TALK_STATUS=FAIL
         ID_TALK_OBSERVED="talk active in /etc/inetd.conf"
         ID_TALK_MEANING="The legacy talk service is exposed through inetd and adds avoidable remote attack surface."
-        ID_TALK_FIX="after service-owner approval, comment the exact talk definition and refresh inetd; AIXray only recommends these actions."
+        ID_TALK_FIX="after service-owner approval, comment the exact talk definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_TALK_STATUS=NOT_ASSESSED
         case "$ID_TALK_PARSED" in
@@ -19340,8 +18947,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_TALK_OBSERVED="not assessed - talk inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_TALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19353,15 +18960,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_TALK_STATUS=NOT_ASSESSED
         ID_TALK_OBSERVED="not assessed - talk inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_TALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_TALK_STATUS=NOT_ASSESSED
       ID_TALK_OBSERVED="not assessed - talk inetd probe grep failed (rc=$ID_TALK_RC)"
-      ID_TALK_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_TALK_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_TALK_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19405,13 +19012,13 @@ _AIXRAY_SESSION_KEYS=""
       if [ -z "$ID_TELNETD_RAW" ]; then
         ID_TELNETD_STATUS=NOT_ASSESSED
         ID_TELNETD_OBSERVED="not assessed - shared inetd.conf capture returned rc=0 with empty output"
-        ID_TELNETD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun AIXray."
+        ID_TELNETD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun PTxray."
       elif [ "$ID_TELNETD_PARSED" = active ]; then
         ID_TELNETD_STATUS=FAIL
         ID_TELNETD_OBSERVED="telnetd active in /etc/inetd.conf"
         ID_TELNETD_MEANING="The Telnet service is exposed through inetd and adds avoidable clear-text credential and remote attack surface."
-        ID_TELNETD_FIX="after service-owner approval, comment the exact telnet/telnetd definition and refresh inetd; AIXray only recommends these actions." # network-lint: allow -- remediation-advice prose, not a network call
+        ID_TELNETD_FIX="after service-owner approval, comment the exact telnet/telnetd definition and refresh inetd; PTxray only recommends these actions." # network-lint: allow -- remediation-advice prose, not a network call
       else
         ID_TELNETD_STATUS=PASS
         ID_TELNETD_OBSERVED="telnetd not active in /etc/inetd.conf"
@@ -19428,15 +19035,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_TELNETD_STATUS=NOT_ASSESSED
         ID_TELNETD_OBSERVED="not assessed - shared inetd.conf capture rc=1 but output was non-empty"
-        ID_TELNETD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the contradictory capture, and rerun AIXray."
+        ID_TELNETD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the contradictory capture, and rerun PTxray."
       fi
       ;;
     *)
       ID_TELNETD_STATUS=NOT_ASSESSED
       ID_TELNETD_OBSERVED="not assessed - shared inetd.conf capture failed (rc=$ID_TELNETD_RC)"
-      ID_TELNETD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun AIXray."
+      ID_TELNETD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_TELNETD_FIX="inspect /etc/inetd.conf, resolve the read or capture problem, and rerun PTxray."
       ;;
   esac
 
@@ -19507,7 +19114,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_TFTPD_STATUS=FAIL
         ID_TFTPD_OBSERVED="tftpd active in /etc/inetd.conf"
         ID_TFTPD_MEANING="The legacy tftpd service is exposed through inetd and adds avoidable remote attack surface."
-        ID_TFTPD_FIX="after service-owner approval, comment the exact tftpd definition and refresh inetd; AIXray only recommends these actions."
+        ID_TFTPD_FIX="after service-owner approval, comment the exact tftpd definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_TFTPD_STATUS=NOT_ASSESSED
         case "$ID_TFTPD_PARSED" in
@@ -19516,8 +19123,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_TFTPD_OBSERVED="not assessed - tftpd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_TFTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TFTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19529,15 +19136,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_TFTPD_STATUS=NOT_ASSESSED
         ID_TFTPD_OBSERVED="not assessed - tftpd inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_TFTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TFTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_TFTPD_STATUS=NOT_ASSESSED
       ID_TFTPD_OBSERVED="not assessed - tftpd inetd probe grep failed (rc=$ID_TFTPD_RC)"
-      ID_TFTPD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_TFTPD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_TFTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19615,7 +19222,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_TIME_STATUS=FAIL
         ID_TIME_OBSERVED="time active in /etc/inetd.conf"
         ID_TIME_MEANING="The legacy time service is exposed through inetd and adds avoidable remote attack surface."
-        ID_TIME_FIX="after service-owner approval, comment the exact time definition and refresh inetd; AIXray only recommends these actions."
+        ID_TIME_FIX="after service-owner approval, comment the exact time definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_TIME_STATUS=NOT_ASSESSED
         case "$ID_TIME_PARSED" in
@@ -19624,8 +19231,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_TIME_OBSERVED="not assessed - time inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_TIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19637,15 +19244,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_TIME_STATUS=NOT_ASSESSED
         ID_TIME_OBSERVED="not assessed - time inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_TIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_TIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_TIME_STATUS=NOT_ASSESSED
       ID_TIME_OBSERVED="not assessed - time inetd probe grep failed (rc=$ID_TIME_RC)"
-      ID_TIME_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_TIME_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_TIME_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19723,7 +19330,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_UUCP_STATUS=FAIL
         ID_UUCP_OBSERVED="uucp active in /etc/inetd.conf"
         ID_UUCP_MEANING="The legacy uucp service is exposed through inetd and adds avoidable remote attack surface."
-        ID_UUCP_FIX="after service-owner approval, comment the exact uucp definition and refresh inetd; AIXray only recommends these actions."
+        ID_UUCP_FIX="after service-owner approval, comment the exact uucp definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_UUCP_STATUS=NOT_ASSESSED
         case "$ID_UUCP_PARSED" in
@@ -19732,8 +19339,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_UUCP_OBSERVED="not assessed - uucp inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_UUCP_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_UUCP_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19745,15 +19352,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_UUCP_STATUS=NOT_ASSESSED
         ID_UUCP_OBSERVED="not assessed - uucp inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_UUCP_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_UUCP_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_UUCP_STATUS=NOT_ASSESSED
       ID_UUCP_OBSERVED="not assessed - uucp inetd probe grep failed (rc=$ID_UUCP_RC)"
-      ID_UUCP_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_UUCP_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_UUCP_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19831,7 +19438,7 @@ _AIXRAY_SESSION_KEYS=""
         ID_XMQUERY_STATUS=FAIL
         ID_XMQUERY_OBSERVED="xmquery active in /etc/inetd.conf"
         ID_XMQUERY_MEANING="The legacy xmquery service is exposed through inetd and adds avoidable remote attack surface."
-        ID_XMQUERY_FIX="after service-owner approval, comment the exact xmquery definition and refresh inetd; AIXray only recommends these actions."
+        ID_XMQUERY_FIX="after service-owner approval, comment the exact xmquery definition and refresh inetd; PTxray only recommends these actions."
       else
         ID_XMQUERY_STATUS=NOT_ASSESSED
         case "$ID_XMQUERY_PARSED" in
@@ -19840,8 +19447,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             ID_XMQUERY_OBSERVED="not assessed - xmquery inetd probe rc=0 but output was empty after grep" ;;
         esac
-        ID_XMQUERY_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_XMQUERY_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -19853,15 +19460,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_XMQUERY_STATUS=NOT_ASSESSED
         ID_XMQUERY_OBSERVED="not assessed - xmquery inetd probe rc=1 but output was non-empty (contradictory)"
-        ID_XMQUERY_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_XMQUERY_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_XMQUERY_STATUS=NOT_ASSESSED
       ID_XMQUERY_OBSERVED="not assessed - xmquery inetd probe grep failed (rc=$ID_XMQUERY_RC)"
-      ID_XMQUERY_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_XMQUERY_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      ID_XMQUERY_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -19916,15 +19523,15 @@ _AIXRAY_SESSION_KEYS=""
   elif [ "$RHRC" -ne 0 ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe failed (rc=$RHRC)" \
         "The trust-file probe did not complete, so absence of .rhosts/hosts.equiv cannot be asserted." \
-        "check /.rhosts and /etc/hosts.equiv manually, then rerun AIXray." "stig:V-215432"
+        "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"
   elif [ -z "$RH" ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe empty (rc=0)" \
         "The trust-file probe returned no evidence, so absence of .rhosts/hosts.equiv cannot be asserted." \
-        "check /.rhosts and /etc/hosts.equiv manually, then rerun AIXray." "stig:V-215432"
+        "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"
   elif [ "$RHCOMP" -ne 1 ] || [ "$RHBAD" -ne 0 ] || [ "$RHCOUNT" -ne "$RHUNIQ" ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe unparseable (rc=0)" \
         "The trust-file probe output was incomplete, contradictory, duplicated, or did not match its completion protocol." \
-        "check /.rhosts and /etc/hosts.equiv manually, then rerun AIXray." "stig:V-215432"
+        "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"
   elif [ -n "$RHPRESENT" ]; then
     add security rhosts "Trust files (.rhosts)" FAIL high "present: $RHPRESENT" \
         "Host-trust files allow passwordless login from named hosts — a classic lateral-movement path." \
@@ -20006,13 +19613,13 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ipsrcrouteforward "Source-routed IP forwarding" \
         NOT_ASSESSED high \
         "not assessed — ipsrcrouteforward capture failed (rc=$NF_RC)" \
-        "AIXray could not determine whether source-routed IP packets are forwarded; the tunable may be absent on this AIX release." \
+        "PTxray could not determine whether source-routed IP packets are forwarded; the tunable may be absent on this AIX release." \
         "run 'no -o ipsrcrouteforward' manually to check the current value." "cis-l1"
   elif [ -z "$NF_OUT" ]; then
     add security net_ipsrcrouteforward "Source-routed IP forwarding" \
         NOT_ASSESSED high \
         "not assessed — ipsrcrouteforward capture empty (rc=0)" \
-        "The successful capture returned no ipsrcrouteforward value, so AIXray cannot determine whether source-routed packets are forwarded." \
+        "The successful capture returned no ipsrcrouteforward value, so PTxray cannot determine whether source-routed packets are forwarded." \
         "run 'no -o ipsrcrouteforward' manually and inspect the output." "cis-l1"
   else
     NF_PARSED=$(printf '%s\n' "$NF_OUT" | awk '
@@ -20068,28 +19675,28 @@ _AIXRAY_SESSION_KEYS=""
         add security net_ipsrcrouteforward "Source-routed IP forwarding" \
             NOT_ASSESSED high \
             "not assessed — conflicting ipsrcrouteforward assignments (values: $NF_VAL)" \
-            "The capture contained disagreeing ipsrcrouteforward values, so AIXray cannot determine one effective tunable value." \
-            "run 'no -o ipsrcrouteforward' manually, resolve the contradictory output, and rerun AIXray." "cis-l1"
+            "The capture contained disagreeing ipsrcrouteforward values, so PTxray cannot determine one effective tunable value." \
+            "run 'no -o ipsrcrouteforward' manually, resolve the contradictory output, and rerun PTxray." "cis-l1"
         ;;
       multiple)
         add security net_ipsrcrouteforward "Source-routed IP forwarding" \
             NOT_ASSESSED high \
             "not assessed — multiple ipsrcrouteforward assignments (values: $NF_VAL)" \
-            "The capture contained more than one ipsrcrouteforward assignment, so AIXray cannot establish one effective value." \
-            "run 'no -o ipsrcrouteforward' manually, resolve the duplicate output, and rerun AIXray." "cis-l1"
+            "The capture contained more than one ipsrcrouteforward assignment, so PTxray cannot establish one effective value." \
+            "run 'no -o ipsrcrouteforward' manually, resolve the duplicate output, and rerun PTxray." "cis-l1"
         ;;
       absent)
         add security net_ipsrcrouteforward "Source-routed IP forwarding" \
             NOT_ASSESSED high \
             "not assessed — capture did not contain exactly one ipsrcrouteforward assignment (rc=0)" \
-            "The output did not contain the requested tunable assignment, so AIXray cannot determine whether source-routed packets are forwarded." \
+            "The output did not contain the requested tunable assignment, so PTxray cannot determine whether source-routed packets are forwarded." \
             "run 'no -o ipsrcrouteforward' manually and inspect the output shape." "cis-l1"
         ;;
       *)
         add security net_ipsrcrouteforward "Source-routed IP forwarding" \
             NOT_ASSESSED high \
             "not assessed — ipsrcrouteforward capture unparseable (rc=0)" \
-            "The requested assignment had unmodelled syntax or trailing fields, so AIXray could not extract one numeric value." \
+            "The requested assignment had unmodelled syntax or trailing fields, so PTxray could not extract one numeric value." \
             "run 'no -o ipsrcrouteforward' manually and inspect the output shape." "cis-l1"
         ;;
     esac
@@ -20120,7 +19727,7 @@ _AIXRAY_SESSION_KEYS=""
     add security net_directed_broadcast "Directed broadcast" \
       NOT_ASSESSED low \
       "not assessed — directed_broadcast capture empty (rc=0)" \
-      "The successful capture returned no directed_broadcast value, so AIXray cannot confirm whether directed broadcasts are dropped." \
+      "The successful capture returned no directed_broadcast value, so PTxray cannot confirm whether directed broadcasts are dropped." \
       "run 'no -o directed_broadcast' manually and inspect the output." \
       "cis-l1"
   else
@@ -20179,23 +19786,23 @@ _AIXRAY_SESSION_KEYS=""
         add security net_directed_broadcast "Directed broadcast" \
           NOT_ASSESSED low \
           "not assessed — conflicting directed_broadcast assignments (values: $DBVAL)" \
-          "The capture contained disagreeing directed_broadcast values, so AIXray cannot determine one effective tunable value." \
-          "run 'no -o directed_broadcast' manually, resolve the contradictory output, and rerun AIXray." \
+          "The capture contained disagreeing directed_broadcast values, so PTxray cannot determine one effective tunable value." \
+          "run 'no -o directed_broadcast' manually, resolve the contradictory output, and rerun PTxray." \
           "cis-l1"
         ;;
       multiple)
         add security net_directed_broadcast "Directed broadcast" \
           NOT_ASSESSED low \
           "not assessed — multiple directed_broadcast assignments (values: $DBVAL)" \
-          "The capture contained more than one directed_broadcast assignment, so AIXray cannot establish one effective value." \
-          "run 'no -o directed_broadcast' manually, resolve the duplicate output, and rerun AIXray." \
+          "The capture contained more than one directed_broadcast assignment, so PTxray cannot establish one effective value." \
+          "run 'no -o directed_broadcast' manually, resolve the duplicate output, and rerun PTxray." \
           "cis-l1"
         ;;
       absent)
         add security net_directed_broadcast "Directed broadcast" \
           NOT_ASSESSED low \
           "not assessed — directed_broadcast capture unparseable: did not contain exactly one directed_broadcast assignment (rc=0)" \
-          "The output did not contain the requested tunable assignment, so AIXray cannot claim directed broadcasts are dropped." \
+          "The output did not contain the requested tunable assignment, so PTxray cannot claim directed broadcasts are dropped." \
           "run 'no -o directed_broadcast' manually and inspect the output shape." \
           "cis-l1"
         ;;
@@ -20203,7 +19810,7 @@ _AIXRAY_SESSION_KEYS=""
         add security net_directed_broadcast "Directed broadcast" \
           NOT_ASSESSED low \
           "not assessed — directed_broadcast capture unparseable (rc=0)" \
-          "The requested assignment had unmodelled syntax or trailing fields, so AIXray cannot claim directed broadcasts are dropped." \
+          "The requested assignment had unmodelled syntax or trailing fields, so PTxray cannot claim directed broadcasts are dropped." \
           "run 'no -o directed_broadcast' manually and inspect the output shape." \
           "cis-l1"
         ;;
@@ -20220,13 +19827,13 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
         NOT_ASSESSED high \
         "not assessed — ip6srcrouteforward capture failed (rc=$IP6SFR_RC)" \
-        "AIXray could not determine whether source-routed IPv6 packets are forwarded; the tunable may be absent on this AIX release." \
+        "PTxray could not determine whether source-routed IPv6 packets are forwarded; the tunable may be absent on this AIX release." \
         "run 'no -o ip6srcrouteforward' manually to check the current value." "cis-l1"
   elif [ -z "$IP6SFR_OUT" ]; then
     add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
         NOT_ASSESSED high \
         "not assessed — ip6srcrouteforward capture empty (rc=0)" \
-        "The successful capture returned no ip6srcrouteforward value, so AIXray cannot determine whether source-routed IPv6 packets are forwarded." \
+        "The successful capture returned no ip6srcrouteforward value, so PTxray cannot determine whether source-routed IPv6 packets are forwarded." \
         "run 'no -o ip6srcrouteforward' manually and inspect the output." "cis-l1"
   else
     IP6SFR_PARSED=$(printf '%s\n' "$IP6SFR_OUT" | awk '
@@ -20282,28 +19889,28 @@ _AIXRAY_SESSION_KEYS=""
         add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
             NOT_ASSESSED high \
             "not assessed — conflicting ip6srcrouteforward assignments (values: $IP6SFR_VAL)" \
-            "The capture contained disagreeing ip6srcrouteforward values, so AIXray cannot determine one effective tunable value." \
-            "run 'no -o ip6srcrouteforward' manually, resolve the contradictory output, and rerun AIXray." "cis-l1"
+            "The capture contained disagreeing ip6srcrouteforward values, so PTxray cannot determine one effective tunable value." \
+            "run 'no -o ip6srcrouteforward' manually, resolve the contradictory output, and rerun PTxray." "cis-l1"
         ;;
       multiple)
         add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
             NOT_ASSESSED high \
             "not assessed — multiple ip6srcrouteforward assignments (values: $IP6SFR_VAL)" \
-            "The capture contained more than one ip6srcrouteforward assignment, so AIXray cannot establish one effective value." \
-            "run 'no -o ip6srcrouteforward' manually, resolve the duplicate output, and rerun AIXray." "cis-l1"
+            "The capture contained more than one ip6srcrouteforward assignment, so PTxray cannot establish one effective value." \
+            "run 'no -o ip6srcrouteforward' manually, resolve the duplicate output, and rerun PTxray." "cis-l1"
         ;;
       absent)
         add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
             NOT_ASSESSED high \
             "not assessed — capture did not contain exactly one ip6srcrouteforward assignment (rc=0)" \
-            "The output did not contain the requested tunable assignment, so AIXray cannot determine whether source-routed IPv6 packets are forwarded." \
+            "The output did not contain the requested tunable assignment, so PTxray cannot determine whether source-routed IPv6 packets are forwarded." \
             "run 'no -o ip6srcrouteforward' manually and inspect the output shape." "cis-l1"
         ;;
       *)
         add security net_ip6srcrouteforward "Source-routed IPv6 forwarding" \
             NOT_ASSESSED high \
             "not assessed — ip6srcrouteforward capture unparseable (rc=0)" \
-            "The requested assignment had unmodelled syntax or trailing fields, so AIXray could not extract one numeric value." \
+            "The requested assignment had unmodelled syntax or trailing fields, so PTxray could not extract one numeric value." \
             "run 'no -o ip6srcrouteforward' manually and inspect the output shape." "cis-l1"
         ;;
     esac
@@ -20599,7 +20206,7 @@ _AIXRAY_SESSION_KEYS=""
           "No setuid/setgid files outside the system paths." "n/a" "cis-l1"
     else
       add security suid_unexpected "Unexpected setuid/setgid files" NOT_ASSESSED med "not assessed - setuid/setgid scan of /home /tmp /var/tmp /usr/local failed (rc=$SUID_RC) with no output" \
-          "AIXray could not determine whether unexpected setuid/setgid files exist because the scan did not complete." \
+          "PTxray could not determine whether unexpected setuid/setgid files exist because the scan did not complete." \
           "run the find manually and confirm each of the four directories exists and is readable." "cis-l1"
     fi
   fi
@@ -21040,7 +20647,7 @@ _AIXRAY_SESSION_KEYS=""
     add security system_accounts_ftpusers "system accounts blocked from FTP" FAIL high \
       "/etc/ftpusers absent (ls rc=$SAF_LS_RC): no account is denied FTP access" \
       "Without /etc/ftpusers no account is denied FTP access, so root and the system accounts may authenticate over FTP wherever an FTP daemon is enabled." \
-      "create /etc/ftpusers listing root, adm, bin, daemon, guest, lpd, nobody, nuucp, sys, and uucp, one account per line; AIXray only recommends this change." \
+      "create /etc/ftpusers listing root, adm, bin, daemon, guest, lpd, nobody, nuucp, sys, and uucp, one account per line; PTxray only recommends this change." \
       "cis-l1"
   elif [ "$SAF_LS_RC" -ne 0 ]; then
     nr_warn security system_accounts_ftpusers "system accounts blocked from FTP" \
@@ -21058,7 +20665,7 @@ _AIXRAY_SESSION_KEYS=""
       add security system_accounts_ftpusers "system accounts blocked from FTP" FAIL high \
         "/etc/ftpusers is empty: all 10 required accounts are missing" \
         "An empty /etc/ftpusers denies no account, so root and the system accounts may authenticate over FTP wherever an FTP daemon is enabled." \
-        "list root, adm, bin, daemon, guest, lpd, nobody, nuucp, sys, and uucp in /etc/ftpusers, one account per line; AIXray only recommends this change." \
+        "list root, adm, bin, daemon, guest, lpd, nobody, nuucp, sys, and uucp in /etc/ftpusers, one account per line; PTxray only recommends this change." \
         "cis-l1"
     else
       SAF_PARSED=$(printf '%s\n' "$SAF_RAW" | awk '
@@ -21093,7 +20700,7 @@ _AIXRAY_SESSION_KEYS=""
           add security system_accounts_ftpusers "system accounts blocked from FTP" FAIL high \
             "missing from /etc/ftpusers: $SAF_DETAIL" \
             "Each account named here is not denied by /etc/ftpusers and may authenticate over FTP wherever an FTP daemon is enabled." \
-            "add each named missing account to /etc/ftpusers, one account per line; AIXray only recommends this change." \
+            "add each named missing account to /etc/ftpusers, one account per line; PTxray only recommends this change." \
             "cis-l1"
           ;;
         *)
@@ -21380,17 +20987,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_icmpaddressmask "ICMP address mask reply" NOT_ASSESSED med \
         "not assessed — no -o icmpaddressmask capture failed (rc=$ICMPAM_RC)" \
         "The 'no' tunable subsystem did not return the icmpaddressmask value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o icmpaddressmask' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o icmpaddressmask' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$ICMPAM" ]; then
     add security net_icmpaddressmask "ICMP address mask reply" NOT_ASSESSED med \
         "not assessed — no -o icmpaddressmask capture empty (rc=0)" \
         "The tunable returned no output. This suggests icmpaddressmask is not present on this AIX release or the output was empty." \
-        "run 'no -o icmpaddressmask' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o icmpaddressmask' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$ICMPAM_SHAPE" -eq 0 ] || [ -z "$ICMPAM_VAL" ]; then
     add security net_icmpaddressmask "ICMP address mask reply" NOT_ASSESSED med \
         "not assessed — no -o icmpaddressmask capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'icmpaddressmask = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o icmpaddressmask' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o icmpaddressmask' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$ICMPAM_VAL" -eq 0 ]; then
     add security net_icmpaddressmask "ICMP address mask reply" PASS low "icmpaddressmask = 0" \
         "ICMP address mask replies are disabled — the host will not disclose the local subnet mask to ICMP requests." "n/a" "cis-l1"
@@ -21425,17 +21032,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ipignoreredirects "ICMP redirect acceptance" NOT_ASSESSED med \
         "not assessed — no -o ipignoreredirects capture failed (rc=$IGR_RC)" \
         "The 'no' tunable subsystem did not return the ipignoreredirects value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o ipignoreredirects' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o ipignoreredirects' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$IGR" ]; then
     add security net_ipignoreredirects "ICMP redirect acceptance" NOT_ASSESSED med \
         "not assessed — no -o ipignoreredirects capture empty (rc=0)" \
         "The tunable returned no output. This suggests ipignoreredirects is not present on this AIX release or the output was empty." \
-        "run 'no -o ipignoreredirects' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o ipignoreredirects' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$IGR_SHAPE" -eq 0 ] || [ -z "$IGR_VAL" ]; then
     add security net_ipignoreredirects "ICMP redirect acceptance" NOT_ASSESSED med \
         "not assessed — no -o ipignoreredirects capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'ipignoreredirects = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o ipignoreredirects' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o ipignoreredirects' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$IGR_VAL" -eq 1 ]; then
     add security net_ipignoreredirects "ICMP redirect acceptance" PASS low "ipignoreredirects = 1" \
         "ICMP redirect acceptance is disabled (ipignoreredirects=1) — the host will not modify routing tables based on ICMP Redirect messages." "n/a" "cis-l1"
@@ -21469,17 +21076,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ipsendredirects "ICMP redirect emission" NOT_ASSESSED med \
         "not assessed — no -o ipsendredirects capture failed (rc=$IPSR_RC)" \
         "The 'no' tunable subsystem did not return the ipsendredirects value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o ipsendredirects' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsendredirects' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$IPSR" ]; then
     add security net_ipsendredirects "ICMP redirect emission" NOT_ASSESSED med \
         "not assessed — no -o ipsendredirects capture empty (rc=0)" \
         "The tunable returned no output. This suggests ipsendredirects is not present on this AIX release or the output was empty." \
-        "run 'no -o ipsendredirects' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsendredirects' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$IPSR_SHAPE" -eq 0 ] || [ -z "$IPSR_VAL" ]; then
     add security net_ipsendredirects "ICMP redirect emission" NOT_ASSESSED med \
         "not assessed — no -o ipsendredirects capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'ipsendredirects = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o ipsendredirects' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsendredirects' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$IPSR_VAL" -eq 0 ]; then
     add security net_ipsendredirects "ICMP redirect emission" PASS low "ipsendredirects = 0" \
         "ICMP redirect emission is disabled — the host will not advertise route changes via ICMP redirects." "n/a" "cis-l1"
@@ -21514,17 +21121,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ipsrcroutesend "Source-route packet emission" NOT_ASSESSED med \
         "not assessed — no -o ipsrcroutesend capture failed (rc=$IPSR_RC)" \
         "The 'no' tunable subsystem did not return the ipsrcroutesend value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o ipsrcroutesend' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcroutesend' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$IPSR" ]; then
     add security net_ipsrcroutesend "Source-route packet emission" NOT_ASSESSED med \
         "not assessed — no -o ipsrcroutesend capture empty (rc=0)" \
         "The tunable returned no output. This suggests ipsrcroutesend is not present on this AIX release or the output was empty." \
-        "run 'no -o ipsrcroutesend' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcroutesend' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$IPSR_SHAPE" -eq 0 ] || [ -z "$IPSR_VAL" ]; then
     add security net_ipsrcroutesend "Source-route packet emission" NOT_ASSESSED med \
         "not assessed — no -o ipsrcroutesend capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'ipsrcroutesend = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o ipsrcroutesend' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcroutesend' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$IPSR_VAL" -eq 0 ]; then
     add security net_ipsrcroutesend "Source-route packet emission" PASS low "ipsrcroutesend = 0" \
         "Source-route packet emission is disabled — the host will not send source-routed IP packets." "n/a" "cis-l1"
@@ -21559,17 +21166,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_ipsrcrouterecv "IP source routing reception" NOT_ASSESSED med \
         "not assessed — no -o ipsrcrouterecv capture failed (rc=$IPSRRCV_RC)" \
         "The 'no' tunable subsystem did not return the ipsrcrouterecv value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o ipsrcrouterecv' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcrouterecv' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$IPSRRCV" ]; then
     add security net_ipsrcrouterecv "IP source routing reception" NOT_ASSESSED med \
         "not assessed — no -o ipsrcrouterecv capture empty (rc=0)" \
         "The tunable returned no output. This suggests ipsrcrouterecv is not present on this AIX release or the output was empty." \
-        "run 'no -o ipsrcrouterecv' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcrouterecv' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$IPSRRCV_SHAPE" -eq 0 ] || [ -z "$IPSRRCV_VAL" ]; then
     add security net_ipsrcrouterecv "IP source routing reception" NOT_ASSESSED med \
         "not assessed — no -o ipsrcrouterecv capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'ipsrcrouterecv = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o ipsrcrouterecv' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o ipsrcrouterecv' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$IPSRRCV_VAL" -eq 0 ]; then
     add security net_ipsrcrouterecv "IP source routing reception" PASS low "ipsrcrouterecv = 0" \
         "IP source routing reception is disabled — the host will not accept source-routed packets." "n/a" "cis-l1"
@@ -21604,17 +21211,17 @@ _AIXRAY_SESSION_KEYS=""
     add security net_nonlocsrcroute "Non-local source routing" NOT_ASSESSED med \
         "not assessed — no -o nonlocsrcroute capture failed (rc=$NLSS_RC)" \
         "The 'no' tunable subsystem did not return the nonlocsrcroute value. On AIX 7.x this is unexpected — verify the command and rerun." \
-        "run 'no -o nonlocsrcroute' manually and verify the tunable is supported before rerunning AIXray." "cis-l1"
+        "run 'no -o nonlocsrcroute' manually and verify the tunable is supported before rerunning PTxray." "cis-l1"
   elif [ -z "$NLSS" ]; then
     add security net_nonlocsrcroute "Non-local source routing" NOT_ASSESSED med \
         "not assessed — no -o nonlocsrcroute capture empty (rc=0)" \
         "The tunable returned no output. This suggests nonlocsrcroute is not present on this AIX release or the output was empty." \
-        "run 'no -o nonlocsrcroute' manually and inspect the returned value before rerunning AIXray." "cis-l1"
+        "run 'no -o nonlocsrcroute' manually and inspect the returned value before rerunning PTxray." "cis-l1"
   elif [ "$NLSS_SHAPE" -eq 0 ] || [ -z "$NLSS_VAL" ]; then
     add security net_nonlocsrcroute "Non-local source routing" NOT_ASSESSED med \
         "not assessed — no -o nonlocsrcroute capture unparseable (rc=0)" \
         "The tunable returned output that could not be parsed as 'nonlocsrcroute = <numeric value>'. The line shape does not evidence the expected tunable." \
-        "run 'no -o nonlocsrcroute' manually and inspect the output shape before rerunning AIXray." "cis-l1"
+        "run 'no -o nonlocsrcroute' manually and inspect the output shape before rerunning PTxray." "cis-l1"
   elif [ "$NLSS_VAL" -eq 0 ]; then
     add security net_nonlocsrcroute "Non-local source routing" PASS low "nonlocsrcroute = 0" \
         "Non-local source routing is disabled — the host will not accept source-routed packets for non-local destinations." "n/a" "cis-l1"
@@ -21697,8 +21304,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPH_REASON" ]; then
     add security fileperm_hosts_owner "Host name database file owner" NOT_ASSESSED med \
         "not assessed — /etc/hosts metadata $FPH_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the /etc/hosts owner." \
-        "run 'ls -ldn /etc/hosts', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the /etc/hosts owner." \
+        "run 'ls -ldn /etc/hosts', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245557"
   elif [ "$FPH_UID" = "0" ]; then
     add security fileperm_hosts_owner "Host name database file owner" PASS med \
@@ -21710,7 +21317,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_hosts_owner "Host name database file owner" FAIL med \
         "$FPH_OBSERVED" \
         "/etc/hosts is not owned by root, allowing an unauthorized owner to alter local name resolution." \
-        "change only the owner with 'chown root /etc/hosts' after validating the host; AIXray only recommends this command." \
+        "change only the owner with 'chown root /etc/hosts' after validating the host; PTxray only recommends this command." \
         "stig:V-245557"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -21798,8 +21405,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIM_REASON" ]; then
     add security fileperm_inetd_mode "/etc/inetd.conf mode" NOT_ASSESSED med \
         "not assessed — /etc/inetd.conf metadata $FIM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIM_OK" = "1" ]; then
     add security fileperm_inetd_mode "/etc/inetd.conf mode" PASS med \
@@ -21810,7 +21417,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_inetd_mode "/etc/inetd.conf mode" FAIL med \
         "/etc/inetd.conf mode=$FIM_MODE; requires no bits beyond 0640" \
         "/etc/inetd.conf violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/inetd.conf'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/inetd.conf'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -21883,8 +21490,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIO_REASON" ]; then
     add security fileperm_inetd_owner "/etc/inetd.conf owner" NOT_ASSESSED med \
         "not assessed — /etc/inetd.conf metadata $FIO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIO_UID" = "0" ]; then
     add security fileperm_inetd_owner "/etc/inetd.conf owner" PASS med \
@@ -21895,7 +21502,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_inetd_owner "/etc/inetd.conf owner" FAIL med \
         "/etc/inetd.conf owner_uid=$FIO_UID" \
         "/etc/inetd.conf violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "change only the owner after validation: 'chown 0 /etc/inetd.conf'; AIXray recommends this command and never executes it." \
+        "change only the owner after validation: 'chown 0 /etc/inetd.conf'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -21968,8 +21575,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIG_REASON" ]; then
     add security fileperm_inetd_group "/etc/inetd.conf group" NOT_ASSESSED med \
         "not assessed — /etc/inetd.conf metadata $FIG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/inetd.conf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIG_GID" = "0" ]; then
     add security fileperm_inetd_group "/etc/inetd.conf group" PASS med \
@@ -21980,7 +21587,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_inetd_group "/etc/inetd.conf group" FAIL med \
         "/etc/inetd.conf group_gid=$FIG_GID" \
         "/etc/inetd.conf violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "change only the group after validation: 'chgrp 0 /etc/inetd.conf'; AIXray recommends this command and never executes it." \
+        "change only the group after validation: 'chgrp 0 /etc/inetd.conf'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22068,8 +21675,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FNM_REASON" ]; then
     add security fileperm_ntp_mode "/etc/ntp.conf mode" NOT_ASSESSED med \
         "not assessed — /etc/ntp.conf metadata $FNM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun PTxray." \
         ""
   elif [ "$FNM_OK" = "1" ]; then
     add security fileperm_ntp_mode "/etc/ntp.conf mode" PASS med \
@@ -22080,7 +21687,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_ntp_mode "/etc/ntp.conf mode" FAIL med \
         "/etc/ntp.conf mode=$FNM_MODE" \
         "/etc/ntp.conf violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/ntp.conf'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/ntp.conf'; PTxray recommends this command and never executes it." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22153,8 +21760,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FNO_REASON" ]; then
     add security fileperm_ntp_owner "/etc/ntp.conf owner" NOT_ASSESSED med \
         "not assessed — /etc/ntp.conf metadata $FNO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun PTxray." \
         ""
   elif [ "$FNO_UID" = "0" ]; then
     add security fileperm_ntp_owner "/etc/ntp.conf owner" PASS med \
@@ -22165,7 +21772,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_ntp_owner "/etc/ntp.conf owner" FAIL med \
         "/etc/ntp.conf owner_uid=$FNO_UID" \
         "/etc/ntp.conf violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "change only the owner after validation: 'chown 0 /etc/ntp.conf'; AIXray recommends this command and never executes it." \
+        "change only the owner after validation: 'chown 0 /etc/ntp.conf'; PTxray recommends this command and never executes it." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22238,8 +21845,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIG_REASON" ]; then
     add security fileperm_ntp_group "/etc/ntp.conf group" NOT_ASSESSED med \
         "not assessed — /etc/ntp.conf metadata $FIG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/ntp.conf', correct the capture or path problem, and rerun PTxray." \
         ""
   elif [ "$FIG_GID" = "0" ]; then
     add security fileperm_ntp_group "/etc/ntp.conf group" PASS med \
@@ -22250,7 +21857,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_ntp_group "/etc/ntp.conf group" FAIL med \
         "/etc/ntp.conf group_gid=$FIG_GID" \
         "/etc/ntp.conf violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "change only the group after validation: 'chgrp 0 /etc/ntp.conf'; AIXray recommends this command and never executes it." \
+        "change only the group after validation: 'chgrp 0 /etc/ntp.conf'; PTxray recommends this command and never executes it." \
         ""
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22326,8 +21933,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPS_REASON" ]; then
     add security fileperm_syslog_owner "System log configuration file owner" NOT_ASSESSED med \
         "not assessed — /etc/syslog.conf metadata $FPS_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the /etc/syslog.conf owner." \
-        "run 'ls -ldn /etc/syslog.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the /etc/syslog.conf owner." \
+        "run 'ls -ldn /etc/syslog.conf', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245561"
   elif [ "$FPS_UID" = "0" ]; then
     add security fileperm_syslog_owner "System log configuration file owner" PASS med \
@@ -22339,7 +21946,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_syslog_owner "System log configuration file owner" FAIL med \
         "$FPS_OBSERVED" \
         "/etc/syslog.conf is not owned by root, allowing an unauthorized owner to alter or disrupt system logging." \
-        "change only the owner with 'chown root /etc/syslog.conf' after validating the host; AIXray only recommends this command." \
+        "change only the owner with 'chown root /etc/syslog.conf' after validating the host; PTxray only recommends this command." \
         "stig:V-245561"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22444,8 +22051,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPC_REASON" ]; then
     add security fileperm_crontabs_mode "Crontabs directory mode" NOT_ASSESSED med \
         "not assessed — crontabs metadata $FPC_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the crontabs directory mode." \
-        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the crontabs directory mode." \
+        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245560"
   else
     FPC_MODE_OBSERVED="/var/spool/cron/crontabs mode=$FPC_MODE"
@@ -22458,7 +22065,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_crontabs_mode "Crontabs directory mode" FAIL med \
           "$FPC_MODE_OBSERVED; world access is set (no other read, write or execute bit is permitted)" \
           "/var/spool/cron/crontabs has world access set — any local user could read, alter or traverse the jobs the cron daemon runs with super-user rights." \
-          "remove world access with 'chmod o= /var/spool/cron/crontabs' after validating the host; AIXray only recommends this command." \
+          "remove world access with 'chmod o= /var/spool/cron/crontabs' after validating the host; PTxray only recommends this command." \
           "stig:V-245560"
     fi
   fi
@@ -22567,8 +22174,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPC_REASON" ]; then
     add security fileperm_crontabs_group "Crontabs directory group" NOT_ASSESSED med \
         "not assessed — crontabs metadata $FPC_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the crontabs directory group." \
-        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the crontabs directory group." \
+        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245569"
   elif [ "$FPC_GID" = "8" ]; then
     add security fileperm_crontabs_group "Crontabs directory group" PASS med \
@@ -22580,7 +22187,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_crontabs_group "Crontabs directory group" FAIL med \
         "$FPC_GROUP_OBSERVED" \
         "/var/spool/cron/crontabs is not group-owned by cron, allowing the wrong group to control scheduled-job storage." \
-        "change only the group with 'chgrp cron /var/spool/cron/crontabs' after validating the host; AIXray only recommends this command." \
+        "change only the group with 'chgrp cron /var/spool/cron/crontabs' after validating the host; PTxray only recommends this command." \
         "stig:V-245569"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22688,8 +22295,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPA_REASON" ]; then
     add security fileperm_atjobs_owner "Atjobs directory owner" NOT_ASSESSED med \
         "not assessed — atjobs metadata $FPA_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the atjobs directory owner." \
-        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the atjobs directory owner." \
+        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245566"
   else
     case "$FPA_UID" in
@@ -22712,7 +22319,7 @@ _AIXRAY_SESSION_KEYS=""
         add security fileperm_atjobs_owner "Atjobs directory owner" FAIL med \
             "$FPA_OWNER_OBSERVED" \
             "/var/spool/cron/atjobs is owned by neither root nor bin." \
-            "change the owner to root or bin after validating local policy; the STIG fix shows 'chown bin /var/spool/cron/atjobs'; AIXray only recommends this change." \
+            "change the owner to root or bin after validating local policy; the STIG fix shows 'chown bin /var/spool/cron/atjobs'; PTxray only recommends this change." \
             "stig:V-245566"
         ;;
     esac
@@ -22822,8 +22429,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPA_REASON" ]; then
     add security fileperm_atjobs_group "Atjobs directory group" NOT_ASSESSED med \
         "not assessed — atjobs metadata $FPA_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the atjobs directory group." \
-        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the atjobs directory group." \
+        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245567"
   elif [ "$FPA_GID" = "8" ]; then
     add security fileperm_atjobs_group "Atjobs directory group" PASS med \
@@ -22835,7 +22442,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_atjobs_group "Atjobs directory group" FAIL med \
         "$FPA_GROUP_OBSERVED" \
         "/var/spool/cron/atjobs is not group-owned by cron." \
-        "change only the group with 'chgrp cron /var/spool/cron/atjobs' after validating the host; AIXray only recommends this command." \
+        "change only the group with 'chgrp cron /var/spool/cron/atjobs' after validating the host; PTxray only recommends this command." \
         "stig:V-245567"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -22940,8 +22547,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPA_REASON" ]; then
     add security fileperm_atjobs_mode "Atjobs directory mode" NOT_ASSESSED med \
         "not assessed — atjobs metadata $FPA_REASON" \
-        "AIXray did not obtain one trustworthy metadata record proving the atjobs directory mode." \
-        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata record proving the atjobs directory mode." \
+        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245568"
   else
     FPA_MODE_OBSERVED="/var/spool/cron/atjobs mode=$FPA_MODE"
@@ -22954,7 +22561,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_atjobs_mode "Atjobs directory mode" FAIL med \
           "$FPA_MODE_OBSERVED; world access is set (no other read, write or execute bit is permitted)" \
           "/var/spool/cron/atjobs has world access set — any local user could read, alter or traverse the at-jobs that run with the submitter's SUID/SGID." \
-          "remove world access with 'chmod o= /var/spool/cron/atjobs' after validating the host; AIXray only recommends this command." \
+          "remove world access with 'chmod o= /var/spool/cron/atjobs' after validating the host; PTxray only recommends this command." \
           "stig:V-245568"
     fi
   fi
@@ -23028,8 +22635,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIO_REASON" ]; then
     add security fileperm_passwd_owner "/etc/passwd owner" NOT_ASSESSED med \
         "not assessed — /etc/passwd metadata $FIO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIO_UID" = "0" ]; then
     add security fileperm_passwd_owner "/etc/passwd owner" PASS med \
@@ -23040,7 +22647,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_passwd_owner "/etc/passwd owner" FAIL med \
         "/etc/passwd owner_uid=$FIO_UID" \
         "/etc/passwd violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "change only the owner after validation: 'chown 0 /etc/passwd'; AIXray recommends this command and never executes it." \
+        "change only the owner after validation: 'chown 0 /etc/passwd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23113,8 +22720,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIG_REASON" ]; then
     add security fileperm_passwd_group "/etc/passwd group" NOT_ASSESSED med \
         "not assessed — /etc/passwd metadata $FIG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIG_GID" = "7" ]; then
     add security fileperm_passwd_group "/etc/passwd group" PASS med \
@@ -23125,7 +22732,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_passwd_group "/etc/passwd group" FAIL med \
         "/etc/passwd group_gid=$FIG_GID" \
         "/etc/passwd violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "change only the group after validation: 'chgrp 7 /etc/passwd'; AIXray recommends this command and never executes it." \
+        "change only the group after validation: 'chgrp 7 /etc/passwd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23213,8 +22820,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIM_REASON" ]; then
     add security fileperm_passwd_mode "/etc/passwd mode" NOT_ASSESSED med \
         "not assessed — /etc/passwd metadata $FIM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/passwd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIM_OK" = "1" ]; then
     add security fileperm_passwd_mode "/etc/passwd mode" PASS med \
@@ -23225,7 +22832,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_passwd_mode "/etc/passwd mode" FAIL med \
         "/etc/passwd mode=$FIM_MODE" \
         "/etc/passwd violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/passwd'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/passwd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23298,8 +22905,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIO_REASON" ]; then
     add security fileperm_sshdconfig_owner "Secure Shell configuration owner" NOT_ASSESSED med \
         "not assessed — OpenSSH daemon configuration file metadata $FIO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIO_UID" = "0" ]; then
     add security fileperm_sshdconfig_owner "Secure Shell configuration owner" PASS med \
@@ -23310,7 +22917,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshdconfig_owner "Secure Shell configuration owner" FAIL med \
         "OpenSSH daemon configuration file owner_uid=$FIO_UID" \
         "The OpenSSH daemon configuration file violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH daemon configuration file owner to UID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH daemon configuration file owner to UID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23383,8 +22990,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIG_REASON" ]; then
     add security fileperm_sshdconfig_group "Secure Shell configuration group" NOT_ASSESSED med \
         "not assessed — OpenSSH daemon configuration file metadata $FIG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIG_GID" = "0" ]; then
     add security fileperm_sshdconfig_group "Secure Shell configuration group" PASS med \
@@ -23395,7 +23002,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshdconfig_group "Secure Shell configuration group" FAIL med \
         "OpenSSH daemon configuration file group_gid=$FIG_GID" \
         "The OpenSSH daemon configuration file violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH daemon configuration file group to GID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH daemon configuration file group to GID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23483,8 +23090,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIM_REASON" ]; then
     add security fileperm_sshdconfig_mode "Secure Shell configuration mode" NOT_ASSESSED med \
         "not assessed — OpenSSH daemon configuration file metadata $FIM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH daemon configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIM_OK" = "1" ]; then
     add security fileperm_sshdconfig_mode "Secure Shell configuration mode" PASS med \
@@ -23495,7 +23102,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshdconfig_mode "Secure Shell configuration mode" FAIL med \
         "OpenSSH daemon configuration file mode=$FIM_MODE" \
         "The OpenSSH daemon configuration file violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, remove only permissions beyond 0644 from the OpenSSH daemon configuration file; AIXray recommends this action and never executes it." \
+        "after validating the path, remove only permissions beyond 0644 from the OpenSSH daemon configuration file; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23575,8 +23182,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIO_REASON" ]; then
     add security fileperm_etcsecurity_owner "/etc/security owner" NOT_ASSESSED med \
         "not assessed — /etc/security metadata $FIO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIO_UID" = "0" ]; then
     add security fileperm_etcsecurity_owner "/etc/security owner" PASS med \
@@ -23587,7 +23194,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_etcsecurity_owner "/etc/security owner" FAIL med \
         "/etc/security owner_uid=$FIO_UID" \
         "/etc/security violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "change only the owner after validation: 'chown 0 /etc/security'; AIXray recommends this command and never executes it." \
+        "change only the owner after validation: 'chown 0 /etc/security'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23667,8 +23274,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIG_REASON" ]; then
     add security fileperm_etcsecurity_group "/etc/security group" NOT_ASSESSED med \
         "not assessed — /etc/security metadata $FIG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIG_GID" = "7" ]; then
     add security fileperm_etcsecurity_group "/etc/security group" PASS med \
@@ -23679,7 +23286,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_etcsecurity_group "/etc/security group" FAIL med \
         "/etc/security group_gid=$FIG_GID" \
         "/etc/security violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "change only the group after validation: 'chgrp 0 /etc/security'; AIXray recommends this command and never executes it." \
+        "change only the group after validation: 'chgrp 0 /etc/security'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23775,8 +23382,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FIM_REASON" ]; then
     add security fileperm_etcsecurity_mode "/etc/security mode" NOT_ASSESSED med \
         "not assessed — /etc/security metadata $FIM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ldn /etc/security', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FIM_OK" = "1" ]; then
     add security fileperm_etcsecurity_mode "/etc/security mode" PASS med \
@@ -23787,7 +23394,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_etcsecurity_mode "/etc/security mode" FAIL med \
         "/etc/security mode=$FIM_MODE" \
         "/etc/security violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "restore the setgid 2750 boundary after validation: 'chmod 2750 /etc/security'; AIXray recommends this command and never executes it." \
+        "restore the setgid 2750 boundary after validation: 'chmod 2750 /etc/security'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -23887,8 +23494,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPG_REASON" ]; then
     add security fileperm_group_mode "Group database file mode" NOT_ASSESSED med \
         "not assessed — /etc/group metadata $FPG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPG_MODE_OBSERVED="/etc/group mode=$FPG_MODE"
@@ -23903,7 +23510,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_group_mode "Group database file mode" FAIL med \
           "$FPG_MODE_OBSERVED" \
           "/etc/group violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-          "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/group'; AIXray recommends this command and never executes it." \
+          "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/group'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24004,8 +23611,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPGO_REASON" ]; then
     add security fileperm_group_owner "Group database file owner" NOT_ASSESSED med \
         "not assessed — /etc/group metadata $FPGO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPGO_OWNER_OBSERVED="/etc/group owner_uid=$FPGO_UID"
@@ -24018,7 +23625,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_group_owner "Group database file owner" FAIL med \
           "$FPGO_OWNER_OBSERVED; requires owner_uid 0" \
           "/etc/group violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-          "change only the owner after validation: 'chown 0 /etc/group'; AIXray recommends this command and never executes it." \
+          "change only the owner after validation: 'chown 0 /etc/group'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24119,8 +23726,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPGG_REASON" ]; then
     add security fileperm_group_group "Group database file group" NOT_ASSESSED med \
         "not assessed — /etc/group metadata $FPGG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/group', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPGG_GROUP_OBSERVED="/etc/group group_gid=$FPGG_GID"
@@ -24133,7 +23740,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_group_group "Group database file group" FAIL med \
           "$FPGG_GROUP_OBSERVED" \
           "/etc/group violates the required group boundary and could let an unintended identity alter trusted configuration." \
-          "change only the group after validation: 'chgrp 7 /etc/group'; AIXray recommends this command and never executes it." \
+          "change only the group after validation: 'chgrp 7 /etc/group'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24234,8 +23841,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPH_REASON" ]; then
     add security fileperm_hosts_mode "Host name database file mode" NOT_ASSESSED med \
         "not assessed — /etc/hosts metadata $FPH_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/hosts', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/hosts', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPH_MODE_OBSERVED="/etc/hosts mode=$FPH_MODE"
@@ -24250,7 +23857,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_hosts_mode "Host name database file mode" FAIL med \
           "$FPH_MODE_OBSERVED" \
           "/etc/hosts violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-          "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/hosts'; AIXray recommends this command and never executes it." \
+          "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/hosts'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24351,8 +23958,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPHG_REASON" ]; then
     add security fileperm_hosts_group "Host name database file group" NOT_ASSESSED med \
         "not assessed — /etc/hosts metadata $FPHG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/hosts', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/hosts', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPHG_GROUP_OBSERVED="/etc/hosts group_gid=$FPHG_GID"
@@ -24365,7 +23972,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_hosts_group "Host name database file group" FAIL med \
           "$FPHG_GROUP_OBSERVED" \
           "/etc/hosts violates the required group boundary and could let an unintended identity alter trusted configuration." \
-          "change only the group after validation: 'chgrp 0 /etc/hosts'; AIXray recommends this command and never executes it." \
+          "change only the group after validation: 'chgrp 0 /etc/hosts'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24466,8 +24073,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPSM_REASON" ]; then
     add security fileperm_syslog_mode "System log configuration file mode" NOT_ASSESSED med \
         "not assessed — /etc/syslog.conf metadata $FPSM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/syslog.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/syslog.conf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPSM_MODE_OBSERVED="/etc/syslog.conf mode=$FPSM_MODE"
@@ -24482,7 +24089,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_syslog_mode "System log configuration file mode" FAIL med \
           "$FPSM_MODE_OBSERVED; requires no bits beyond 0640" \
           "/etc/syslog.conf violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-          "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/syslog.conf'; AIXray recommends this command and never executes it." \
+          "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/syslog.conf'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24583,8 +24190,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$FPSG_REASON" ]; then
     add security fileperm_syslog_group "System log configuration file group" NOT_ASSESSED med \
         "not assessed — /etc/syslog.conf metadata $FPSG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/syslog.conf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/syslog.conf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FPSG_GROUP_OBSERVED="/etc/syslog.conf group_gid=$FPSG_GID"
@@ -24597,7 +24204,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_syslog_group "System log configuration file group" FAIL med \
           "$FPSG_GROUP_OBSERVED" \
           "/etc/syslog.conf violates the required group boundary and could let an unintended identity alter trusted configuration." \
-          "change only the group after validation: 'chgrp 0 /etc/syslog.conf'; AIXray recommends this command and never executes it." \
+          "change only the group after validation: 'chgrp 0 /etc/syslog.conf'; PTxray recommends this command and never executes it." \
           "cis-l1"
     fi
   fi
@@ -24695,8 +24302,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DAAO_REASON" ]; then
     add security diracc_audit_owner "/audit owner" NOT_ASSESSED med \
         "not assessed — /audit metadata $DAAO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /audit', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /audit', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DAAO_UID" = "0" ]; then
     add security diracc_audit_owner "/audit owner" PASS med \
@@ -24707,7 +24314,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_audit_owner "/audit owner" FAIL med \
         "/audit owner_uid=$DAAO_UID" \
         "/audit violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:audit /audit'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:audit /audit'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -24804,8 +24411,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DAAG_REASON" ]; then
     add security diracc_audit_group "/audit group" NOT_ASSESSED med \
         "not assessed — /audit metadata $DAAG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /audit', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /audit', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DAAG_GID" = "10" ]; then
     add security diracc_audit_group "/audit group" PASS med \
@@ -24816,7 +24423,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_audit_group "/audit group" FAIL med \
         "/audit group_gid=$DAAG_GID" \
         "/audit violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:audit /audit'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:audit /audit'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -24909,11 +24516,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$DAAM_REASON" = "absent" ]; then
     add security diracc_audit_mode "/audit mode" NOT_APPLICABLE med "/audit absent"         "The probe returned the determinate-absence signature ('/audit not found', exit $DAAM_RC); /audit need not exist, so the mode boundary does not apply."         "n/a" "cis-l1"
   elif [ -n "$DAAM_REASON" ]; then
-    add security diracc_audit_mode "/audit mode" NOT_ASSESSED med         "not assessed — /audit metadata $DAAM_REASON"         "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /audit', correct the capture or path problem, and rerun AIXray." "cis-l1"
+    add security diracc_audit_mode "/audit mode" NOT_ASSESSED med         "not assessed — /audit metadata $DAAM_REASON"         "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /audit', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ "$DAAM_OK" = "1" ]; then
     add security diracc_audit_mode "/audit mode" PASS med "/audit mode=$DAAM_MODE"         "/audit has the required mode boundary." "n/a" "cis-l1"
   else
-    add security diracc_audit_mode "/audit mode" FAIL med "/audit mode=$DAAM_MODE"         "/audit violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0750 after validation: 'chmod 0750 /audit'; AIXray recommends this command and never executes it." "cis-l1"
+    add security diracc_audit_mode "/audit mode" FAIL med "/audit mode=$DAAM_MODE"         "/audit violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0750 after validation: 'chmod 0750 /audit'; PTxray recommends this command and never executes it." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_secaudit_owner — CIS L1-aligned /etc/security/audit owner boundary.
@@ -25016,8 +24623,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DASO_REASON" ]; then
     add security diracc_secaudit_owner "/etc/security/audit owner" NOT_ASSESSED med \
         "not assessed — /etc/security/audit metadata $DASO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DASO_UID" = "0" ]; then
     add security diracc_secaudit_owner "/etc/security/audit owner" PASS med \
@@ -25028,7 +24635,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_secaudit_owner "/etc/security/audit owner" FAIL med \
         "/etc/security/audit owner_uid=$DASO_UID" \
         "/etc/security/audit violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:audit /etc/security/audit'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:audit /etc/security/audit'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25132,8 +24739,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DASG_REASON" ]; then
     add security diracc_secaudit_group "/etc/security/audit group" NOT_ASSESSED med \
         "not assessed — /etc/security/audit metadata $DASG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DASG_GID" = "10" ]; then
     add security diracc_secaudit_group "/etc/security/audit group" PASS med \
@@ -25144,7 +24751,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_secaudit_group "/etc/security/audit group" FAIL med \
         "/etc/security/audit group_gid=$DASG_GID" \
         "/etc/security/audit violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:audit /etc/security/audit'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:audit /etc/security/audit'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25244,11 +24851,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$DASM_REASON" = "absent" ]; then
     add security diracc_secaudit_mode "/etc/security/audit mode" NOT_APPLICABLE med "/etc/security/audit absent"         "The probe returned the determinate-absence signature ('/etc/security/audit not found', exit $DASM_RC); /etc/security/audit need not exist, so the mode boundary does not apply."         "n/a" "cis-l1"
   elif [ -n "$DASM_REASON" ]; then
-    add security diracc_secaudit_mode "/etc/security/audit mode" NOT_ASSESSED med         "not assessed — /etc/security/audit metadata $DASM_REASON"         "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun AIXray." "cis-l1"
+    add security diracc_secaudit_mode "/etc/security/audit mode" NOT_ASSESSED med         "not assessed — /etc/security/audit metadata $DASM_REASON"         "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /etc/security/audit', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ "$DASM_OK" = "1" ]; then
     add security diracc_secaudit_mode "/etc/security/audit mode" PASS med "/etc/security/audit mode=$DASM_MODE"         "/etc/security/audit has the required mode boundary." "n/a" "cis-l1"
   else
-    add security diracc_secaudit_mode "/etc/security/audit mode" FAIL med "/etc/security/audit mode=$DASM_MODE"         "/etc/security/audit violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0750 after validation: 'chmod 0750 /etc/security/audit'; AIXray recommends this command and never executes it." "cis-l1"
+    add security diracc_secaudit_mode "/etc/security/audit mode" FAIL med "/etc/security/audit mode=$DASM_MODE"         "/etc/security/audit violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0750 after validation: 'chmod 0750 /etc/security/audit'; PTxray recommends this command and never executes it." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_varadmras_world — CIS L1-aligned world-access boundary for /var/adm/ras entries.
@@ -25349,8 +24956,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DRW_REASON" ]; then
     add security diracc_varadmras_world "/var/adm/ras world access" NOT_ASSESSED med \
         "not assessed — /var/adm/ras listing $DRW_REASON" \
-        "AIXray did not obtain one trustworthy directory listing, so it cannot claim the world-access boundary is satisfied." \
-        "run 'ls -ln /var/adm/ras', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy directory listing, so it cannot claim the world-access boundary is satisfied." \
+        "run 'ls -ln /var/adm/ras', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DRW_BAD" = "0" ]; then
     add security diracc_varadmras_world "/var/adm/ras world access" PASS med \
@@ -25361,7 +24968,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_varadmras_world "/var/adm/ras world access" FAIL med \
         "/var/adm/ras: $DRW_BAD of $DRW_TOTAL entries allow world read or write" \
         "World-readable or world-writable entries under /var/adm/ras expose log evidence that an attacker could read or alter." \
-        "remove world read/write after validation: 'chmod o-rw /var/adm/ras/*'; AIXray recommends this command and never executes it." \
+        "remove world read/write after validation: 'chmod o-rw /var/adm/ras/*'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25457,8 +25064,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DSAO_REASON" ]; then
     add security diracc_varadmsa_owner "/var/adm/sa owner" NOT_ASSESSED med \
         "not assessed — /var/adm/sa metadata $DSAO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DSAO_UID" = "4" ]; then
     add security diracc_varadmsa_owner "/var/adm/sa owner" PASS med \
@@ -25469,7 +25076,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_varadmsa_owner "/var/adm/sa owner" FAIL med \
         "/var/adm/sa owner_uid=$DSAO_UID" \
         "/var/adm/sa violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown adm:adm /var/adm/sa'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown adm:adm /var/adm/sa'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25565,8 +25172,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DSAG_REASON" ]; then
     add security diracc_varadmsa_group "/var/adm/sa group" NOT_ASSESSED med \
         "not assessed — /var/adm/sa metadata $DSAG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DSAG_GID" = "4" ]; then
     add security diracc_varadmsa_group "/var/adm/sa group" PASS med \
@@ -25577,7 +25184,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_varadmsa_group "/var/adm/sa group" FAIL med \
         "/var/adm/sa group_gid=$DSAG_GID" \
         "/var/adm/sa violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown adm:adm /var/adm/sa'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown adm:adm /var/adm/sa'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25670,11 +25277,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$DSAM_REASON" = "absent" ]; then
     add security diracc_varadmsa_mode "/var/adm/sa mode" NOT_APPLICABLE med "/var/adm/sa absent"         "The probe returned the determinate-absence signature ('/var/adm/sa not found', exit $DSAM_RC); /var/adm/sa need not exist, so the mode boundary does not apply."         "n/a" "cis-l1"
   elif [ -n "$DSAM_REASON" ]; then
-    add security diracc_varadmsa_mode "/var/adm/sa mode" NOT_ASSESSED med         "not assessed — /var/adm/sa metadata $DSAM_REASON"         "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun AIXray." "cis-l1"
+    add security diracc_varadmsa_mode "/var/adm/sa mode" NOT_ASSESSED med         "not assessed — /var/adm/sa metadata $DSAM_REASON"         "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/adm/sa', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ "$DSAM_OK" = "1" ]; then
     add security diracc_varadmsa_mode "/var/adm/sa mode" PASS med "/var/adm/sa mode=$DSAM_MODE"         "/var/adm/sa has the required mode boundary." "n/a" "cis-l1"
   else
-    add security diracc_varadmsa_mode "/var/adm/sa mode" FAIL med "/var/adm/sa mode=$DSAM_MODE; requires no bits beyond 0755"         "/var/adm/sa violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0755 after validation: 'chmod 0755 /var/adm/sa'; AIXray recommends this command and never executes it." "cis-l1"
+    add security diracc_varadmsa_mode "/var/adm/sa mode" FAIL med "/var/adm/sa mode=$DSAM_MODE; requires no bits beyond 0755"         "/var/adm/sa violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0755 after validation: 'chmod 0755 /var/adm/sa'; PTxray recommends this command and never executes it." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_crontabs_owner — CIS L1-aligned /var/spool/cron/crontabs owner boundary.
@@ -25769,8 +25376,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DCTO_REASON" ]; then
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" NOT_ASSESSED med \
         "not assessed — /var/spool/cron/crontabs metadata $DCTO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DCTO_UID" = "2" ]; then
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" PASS med \
@@ -25781,7 +25388,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" FAIL med \
         "/var/spool/cron/crontabs owner_uid=$DCTO_UID" \
         "/var/spool/cron/crontabs violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/spool/cron/crontabs'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/spool/cron/crontabs'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25877,8 +25484,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DCTG_REASON" ]; then
     add security diracc_crontabs_group "/var/spool/cron/crontabs group" NOT_ASSESSED med \
         "not assessed — /var/spool/cron/crontabs metadata $DCTG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DCTG_GID" = "8" ]; then
     add security diracc_crontabs_group "/var/spool/cron/crontabs group" PASS med \
@@ -25889,7 +25496,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_crontabs_group "/var/spool/cron/crontabs group" FAIL med \
         "/var/spool/cron/crontabs group_gid=$DCTG_GID" \
         "/var/spool/cron/crontabs violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/spool/cron/crontabs'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/spool/cron/crontabs'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -25988,11 +25595,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$DCTM_REASON" = "absent" ]; then
     add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" NOT_APPLICABLE med "/var/spool/cron/crontabs absent"         "The probe returned the determinate-absence signature ('/var/spool/cron/crontabs not found', exit $DCTM_RC); /var/spool/cron/crontabs need not exist, so the mode boundary does not apply."         "n/a" "cis-l1"
   elif [ -n "$DCTM_REASON" ]; then
-    add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" NOT_ASSESSED med         "not assessed — /var/spool/cron/crontabs metadata $DCTM_REASON"         "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun AIXray." "cis-l1"
+    add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" NOT_ASSESSED med         "not assessed — /var/spool/cron/crontabs metadata $DCTM_REASON"         "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ "$DCTM_OK" = "1" ]; then
     add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" PASS med "/var/spool/cron/crontabs mode=$DCTM_MODE"         "/var/spool/cron/crontabs has the required mode boundary." "n/a" "cis-l1"
   else
-    add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" FAIL med "/var/spool/cron/crontabs mode=$DCTM_MODE"         "/var/spool/cron/crontabs violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0770 after validation: 'chmod 0770 /var/spool/cron/crontabs'; AIXray recommends this command and never executes it. if an extended ACL is reported, clear it after validation: 'echo | aclput /var/spool/cron/crontabs'." "cis-l1"
+    add security diracc_crontabs_mode "/var/spool/cron/crontabs mode" FAIL med "/var/spool/cron/crontabs mode=$DCTM_MODE"         "/var/spool/cron/crontabs violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0770 after validation: 'chmod 0770 /var/spool/cron/crontabs'; PTxray recommends this command and never executes it. if an extended ACL is reported, clear it after validation: 'echo | aclput /var/spool/cron/crontabs'." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_atjobs_owner — CIS L1-aligned /var/spool/cron/atjobs owner boundary.
@@ -26087,8 +25694,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DAJO_REASON" ]; then
     add security diracc_atjobs_owner "/var/spool/cron/atjobs owner" NOT_ASSESSED med \
         "not assessed — /var/spool/cron/atjobs metadata $DAJO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DAJO_UID" = "2" ]; then
     add security diracc_atjobs_owner "/var/spool/cron/atjobs owner" PASS med \
@@ -26099,7 +25706,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_atjobs_owner "/var/spool/cron/atjobs owner" FAIL med \
         "/var/spool/cron/atjobs owner_uid=$DAJO_UID" \
         "/var/spool/cron/atjobs violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/spool/cron/atjobs'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/spool/cron/atjobs'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -26195,8 +25802,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$DAJG_REASON" ]; then
     add security diracc_atjobs_group "/var/spool/cron/atjobs group" NOT_ASSESSED med \
         "not assessed — /var/spool/cron/atjobs metadata $DAJG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DAJG_GID" = "8" ]; then
     add security diracc_atjobs_group "/var/spool/cron/atjobs group" PASS med \
@@ -26207,7 +25814,7 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_atjobs_group "/var/spool/cron/atjobs group" FAIL med \
         "/var/spool/cron/atjobs group_gid=$DAJG_GID" \
         "/var/spool/cron/atjobs violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/spool/cron/atjobs'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/spool/cron/atjobs'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -26305,11 +25912,11 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$DAJM_REASON" = "absent" ]; then
     add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" NOT_APPLICABLE med "/var/spool/cron/atjobs absent"         "The probe returned the determinate-absence signature ('/var/spool/cron/atjobs not found', exit $DAJM_RC); /var/spool/cron/atjobs need not exist, so the mode boundary does not apply."         "n/a" "cis-l1"
   elif [ -n "$DAJM_REASON" ]; then
-    add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" NOT_ASSESSED med         "not assessed — /var/spool/cron/atjobs metadata $DAJM_REASON"         "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun AIXray." "cis-l1"
+    add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" NOT_ASSESSED med         "not assessed — /var/spool/cron/atjobs metadata $DAJM_REASON"         "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied."         "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ "$DAJM_OK" = "1" ]; then
     add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" PASS med "/var/spool/cron/atjobs mode=$DAJM_MODE"         "/var/spool/cron/atjobs has the required mode boundary." "n/a" "cis-l1"
   else
-    add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" FAIL med "/var/spool/cron/atjobs mode=$DAJM_MODE"         "/var/spool/cron/atjobs violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0770 after validation: 'chmod 0770 /var/spool/cron/atjobs'; AIXray recommends this command and never executes it. if an extended ACL is reported, clear it after validation: 'echo | aclput /var/spool/cron/atjobs'." "cis-l1"
+    add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" FAIL med "/var/spool/cron/atjobs mode=$DAJM_MODE"         "/var/spool/cron/atjobs violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0770 after validation: 'chmod 0770 /var/spool/cron/atjobs'; PTxray recommends this command and never executes it. if an extended ACL is reported, clear it after validation: 'echo | aclput /var/spool/cron/atjobs'." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_roothome — CIS L1-aligned dedicated root home boundary.
@@ -26358,20 +25965,20 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$DRH_REASON" ]; then
     add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
         "not assessed — $DRH_REASON" \
-        "AIXray did not obtain a trustworthy root home attribute, so it cannot claim the dedicated-home boundary is satisfied." \
-        "run 'lsuser -a home root', correct the capture problem, and rerun AIXray." \
+        "PTxray did not obtain a trustworthy root home attribute, so it cannot claim the dedicated-home boundary is satisfied." \
+        "run 'lsuser -a home root', correct the capture problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$DRH_HOME" = "/" ]; then
     add security diracc_roothome "root dedicated home" FAIL med \
         "root home=/" \
         "The root account uses / as its home directory, exposing root dotfiles to every user on the system." \
-        "create a dedicated home and move root after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root; chuser home=/root root'; AIXray recommends these commands and never executes them." \
+        "create a dedicated home and move root after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root; chuser home=/root root'; PTxray recommends these commands and never executes them." \
         "cis-l1"
   elif [ "$DRH_HOME" != "/root" ]; then
     add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
         "not assessed — root home=$DRH_HOME is non-standard; permissions not statically assessable" \
-        "AIXray only assesses the standard /root location; a non-standard dedicated home needs manual review." \
-        "review the ownership and mode of the configured root home manually, or relocate it to /root and rerun AIXray." \
+        "PTxray only assesses the standard /root location; a non-standard dedicated home needs manual review." \
+        "review the ownership and mode of the configured root home manually, or relocate it to /root and rerun PTxray." \
         "cis-l1"
   else
     DRH_LS_RAW=$(aixv diracc_roothome_ls ls -ldn /root)
@@ -26471,13 +26078,13 @@ _AIXRAY_SESSION_KEYS=""
       add security diracc_roothome "root dedicated home" FAIL med \
           "root home=/root but /root absent" \
           "The probe returned the determinate-absence signature ('/root not found', exit $DRH_LS_RC); root is configured with home=/root and that directory does not exist, so root has no dedicated home directory." \
-          "create the dedicated home after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root'; AIXray recommends these commands and never executes them." \
+          "create the dedicated home after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root'; PTxray recommends these commands and never executes them." \
           "cis-l1"
     elif [ -n "$DRH_REASON" ]; then
       add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
           "not assessed — $DRH_REASON" \
-          "AIXray did not obtain one trustworthy metadata row for /root, so it cannot claim the dedicated-home boundary is satisfied." \
-          "run 'ls -ldn /root', correct the capture or path problem, and rerun AIXray." \
+          "PTxray did not obtain one trustworthy metadata row for /root, so it cannot claim the dedicated-home boundary is satisfied." \
+          "run 'ls -ldn /root', correct the capture or path problem, and rerun PTxray." \
           "cis-l1"
     elif [ "$DRH_UID" = "0" ] && [ "$DRH_GID" = "0" ] && [ "$DRH_MODE_OK" = "1" ]; then
       add security diracc_roothome "root dedicated home" PASS med \
@@ -26488,7 +26095,7 @@ _AIXRAY_SESSION_KEYS=""
       add security diracc_roothome "root dedicated home" FAIL med \
           "root home=/root owner_uid=$DRH_UID group_gid=$DRH_GID mode=$DRH_MODE" \
           "The dedicated root home directory permits access beyond root, weakening protection of root's configuration files." \
-          "correct after validation: 'chown root:system /root; chmod 0700 /root'; AIXray recommends these commands and never executes them." \
+          "correct after validation: 'chown root:system /root; chmod 0700 /root'; PTxray recommends these commands and never executes them." \
           "cis-l1"
     fi
   fi
@@ -26596,8 +26203,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSMO_REASON" ]; then
     add security fileperm_smitlog_owner "/smit.log owner" NOT_ASSESSED med \
         "not assessed — /smit.log metadata $FSMO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSMO_UID" = "0" ]; then
     add security fileperm_smitlog_owner "/smit.log owner" PASS med \
@@ -26608,7 +26215,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_smitlog_owner "/smit.log owner" FAIL med \
         "/smit.log owner_uid=$FSMO_UID" \
         "/smit.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /smit.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /smit.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -26715,8 +26322,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSMG_REASON" ]; then
     add security fileperm_smitlog_group "/smit.log group" NOT_ASSESSED med \
         "not assessed — /smit.log metadata $FSMG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSMG_GID" = "0" ]; then
     add security fileperm_smitlog_group "/smit.log group" PASS med \
@@ -26727,7 +26334,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_smitlog_group "/smit.log group" FAIL med \
         "/smit.log group_gid=$FSMG_GID" \
         "/smit.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /smit.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /smit.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -26849,8 +26456,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSMM_REASON" ]; then
     add security fileperm_smitlog_mode "/smit.log mode" NOT_ASSESSED med \
         "not assessed — /smit.log metadata $FSMM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /smit.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSMM_OK" = "1" ]; then
     add security fileperm_smitlog_mode "/smit.log mode" PASS med \
@@ -26861,7 +26468,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_smitlog_mode "/smit.log mode" FAIL med \
         "/smit.log mode=$FSMM_MODE" \
         "/smit.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /smit.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /smit.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -26957,8 +26564,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FMOO_REASON" ]; then
     add security fileperm_motd_owner "/etc/motd owner" NOT_ASSESSED med \
         "not assessed — /etc/motd metadata $FMOO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FMOO_UID" = "2" ]; then
     add security fileperm_motd_owner "/etc/motd owner" PASS med \
@@ -26969,7 +26576,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_motd_owner "/etc/motd owner" FAIL med \
         "/etc/motd owner_uid=$FMOO_UID" \
         "/etc/motd violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:bin /etc/motd'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:bin /etc/motd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27065,8 +26672,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FMOG_REASON" ]; then
     add security fileperm_motd_group "/etc/motd group" NOT_ASSESSED med \
         "not assessed — /etc/motd metadata $FMOG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FMOG_GID" = "2" ]; then
     add security fileperm_motd_group "/etc/motd group" PASS med \
@@ -27077,7 +26684,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_motd_group "/etc/motd group" FAIL med \
         "/etc/motd group_gid=$FMOG_GID" \
         "/etc/motd violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:bin /etc/motd'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:bin /etc/motd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27188,8 +26795,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FMOM_REASON" ]; then
     add security fileperm_motd_mode "/etc/motd mode" NOT_ASSESSED med \
         "not assessed — /etc/motd metadata $FMOM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/motd', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FMOM_OK" = "1" ]; then
     add security fileperm_motd_mode "/etc/motd mode" PASS med \
@@ -27200,7 +26807,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_motd_mode "/etc/motd mode" FAIL med \
         "/etc/motd mode=$FMOM_MODE" \
         "/etc/motd violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/motd'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0644 after validation: 'chmod 0644 /etc/motd'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27312,8 +26919,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSCM_REASON" ]; then
     add security fileperm_submitcf_mode "/etc/mail/submit.cf mode" NOT_ASSESSED med \
         "not assessed — /etc/mail/submit.cf metadata $FSCM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /etc/mail/submit.cf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /etc/mail/submit.cf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSCM_OK" = "1" ]; then
     add security fileperm_submitcf_mode "/etc/mail/submit.cf mode" PASS med \
@@ -27324,7 +26931,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_submitcf_mode "/etc/mail/submit.cf mode" FAIL med \
         "/etc/mail/submit.cf mode=$FSCM_MODE; requires no bits beyond 0640" \
         "/etc/mail/submit.cf violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/mail/submit.cf'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /etc/mail/submit.cf'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27422,8 +27029,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSBO_REASON" ]; then
     add security fileperm_sshbanner_owner "Secure Shell login banner owner" NOT_ASSESSED med \
         "not assessed — OpenSSH login banner file metadata $FSBO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSBO_UID" = "0" ]; then
     add security fileperm_sshbanner_owner "Secure Shell login banner owner" PASS med \
@@ -27434,7 +27041,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshbanner_owner "Secure Shell login banner owner" FAIL med \
         "OpenSSH login banner file owner_uid=$FSBO_UID" \
         "The OpenSSH login banner file violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH login banner file owner to UID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH login banner file owner to UID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27532,8 +27139,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSBG_REASON" ]; then
     add security fileperm_sshbanner_group "Secure Shell login banner group" NOT_ASSESSED med \
         "not assessed — OpenSSH login banner file metadata $FSBG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSBG_GID" = "0" ]; then
     add security fileperm_sshbanner_group "Secure Shell login banner group" PASS med \
@@ -27544,7 +27151,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshbanner_group "Secure Shell login banner group" FAIL med \
         "OpenSSH login banner file group_gid=$FSBG_GID" \
         "The OpenSSH login banner file violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH login banner file group to GID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH login banner file group to GID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27657,8 +27264,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSBM_REASON" ]; then
     add security fileperm_sshbanner_mode "Secure Shell login banner mode" NOT_ASSESSED med \
         "not assessed — OpenSSH login banner file metadata $FSBM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH login banner file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSBM_OK" = "1" ]; then
     add security fileperm_sshbanner_mode "Secure Shell login banner mode" PASS med \
@@ -27669,7 +27276,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshbanner_mode "Secure Shell login banner mode" FAIL med \
         "OpenSSH login banner file mode=$FSBM_MODE" \
         "The OpenSSH login banner file violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, remove only permissions beyond 0644 from the OpenSSH login banner file; AIXray recommends this action and never executes it." \
+        "after validating the path, remove only permissions beyond 0644 from the OpenSSH login banner file; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27766,8 +27373,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSSO_REASON" ]; then
     add security fileperm_sshconfig_owner "Secure Shell client configuration owner" NOT_ASSESSED med \
         "not assessed — OpenSSH client configuration file metadata $FSSO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSSO_UID" = "0" ]; then
     add security fileperm_sshconfig_owner "Secure Shell client configuration owner" PASS med \
@@ -27778,7 +27385,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshconfig_owner "Secure Shell client configuration owner" FAIL med \
         "OpenSSH client configuration file owner_uid=$FSSO_UID" \
         "The OpenSSH client configuration file violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH client configuration file owner to UID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH client configuration file owner to UID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27875,8 +27482,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSSG_REASON" ]; then
     add security fileperm_sshconfig_group "Secure Shell client configuration group" NOT_ASSESSED med \
         "not assessed — OpenSSH client configuration file metadata $FSSG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSSG_GID" = "0" ]; then
     add security fileperm_sshconfig_group "Secure Shell client configuration group" PASS med \
@@ -27887,7 +27494,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshconfig_group "Secure Shell client configuration group" FAIL med \
         "OpenSSH client configuration file group_gid=$FSSG_GID" \
         "The OpenSSH client configuration file violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, change only the OpenSSH client configuration file group to GID 0; AIXray recommends this action and never executes it." \
+        "after validating the path, change only the OpenSSH client configuration file group to GID 0; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -27999,8 +27606,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSSM_REASON" ]; then
     add security fileperm_sshconfig_mode "Secure Shell client configuration mode" NOT_ASSESSED med \
         "not assessed — OpenSSH client configuration file metadata $FSSM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln' on the OpenSSH client configuration file, correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSSM_OK" = "1" ]; then
     add security fileperm_sshconfig_mode "Secure Shell client configuration mode" PASS med \
@@ -28011,7 +27618,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_sshconfig_mode "Secure Shell client configuration mode" FAIL med \
         "OpenSSH client configuration file mode=$FSSM_MODE" \
         "The OpenSSH client configuration file violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "after validating the path, remove only permissions beyond 0644 from the OpenSSH client configuration file; AIXray recommends this action and never executes it." \
+        "after validating the path, remove only permissions beyond 0644 from the OpenSSH client configuration file; PTxray recommends this action and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28108,8 +27715,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FAAO_REASON" ]; then
     add security fileperm_atallow_owner "/var/adm/cron/at.allow owner" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/at.allow metadata $FAAO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FAAO_UID" = "0" ]; then
     add security fileperm_atallow_owner "/var/adm/cron/at.allow owner" PASS med \
@@ -28120,7 +27727,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_atallow_owner "/var/adm/cron/at.allow owner" FAIL med \
         "/var/adm/cron/at.allow owner_uid=$FAAO_UID" \
         "/var/adm/cron/at.allow violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:sys /var/adm/cron/at.allow'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:sys /var/adm/cron/at.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28217,8 +27824,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FAAG_REASON" ]; then
     add security fileperm_atallow_group "/var/adm/cron/at.allow group" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/at.allow metadata $FAAG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FAAG_GID" = "3" ]; then
     add security fileperm_atallow_group "/var/adm/cron/at.allow group" PASS med \
@@ -28229,7 +27836,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_atallow_group "/var/adm/cron/at.allow group" FAIL med \
         "/var/adm/cron/at.allow group_gid=$FAAG_GID" \
         "/var/adm/cron/at.allow violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:sys /var/adm/cron/at.allow'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:sys /var/adm/cron/at.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28341,8 +27948,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FAAM_REASON" ]; then
     add security fileperm_atallow_mode "/var/adm/cron/at.allow mode" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/at.allow metadata $FAAM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/at.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FAAM_OK" = "1" ]; then
     add security fileperm_atallow_mode "/var/adm/cron/at.allow mode" PASS med \
@@ -28353,7 +27960,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_atallow_mode "/var/adm/cron/at.allow mode" FAIL med \
         "/var/adm/cron/at.allow mode=$FAAM_MODE" \
         "/var/adm/cron/at.allow violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0400 after validation: 'chmod 0400 /var/adm/cron/at.allow'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0400 after validation: 'chmod 0400 /var/adm/cron/at.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28450,8 +28057,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCAO_REASON" ]; then
     add security fileperm_cronallow_owner "/var/adm/cron/cron.allow owner" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/cron.allow metadata $FCAO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCAO_UID" = "0" ]; then
     add security fileperm_cronallow_owner "/var/adm/cron/cron.allow owner" PASS med \
@@ -28462,7 +28069,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronallow_owner "/var/adm/cron/cron.allow owner" FAIL med \
         "/var/adm/cron/cron.allow owner_uid=$FCAO_UID" \
         "/var/adm/cron/cron.allow violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:sys /var/adm/cron/cron.allow'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:sys /var/adm/cron/cron.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28559,8 +28166,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCAG_REASON" ]; then
     add security fileperm_cronallow_group "/var/adm/cron/cron.allow group" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/cron.allow metadata $FCAG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCAG_GID" = "3" ]; then
     add security fileperm_cronallow_group "/var/adm/cron/cron.allow group" PASS med \
@@ -28571,7 +28178,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronallow_group "/var/adm/cron/cron.allow group" FAIL med \
         "/var/adm/cron/cron.allow group_gid=$FCAG_GID" \
         "/var/adm/cron/cron.allow violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:sys /var/adm/cron/cron.allow'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:sys /var/adm/cron/cron.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28683,8 +28290,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCAM_REASON" ]; then
     add security fileperm_cronallow_mode "/var/adm/cron/cron.allow mode" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/cron.allow metadata $FCAM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/cron.allow', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCAM_OK" = "1" ]; then
     add security fileperm_cronallow_mode "/var/adm/cron/cron.allow mode" PASS med \
@@ -28695,7 +28302,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronallow_mode "/var/adm/cron/cron.allow mode" FAIL med \
         "/var/adm/cron/cron.allow mode=$FCAM_MODE" \
         "/var/adm/cron/cron.allow violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0400 after validation: 'chmod 0400 /var/adm/cron/cron.allow'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0400 after validation: 'chmod 0400 /var/adm/cron/cron.allow'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28791,8 +28398,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCLO_REASON" ]; then
     add security fileperm_cronlog_owner "/var/adm/cron/log owner" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/log metadata $FCLO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCLO_UID" = "2" ]; then
     add security fileperm_cronlog_owner "/var/adm/cron/log owner" PASS med \
@@ -28803,7 +28410,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronlog_owner "/var/adm/cron/log owner" FAIL med \
         "/var/adm/cron/log owner_uid=$FCLO_UID" \
         "/var/adm/cron/log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/adm/cron/log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/adm/cron/log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -28899,8 +28506,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCLG_REASON" ]; then
     add security fileperm_cronlog_group "/var/adm/cron/log group" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/log metadata $FCLG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCLG_GID" = "8" ]; then
     add security fileperm_cronlog_group "/var/adm/cron/log group" PASS med \
@@ -28911,7 +28518,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronlog_group "/var/adm/cron/log group" FAIL med \
         "/var/adm/cron/log group_gid=$FCLG_GID" \
         "/var/adm/cron/log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/adm/cron/log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown bin:cron /var/adm/cron/log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29022,8 +28629,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FCLM_REASON" ]; then
     add security fileperm_cronlog_mode "/var/adm/cron/log mode" NOT_ASSESSED med \
         "not assessed — /var/adm/cron/log metadata $FCLM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/adm/cron/log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FCLM_OK" = "1" ]; then
     add security fileperm_cronlog_mode "/var/adm/cron/log mode" PASS med \
@@ -29034,7 +28641,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_cronlog_mode "/var/adm/cron/log mode" FAIL med \
         "/var/adm/cron/log mode=$FCLM_MODE" \
         "/var/adm/cron/log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0660 after validation: 'chmod 0660 /var/adm/cron/log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0660 after validation: 'chmod 0660 /var/adm/cron/log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29130,8 +28737,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FRMO_REASON" ]; then
     add security fileperm_rmstartlog_owner "/var/ct/RMstart.log owner" NOT_ASSESSED med \
         "not assessed — /var/ct/RMstart.log metadata $FRMO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FRMO_UID" = "0" ]; then
     add security fileperm_rmstartlog_owner "/var/ct/RMstart.log owner" PASS med \
@@ -29142,7 +28749,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_rmstartlog_owner "/var/ct/RMstart.log owner" FAIL med \
         "/var/ct/RMstart.log owner_uid=$FRMO_UID" \
         "/var/ct/RMstart.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/ct/RMstart.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/ct/RMstart.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29238,8 +28845,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FRMG_REASON" ]; then
     add security fileperm_rmstartlog_group "/var/ct/RMstart.log group" NOT_ASSESSED med \
         "not assessed — /var/ct/RMstart.log metadata $FRMG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FRMG_GID" = "0" ]; then
     add security fileperm_rmstartlog_group "/var/ct/RMstart.log group" PASS med \
@@ -29250,7 +28857,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_rmstartlog_group "/var/ct/RMstart.log group" FAIL med \
         "/var/ct/RMstart.log group_gid=$FRMG_GID" \
         "/var/ct/RMstart.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/ct/RMstart.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/ct/RMstart.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29361,8 +28968,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FRMM_REASON" ]; then
     add security fileperm_rmstartlog_mode "/var/ct/RMstart.log mode" NOT_ASSESSED med \
         "not assessed — /var/ct/RMstart.log metadata $FRMM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/ct/RMstart.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FRMM_OK" = "1" ]; then
     add security fileperm_rmstartlog_mode "/var/ct/RMstart.log mode" PASS med \
@@ -29373,7 +28980,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_rmstartlog_mode "/var/ct/RMstart.log mode" FAIL med \
         "/var/ct/RMstart.log mode=$FRMM_MODE" \
         "/var/ct/RMstart.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/ct/RMstart.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/ct/RMstart.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29470,8 +29077,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FDPO_REASON" ]; then
     add security fileperm_dpid2log_owner "/var/tmp/dpid2.log owner" NOT_ASSESSED med \
         "not assessed — /var/tmp/dpid2.log metadata $FDPO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FDPO_UID" = "0" ]; then
     add security fileperm_dpid2log_owner "/var/tmp/dpid2.log owner" PASS med \
@@ -29482,7 +29089,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_dpid2log_owner "/var/tmp/dpid2.log owner" FAIL med \
         "/var/tmp/dpid2.log owner_uid=$FDPO_UID" \
         "/var/tmp/dpid2.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/dpid2.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/dpid2.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29579,8 +29186,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FDPG_REASON" ]; then
     add security fileperm_dpid2log_group "/var/tmp/dpid2.log group" NOT_ASSESSED med \
         "not assessed — /var/tmp/dpid2.log metadata $FDPG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FDPG_GID" = "0" ]; then
     add security fileperm_dpid2log_group "/var/tmp/dpid2.log group" PASS med \
@@ -29591,7 +29198,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_dpid2log_group "/var/tmp/dpid2.log group" FAIL med \
         "/var/tmp/dpid2.log group_gid=$FDPG_GID" \
         "/var/tmp/dpid2.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/dpid2.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/dpid2.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29703,8 +29310,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FDPM_REASON" ]; then
     add security fileperm_dpid2log_mode "/var/tmp/dpid2.log mode" NOT_ASSESSED med \
         "not assessed — /var/tmp/dpid2.log metadata $FDPM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/tmp/dpid2.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FDPM_OK" = "1" ]; then
     add security fileperm_dpid2log_mode "/var/tmp/dpid2.log mode" PASS med \
@@ -29715,7 +29322,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_dpid2log_mode "/var/tmp/dpid2.log mode" FAIL med \
         "/var/tmp/dpid2.log mode=$FDPM_MODE" \
         "/var/tmp/dpid2.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/dpid2.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/dpid2.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29811,8 +29418,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FHMO_REASON" ]; then
     add security fileperm_hostmibdlog_owner "/var/tmp/hostmibd.log owner" NOT_ASSESSED med \
         "not assessed — /var/tmp/hostmibd.log metadata $FHMO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FHMO_UID" = "0" ]; then
     add security fileperm_hostmibdlog_owner "/var/tmp/hostmibd.log owner" PASS med \
@@ -29823,7 +29430,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_hostmibdlog_owner "/var/tmp/hostmibd.log owner" FAIL med \
         "/var/tmp/hostmibd.log owner_uid=$FHMO_UID" \
         "/var/tmp/hostmibd.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/hostmibd.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/hostmibd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -29919,8 +29526,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FHMG_REASON" ]; then
     add security fileperm_hostmibdlog_group "/var/tmp/hostmibd.log group" NOT_ASSESSED med \
         "not assessed — /var/tmp/hostmibd.log metadata $FHMG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FHMG_GID" = "0" ]; then
     add security fileperm_hostmibdlog_group "/var/tmp/hostmibd.log group" PASS med \
@@ -29931,7 +29538,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_hostmibdlog_group "/var/tmp/hostmibd.log group" FAIL med \
         "/var/tmp/hostmibd.log group_gid=$FHMG_GID" \
         "/var/tmp/hostmibd.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/hostmibd.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/hostmibd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30042,8 +29649,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FHMM_REASON" ]; then
     add security fileperm_hostmibdlog_mode "/var/tmp/hostmibd.log mode" NOT_ASSESSED med \
         "not assessed — /var/tmp/hostmibd.log metadata $FHMM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/tmp/hostmibd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FHMM_OK" = "1" ]; then
     add security fileperm_hostmibdlog_mode "/var/tmp/hostmibd.log mode" PASS med \
@@ -30054,7 +29661,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_hostmibdlog_mode "/var/tmp/hostmibd.log mode" FAIL med \
         "/var/tmp/hostmibd.log mode=$FHMM_MODE; requires no bits beyond 0640" \
         "/var/tmp/hostmibd.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/hostmibd.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/hostmibd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30151,8 +29758,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSNO_REASON" ]; then
     add security fileperm_snmpdlog_owner "/var/tmp/snmpd.log owner" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpd.log metadata $FSNO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSNO_UID" = "0" ]; then
     add security fileperm_snmpdlog_owner "/var/tmp/snmpd.log owner" PASS med \
@@ -30163,7 +29770,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdlog_owner "/var/tmp/snmpd.log owner" FAIL med \
         "/var/tmp/snmpd.log owner_uid=$FSNO_UID" \
         "/var/tmp/snmpd.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/snmpd.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/snmpd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30260,8 +29867,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSNG_REASON" ]; then
     add security fileperm_snmpdlog_group "/var/tmp/snmpd.log group" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpd.log metadata $FSNG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSNG_GID" = "0" ]; then
     add security fileperm_snmpdlog_group "/var/tmp/snmpd.log group" PASS med \
@@ -30272,7 +29879,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdlog_group "/var/tmp/snmpd.log group" FAIL med \
         "/var/tmp/snmpd.log group_gid=$FSNG_GID" \
         "/var/tmp/snmpd.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/snmpd.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/snmpd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30384,8 +29991,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSNM_REASON" ]; then
     add security fileperm_snmpdlog_mode "/var/tmp/snmpd.log mode" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpd.log metadata $FSNM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpd.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSNM_OK" = "1" ]; then
     add security fileperm_snmpdlog_mode "/var/tmp/snmpd.log mode" PASS med \
@@ -30396,7 +30003,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdlog_mode "/var/tmp/snmpd.log mode" FAIL med \
         "/var/tmp/snmpd.log mode=$FSNM_MODE" \
         "/var/tmp/snmpd.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/snmpd.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/snmpd.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30492,8 +30099,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSVO_REASON" ]; then
     add security fileperm_snmpdv3log_owner "/var/tmp/snmpdv3.log owner" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpdv3.log metadata $FSVO_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSVO_UID" = "0" ]; then
     add security fileperm_snmpdv3log_owner "/var/tmp/snmpdv3.log owner" PASS med \
@@ -30504,7 +30111,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdv3log_owner "/var/tmp/snmpdv3.log owner" FAIL med \
         "/var/tmp/snmpdv3.log owner_uid=$FSVO_UID" \
         "/var/tmp/snmpdv3.log violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/snmpdv3.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/snmpdv3.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30600,8 +30207,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSVG_REASON" ]; then
     add security fileperm_snmpdv3log_group "/var/tmp/snmpdv3.log group" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpdv3.log metadata $FSVG_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the group boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSVG_GID" = "0" ]; then
     add security fileperm_snmpdv3log_group "/var/tmp/snmpdv3.log group" PASS med \
@@ -30612,7 +30219,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdv3log_group "/var/tmp/snmpdv3.log group" FAIL med \
         "/var/tmp/snmpdv3.log group_gid=$FSVG_GID" \
         "/var/tmp/snmpdv3.log violates the required group boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown root:system /var/tmp/snmpdv3.log'; AIXray recommends this command and never executes it." \
+        "correct ownership after validation: 'chown root:system /var/tmp/snmpdv3.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -30723,8 +30330,8 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FSVM_REASON" ]; then
     add security fileperm_snmpdv3log_mode "/var/tmp/snmpdv3.log mode" NOT_ASSESSED med \
         "not assessed — /var/tmp/snmpdv3.log metadata $FSVM_REASON" \
-        "AIXray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
-        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the mode boundary is satisfied." \
+        "run 'ls -ln /var/tmp/snmpdv3.log', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$FSVM_OK" = "1" ]; then
     add security fileperm_snmpdv3log_mode "/var/tmp/snmpdv3.log mode" PASS med \
@@ -30735,7 +30342,7 @@ _AIXRAY_SESSION_KEYS=""
     add security fileperm_snmpdv3log_mode "/var/tmp/snmpdv3.log mode" FAIL med \
         "/var/tmp/snmpdv3.log mode=$FSVM_MODE" \
         "/var/tmp/snmpdv3.log violates the required mode boundary and could let an unintended identity alter trusted configuration." \
-        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/snmpdv3.log'; AIXray recommends this command and never executes it." \
+        "remove only permissions beyond 0640 after validation: 'chmod 0640 /var/tmp/snmpdv3.log'; PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 
@@ -30927,7 +30534,7 @@ function eval_secattr {
     ST=WARN; SEV=med
     OBS="n/a"
     MEAN="Could not read the /etc/security account-policy stanzas (needs root); no STIG account/attribute rule could be assessed on this run."
-    FIX="re-run aixray as root to evaluate the account-policy controls; or inspect 'lssec -f /etc/security/user -s default' manually."
+    FIX="re-run ptxray as root to evaluate the account-policy controls; or inspect 'lssec -f /etc/security/user -s default' manually."
   elif [ "$NFAIL" -gt 0 ]; then
     ST=FAIL; SEV=high
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
@@ -31405,8 +31012,8 @@ _AIXRAY_SESSION_KEYS=""
 ${NFS_GAP_EVIDENCE}"
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "$NFS_OBS" \
-        "At least one non-comment evidence line was not exactly a /path [-options] export definition, or the same path had conflicting definitions, so AIXray cannot claim the export set was safely assessed." \
-        "inspect /etc/exports and the no-argument exportfs listing, resolve conflicting definitions or diagnostics, then rerun AIXray." "cis-l1"
+        "At least one non-comment evidence line was not exactly a /path [-options] export definition, or the same path had conflicting definitions, so PTxray cannot claim the export set was safely assessed." \
+        "inspect /etc/exports and the no-argument exportfs listing, resolve conflicting definitions or diagnostics, then rerun PTxray." "cis-l1"
   elif [ "$NFS_HIGH_COUNT" -gt 0 ]; then
     NFS_OBS=$NFS_EVIDENCE
     if [ -n "$NFS_PARTIAL_NOTE" ]; then
@@ -31445,47 +31052,47 @@ configured-but-not-live: $NFS_CONFIG_COUNT uncommented /etc/exports line(s); exp
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — both NFS evidence reads failed (/etc/exports exit=$NFS_CONFIG_RC; exportfs exit=$NFS_LIVE_RC)" \
         "Neither configured nor current NFS export evidence was readable, so absence of exports and safe export options cannot be established." \
-        "restore read access to /etc/exports and the no-argument exportfs listing, then re-run AIXray." "cis-l1"
+        "restore read access to /etc/exports and the no-argument exportfs listing, then re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_ABSENT" -eq 1 ] && [ "$NFS_LIVE_RC" -ne 0 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports is absent and the current exportfs listing failed (exit=$NFS_LIVE_RC)" \
         "Neither dormant export definitions nor the active export set could be established." \
-        "determine whether this host should have an /etc/exports definition file, restore access to the no-argument exportfs listing, and re-run AIXray." "cis-l1"
+        "determine whether this host should have an /etc/exports definition file, restore access to the no-argument exportfs listing, and re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_RC" -ne 0 ] && [ "$NFS_LIVE_RC" -ne 0 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports existence and read state could not be established (existence exit=$NFS_CONFIG_EXISTS_RC; read exit=$NFS_CONFIG_RC), and exportfs failed (exit=$NFS_LIVE_RC)" \
         "The definition-file state and current NFS export set are both unknown." \
-        "verify whether /etc/exports exists, establish the no-argument exportfs listing, and re-run AIXray." "cis-l1"
+        "verify whether /etc/exports exists, establish the no-argument exportfs listing, and re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_ABSENT" -eq 1 ] && [ "$NFS_LIVE_COUNT" -gt 0 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports is absent while the current exportfs listing contains $NFS_LIVE_COUNT active export line(s)" \
-        "Active exports were observed, but without the definition file AIXray cannot establish whether dormant exports exist or whether definitions are managed elsewhere." \
-        "determine how this host's active NFS exports are managed; restore or recreate /etc/exports if appropriate, then re-run AIXray." "cis-l1"
+        "Active exports were observed, but without the definition file PTxray cannot establish whether dormant exports exist or whether definitions are managed elsewhere." \
+        "determine how this host's active NFS exports are managed; restore or recreate /etc/exports if appropriate, then re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_ABSENT" -eq 1 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports is absent; the current exportfs evidence did not establish the exact no-export state" \
         "The definition file is missing and the live evidence was not sufficient to prove that this host exports no filesystems." \
-        "determine whether this host should have an /etc/exports definition file, verify the complete no-argument exportfs output, and re-run AIXray." "cis-l1"
+        "determine whether this host should have an /etc/exports definition file, verify the complete no-argument exportfs output, and re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_UNREADABLE" -eq 1 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports read failed (exit=$NFS_CONFIG_RC); no unsafe option was established from the current exportfs listing" \
         "The live listing alone did not establish an unsafe export, but unreadable configuration can contain dormant definitions that later become active." \
-        "restore read access to /etc/exports and re-run AIXray." "cis-l1"
+        "restore read access to /etc/exports and re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIG_RC" -ne 0 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — /etc/exports existence and read state could not be established (existence exit=$NFS_CONFIG_EXISTS_RC; read exit=$NFS_CONFIG_RC)" \
         "The live listing alone did not establish an unsafe export, and the configured export state remains unknown." \
-        "verify whether /etc/exports exists and can be captured, then re-run AIXray." "cis-l1"
+        "verify whether /etc/exports exists and can be captured, then re-run PTxray." "cis-l1"
   elif [ "$NFS_LIVE_RC" -ne 0 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "not assessed — current exportfs listing failed (exit=$NFS_LIVE_RC); no unsafe option was established from /etc/exports" \
         "The configuration alone did not establish an unsafe export, but the unreadable live listing can contain currently exported state not represented by that file." \
-        "restore access to the no-argument exportfs listing and re-run AIXray." "cis-l1"
+        "restore access to the no-argument exportfs listing and re-run PTxray." "cis-l1"
   elif [ "$NFS_LIVE_UNASSESSED" -eq 1 ]; then
     add security nfs_exports "NFS exports" NOT_ASSESSED high \
         "$NFS_LIVE_GAP_REASON; no unsafe option was established from /etc/exports" \
         "A successful live-listing capture must contain export rows or the exact AIX no-export sentinel before absence of current exports can be established." \
-        "rerun the no-argument exportfs listing, verify its complete stdout and return code, then re-run AIXray." "cis-l1"
+        "rerun the no-argument exportfs listing, verify its complete stdout and return code, then re-run PTxray." "cis-l1"
   elif [ "$NFS_CONFIGURED_ONLY" -eq 1 ]; then
     add security nfs_exports "NFS exports" WARN low \
         "configured-but-not-live: $NFS_CONFIG_COUNT uncommented /etc/exports line(s); exportfs listed no current exports" \
@@ -31519,8 +31126,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_BANNER_LAST_FIELD
   SSH_BANNER_STATUS=NOT_ASSESSED
   SSH_BANNER_OBSERVED=''
-  SSH_BANNER_MEANING='AIXray did not obtain trustworthy global effective Banner and regular-file evidence, so it cannot establish a usable pre-authentication banner.'
-  SSH_BANNER_FIX='run sshd -T as root, resolve any configuration or host-key error, verify the effective banner target, and rerun AIXray.'
+  SSH_BANNER_MEANING='PTxray did not obtain trustworthy global effective Banner and regular-file evidence, so it cannot establish a usable pre-authentication banner.'
+  SSH_BANNER_FIX='run sshd -T as root, resolve any configuration or host-key error, verify the effective banner target, and rerun PTxray.'
   SSH_BANNER_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -31560,7 +31167,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_BANNER_STATUS=FAIL
           SSH_BANNER_OBSERVED='Banner none'
           SSH_BANNER_MEANING='sshd has no usable regular-file pre-authentication banner configured.'
-          SSH_BANNER_FIX="configure an approved absolute Banner file, validate the global effective path with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          SSH_BANNER_FIX="configure an approved absolute Banner file, validate the global effective path with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
         /*)
           SSH_BANNER_PATH=$SSH_BANNER_PARSED
@@ -31595,12 +31202,12 @@ _AIXRAY_SESSION_KEYS=""
               SSH_BANNER_STATUS=FAIL
               SSH_BANNER_OBSERVED="Banner $SSH_BANNER_PATH; target exists but is not a regular file"
               SSH_BANNER_MEANING='sshd has no usable regular-file pre-authentication banner configured.'
-              SSH_BANNER_FIX='replace the effective Banner target with an approved regular file, validate sshd_config, and restart sshd; AIXray only recommends these actions.'
+              SSH_BANNER_FIX='replace the effective Banner target with an approved regular file, validate sshd_config, and restart sshd; PTxray only recommends these actions.'
             elif [ "$SSH_BANNER_LAST_FIELD" != "$SSH_BANNER_PATH" ]; then
               SSH_BANNER_STATUS=FAIL
               SSH_BANNER_OBSERVED="Banner $SSH_BANNER_PATH; file metadata path mismatch"
               SSH_BANNER_MEANING='sshd has no positively identified regular-file pre-authentication banner target.'
-              SSH_BANNER_FIX='inspect the effective Banner path and target metadata, correct the mismatch, and rerun AIXray.'
+              SSH_BANNER_FIX='inspect the effective Banner path and target metadata, correct the mismatch, and rerun PTxray.'
             else
               SSH_BANNER_STATUS=PASS
               SSH_BANNER_OBSERVED="Banner $SSH_BANNER_PATH; regular file present"
@@ -31614,7 +31221,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_BANNER_STATUS=FAIL
           SSH_BANNER_OBSERVED="Banner $SSH_BANNER_PATH; relative path is misconfiguration"
           SSH_BANNER_MEANING='sshd has no usable regular-file pre-authentication banner configured.'
-          SSH_BANNER_FIX='set Banner to an approved absolute regular-file path, validate sshd_config, and restart sshd; AIXray only recommends these actions.'
+          SSH_BANNER_FIX='set Banner to an approved absolute regular-file path, validate sshd_config, and restart sshd; PTxray only recommends these actions.'
           ;;
       esac
     fi
@@ -31904,7 +31511,7 @@ _AIXRAY_SESSION_KEYS=""
     SBD_STATUS=FAIL
     SBD_OBS="$SBD_EVIDENCE"
     SBD_MEAN="Software that a Secure by Default installation never installs is present on this system, so this system was not installed with Secure by Default."
-    SBD_FIX="Secure by Default is an installation-time option and cannot be enabled afterwards: rebuild the system with Secure by Default selected, or remove the excluded software and apply /etc/security/aixpert/core/SbD.xml through the approved change process. AIXray recommends these actions and never performs them."
+    SBD_FIX="Secure by Default is an installation-time option and cannot be enabled afterwards: rebuild the system with Secure by Default selected, or remove the excluded software and apply /etc/security/aixpert/core/SbD.xml through the approved change process. PTxray recommends these actions and never performs them."
   elif [ "$SBD_CLASS1" = POSITIVE ]; then
     SBD_STATUS=PASS
     SBD_OBS="SbD applied at install: $SBD_CLASS1_WHY"
@@ -31914,12 +31521,12 @@ _AIXRAY_SESSION_KEYS=""
     SBD_STATUS=FAIL
     SBD_OBS="no SbD install evidence: $SBD_CLASS1_WHY"
     SBD_MEAN="No artifact of the Secure by Default first-boot step exists on this system, so Secure by Default was not selected when it was installed. Absence of the excluded binaries alone does not satisfy this control: a normal install hardened by hand looks identical."
-    SBD_FIX="Secure by Default is an installation-time option and cannot be enabled afterwards: rebuild the system with Secure by Default selected, or accept the residual risk on the record after confirming the excluded applications are removed and the AIX Security Expert high-level profile is applied. AIXray recommends these actions and never performs them."
+    SBD_FIX="Secure by Default is an installation-time option and cannot be enabled afterwards: rebuild the system with Secure by Default selected, or accept the residual risk on the record after confirming the excluded applications are removed and the AIX Security Expert high-level profile is applied. PTxray recommends these actions and never performs them."
   else
     SBD_STATUS=NOT_ASSESSED
     SBD_OBS="not assessed — SbD install evidence unreadable (aixpert log rc=$SBD_LOGDIR_RC, /etc/firstboot rc=$SBD_FIRSTBOOT_RC)"
     SBD_MEAN="Neither the aixpert first-boot log directory nor /etc/firstboot could be read, and no excluded software was found, so whether Secure by Default was selected at installation is unknown."
-    SBD_FIX="rerun AIXray with an identity that can read /etc/security/aixpert/log and /etc/firstboot, then rerun the check."
+    SBD_FIX="rerun PTxray with an identity that can read /etc/security/aixpert/log and /etc/firstboot, then rerun the check."
   fi
 
   add security secure_by_default "Secure by Default installation" \
@@ -31998,11 +31605,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_FS_MEANING="The legacy CDE desktop is installed; its daemons and setuid binaries have a long history of remotely and locally exploitable defects."
-      CDE_FS_FIX="after confirming no workload needs CDE, preview removal with 'installp -up <fileset>' and remove with 'installp -ug <fileset>' for each X11.Dt fileset; AIXray only recommends these actions."
+      CDE_FS_FIX="after confirming no workload needs CDE, preview removal with 'installp -up <fileset>' and remove with 'installp -ug <fileset>' for each X11.Dt fileset; PTxray only recommends these actions."
       ;;
     *)
-      CDE_FS_MEANING="AIXray did not obtain trustworthy package-inventory evidence for the CDE fileset family."
-      CDE_FS_FIX="run \"lslpp -qcL 'X11.Dt*'\" as root, resolve the query or output-shape problem, and rerun AIXray."
+      CDE_FS_MEANING="PTxray did not obtain trustworthy package-inventory evidence for the CDE fileset family."
+      CDE_FS_FIX="run \"lslpp -qcL 'X11.Dt*'\" as root, resolve the query or output-shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -32073,7 +31680,7 @@ _AIXRAY_SESSION_KEYS=""
         CDE_CMSD_STATUS=FAIL
         CDE_CMSD_OBSERVED="cmsd active in /etc/inetd.conf"
         CDE_CMSD_MEANING="The CDE calendar daemon is exposed through inetd; rpc.cmsd has a history of remotely exploitable defects that yield root."
-        CDE_CMSD_FIX="after service-owner approval, comment the exact cmsd definition and refresh inetd; AIXray only recommends these actions."
+        CDE_CMSD_FIX="after service-owner approval, comment the exact cmsd definition and refresh inetd; PTxray only recommends these actions."
       else
         CDE_CMSD_STATUS=NOT_ASSESSED
         case "$CDE_CMSD_PARSED" in
@@ -32084,8 +31691,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             CDE_CMSD_OBSERVED="not assessed - cmsd inetd probe rc=0 but output was empty after grep" ;;
         esac
-        CDE_CMSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        CDE_CMSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -32097,15 +31704,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         CDE_CMSD_STATUS=NOT_ASSESSED
         CDE_CMSD_OBSERVED="not assessed - cmsd inetd probe rc=1 but output was non-empty (contradictory)"
-        CDE_CMSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        CDE_CMSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       CDE_CMSD_STATUS=NOT_ASSESSED
       CDE_CMSD_OBSERVED="not assessed - cmsd inetd probe grep failed (rc=$CDE_CMSD_RC)"
-      CDE_CMSD_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      CDE_CMSD_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      CDE_CMSD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -32188,11 +31795,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_DTL_MEANING="dtlogin starts at boot; the CDE login manager listens for graphical logins and enlarges the attack surface of a server that does not need it."
-      CDE_DTL_FIX="after confirming no console workflow needs CDE, disable the boot entry with '/usr/dt/bin/dtconfig -d'; AIXray only recommends this action."
+      CDE_DTL_FIX="after confirming no console workflow needs CDE, disable the boot entry with '/usr/dt/bin/dtconfig -d'; PTxray only recommends this action."
       ;;
     *)
-      CDE_DTL_MEANING="AIXray did not obtain trustworthy inittab evidence for the dt entry."
-      CDE_DTL_FIX="run \"grep -E '^dt:' /etc/inittab\" as root, resolve the read or shape problem, and rerun AIXray."
+      CDE_DTL_MEANING="PTxray did not obtain trustworthy inittab evidence for the dt entry."
+      CDE_DTL_FIX="run \"grep -E '^dt:' /etc/inittab\" as root, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -32271,7 +31878,7 @@ _AIXRAY_SESSION_KEYS=""
         CDE_DTSPC_STATUS=FAIL
         CDE_DTSPC_OBSERVED="dtspc active in /etc/inetd.conf"
         CDE_DTSPC_MEANING="The CDE subprocess control service is exposed through inetd; dtspcd buffer overflows have historically yielded root."
-        CDE_DTSPC_FIX="after service-owner approval, comment the exact dtspc definition and refresh inetd; AIXray only recommends these actions."
+        CDE_DTSPC_FIX="after service-owner approval, comment the exact dtspc definition and refresh inetd; PTxray only recommends these actions."
       else
         CDE_DTSPC_STATUS=NOT_ASSESSED
         case "$CDE_DTSPC_PARSED" in
@@ -32282,8 +31889,8 @@ _AIXRAY_SESSION_KEYS=""
           *)
             CDE_DTSPC_OBSERVED="not assessed - dtspc inetd probe rc=0 but output was empty after grep" ;;
         esac
-        CDE_DTSPC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        CDE_DTSPC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -32295,15 +31902,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         CDE_DTSPC_STATUS=NOT_ASSESSED
         CDE_DTSPC_OBSERVED="not assessed - dtspc inetd probe rc=1 but output was non-empty (contradictory)"
-        CDE_DTSPC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-        CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        CDE_DTSPC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+        CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       CDE_DTSPC_STATUS=NOT_ASSESSED
       CDE_DTSPC_OBSERVED="not assessed - dtspc inetd probe grep failed (rc=$CDE_DTSPC_RC)"
-      CDE_DTSPC_MEANING="AIXray did not obtain trustworthy service-definition evidence."
-      CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      CDE_DTSPC_MEANING="PTxray did not obtain trustworthy service-definition evidence."
+      CDE_DTSPC_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -32398,11 +32005,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_SUID_MEANING="A CDE binary still carries setuid or setgid; CDE suid programs have a history of local privilege-escalation defects."
-      CDE_SUID_FIX="after confirming no CDE workflow needs the bit, remove it with 'chmod ug-s <path>' per listed binary; AIXray only recommends this action."
+      CDE_SUID_FIX="after confirming no CDE workflow needs the bit, remove it with 'chmod ug-s <path>' per listed binary; PTxray only recommends this action."
       ;;
     *)
-      CDE_SUID_MEANING="AIXray did not obtain trustworthy file-mode evidence for the CDE binaries."
-      CDE_SUID_FIX="run 'ls -ld /usr/dt/bin/dtaction /usr/dt/bin/dtappgather /usr/dt/bin/dtprintinfo /usr/dt/bin/dtsession' as root, resolve the probe problem, and rerun AIXray."
+      CDE_SUID_MEANING="PTxray did not obtain trustworthy file-mode evidence for the CDE binaries."
+      CDE_SUID_FIX="run 'ls -ld /usr/dt/bin/dtaction /usr/dt/bin/dtappgather /usr/dt/bin/dtprintinfo /usr/dt/bin/dtsession' as root, resolve the probe problem, and rerun PTxray."
       ;;
   esac
 
@@ -32509,11 +32116,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_XRP_MEANING="XDMCP is reachable, so remote systems can request CDE login sessions; X11 traffic is unencrypted and dtlogin enlarges the remote attack surface."
-      CDE_XRP_FIX="copy /usr/dt/config/Xconfig to /etc/dt/config/Xconfig if needed and set the uncommented resource 'Dtlogin.requestPort: 0', then restart dtlogin; AIXray only recommends these actions."
+      CDE_XRP_FIX="copy /usr/dt/config/Xconfig to /etc/dt/config/Xconfig if needed and set the uncommented resource 'Dtlogin.requestPort: 0', then restart dtlogin; PTxray only recommends these actions."
       ;;
     *)
-      CDE_XRP_MEANING="AIXray did not obtain trustworthy evidence for the CDE XDMCP posture."
-      CDE_XRP_FIX="verify the CDE fileset state with \"lslpp -qcL 'X11.Dt*'\" and the requestPort resource in the dt Xconfig files as root, then rerun AIXray."
+      CDE_XRP_MEANING="PTxray did not obtain trustworthy evidence for the CDE XDMCP posture."
+      CDE_XRP_FIX="verify the CDE fileset state with \"lslpp -qcL 'X11.Dt*'\" and the requestPort resource in the dt Xconfig files as root, then rerun PTxray."
       ;;
   esac
 
@@ -32626,11 +32233,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_SCR_MEANING="An unattended CDE session stays unlocked beyond the benchmark window, exposing the console session to walk-up access."
-      CDE_SCR_FIX="set 'dtsession*saverTimeout: 10' and 'dtsession*lockTimeout: 10' in the dt sys.resources files (site copy under /etc/dt/config preferred); AIXray only recommends these actions."
+      CDE_SCR_FIX="set 'dtsession*saverTimeout: 10' and 'dtsession*lockTimeout: 10' in the dt sys.resources files (site copy under /etc/dt/config preferred); PTxray only recommends these actions."
       ;;
     *)
-      CDE_SCR_MEANING="AIXray did not obtain trustworthy evidence for the CDE screensaver policy."
-      CDE_SCR_FIX="verify the CDE fileset state and the dtsession timeout resources as root, then rerun AIXray."
+      CDE_SCR_MEANING="PTxray did not obtain trustworthy evidence for the CDE screensaver policy."
+      CDE_SCR_FIX="verify the CDE fileset state and the dtsession timeout resources as root, then rerun PTxray."
       ;;
   esac
 
@@ -32734,11 +32341,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_GRT_MEANING="The CDE login screen reveals the host name before authentication, giving reconnaissance information to anyone who can reach a session."
-      CDE_GRT_FIX="copy the dt Xresources files under /etc/dt/config and set 'Dtlogin*greeting.labelString' and 'Dtlogin*greeting.persLabelString' to site text without the %LocalHost% macro; AIXray only recommends these actions."
+      CDE_GRT_FIX="copy the dt Xresources files under /etc/dt/config and set 'Dtlogin*greeting.labelString' and 'Dtlogin*greeting.persLabelString' to site text without the %LocalHost% macro; PTxray only recommends these actions."
       ;;
     *)
-      CDE_GRT_MEANING="AIXray did not obtain trustworthy evidence for the CDE greeting configuration."
-      CDE_GRT_FIX="verify the CDE fileset state and the Dtlogin greeting resources as root, then rerun AIXray."
+      CDE_GRT_MEANING="PTxray did not obtain trustworthy evidence for the CDE greeting configuration."
+      CDE_GRT_FIX="verify the CDE fileset state and the Dtlogin greeting resources as root, then rerun PTxray."
       ;;
   esac
 
@@ -32853,11 +32460,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_XCA_MEANING="A non-root or group/other-writable dt Xconfig lets a local user redefine dtlogin behavior, including the programs it runs as root."
-      CDE_XCA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; AIXray only recommends these actions."
+      CDE_XCA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; PTxray only recommends these actions."
       ;;
     *)
-      CDE_XCA_MEANING="AIXray did not obtain trustworthy file-access evidence for the dt Xconfig file."
-      CDE_XCA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xconfig files as root, then rerun AIXray."
+      CDE_XCA_MEANING="PTxray did not obtain trustworthy file-access evidence for the dt Xconfig file."
+      CDE_XCA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xconfig files as root, then rerun PTxray."
       ;;
   esac
 
@@ -32972,11 +32579,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_XSA_MEANING="A non-root or group/other-writable dt Xservers lets a local user change how and with what arguments the local X server is started."
-      CDE_XSA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; AIXray only recommends these actions."
+      CDE_XSA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; PTxray only recommends these actions."
       ;;
     *)
-      CDE_XSA_MEANING="AIXray did not obtain trustworthy file-access evidence for the dt Xservers file."
-      CDE_XSA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xservers files as root, then rerun AIXray."
+      CDE_XSA_MEANING="PTxray did not obtain trustworthy file-access evidence for the dt Xservers file."
+      CDE_XSA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xservers files as root, then rerun PTxray."
       ;;
   esac
 
@@ -33091,11 +32698,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       CDE_XRA_MEANING="A non-root or group/other-writable dt Xresources lets a local user change the resources merged into every CDE login session, including the login-screen behavior."
-      CDE_XRA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; AIXray only recommends these actions."
+      CDE_XRA_FIX="restore restrictive access with 'chown root:bin <file>' and 'chmod go-w <file>' for each listed file; PTxray only recommends these actions."
       ;;
     *)
-      CDE_XRA_MEANING="AIXray did not obtain trustworthy file-access evidence for the dt Xresources file."
-      CDE_XRA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xresources files as root, then rerun AIXray."
+      CDE_XRA_MEANING="PTxray did not obtain trustworthy file-access evidence for the dt Xresources file."
+      CDE_XRA_FIX="verify the CDE fileset state and 'ls -ld' the dt Xresources files as root, then rerun PTxray."
       ;;
   esac
 
@@ -33307,8 +32914,8 @@ if [ "$SSHPKG_CLIENT_RESULT" = unknown ] || [ "$SSHPKG_SERVER_RESULT" = unknown 
   if [ -n "$SSHPKG_SERVER_REASON" ]; then
     SSHPKG_OBS="$SSHPKG_OBS; $SSHPKG_SERVER_REASON"
   fi
-  SSHPKG_MEAN="AIXray could not determine the installed and healthy state of the OpenSSH client and server filesets from the package inventory."
-  SSHPKG_FIX="restore a readable 'lslpp -L' query for both filesets and rerun AIXray."
+  SSHPKG_MEAN="PTxray could not determine the installed and healthy state of the OpenSSH client and server filesets from the package inventory."
+  SSHPKG_FIX="restore a readable 'lslpp -L' query for both filesets and rerun PTxray."
 elif [ "$SSHPKG_CLIENT_RESULT" = absent ] || [ "$SSHPKG_SERVER_RESULT" = absent ] ||
      [ "$SSHPKG_CLIENT_RESULT" = unhealthy ] || [ "$SSHPKG_SERVER_RESULT" = unhealthy ]; then
   SSHPKG_STATUS=FAIL
@@ -33325,7 +32932,7 @@ elif [ "$SSHPKG_CLIENT_RESULT" = absent ] || [ "$SSHPKG_SERVER_RESULT" = absent 
     fi
   fi
   SSHPKG_MEAN="The OpenSSH client and server filesets must both be installed and in a healthy state; a missing fileset or a broken, obsolete, inconsistent, or efix-locked state is non-compliant."
-  SSHPKG_FIX="install or repair the affected fileset(s) with 'installp' and rerun AIXray; AIXray only recommends these actions."
+  SSHPKG_FIX="install or repair the affected fileset(s) with 'installp' and rerun PTxray; PTxray only recommends these actions."
 else
   SSHPKG_STATUS=PASS
   SSHPKG_SEV=low
@@ -33410,7 +33017,7 @@ _AIXRAY_SESSION_KEYS=""
     SCC_OVERALL=NOT_ASSESSED
     SCC_SEV=low
     SCC_MEAN="Capture evidence was incomplete, so the scheduled configuration capture and its syslog routing could not be verified."
-    SCC_FIX="restore access to 'crontab -l' and /etc/syslog.conf, then rerun AIXray."
+    SCC_FIX="restore access to 'crontab -l' and /etc/syslog.conf, then rerun PTxray."
   fi
 
   SCC_OBS="$SCC_CRON_OBS; $SCC_SYS_OBS"
@@ -33498,7 +33105,7 @@ _AIXRAY_SESSION_KEYS=""
         *)
           add security trustchk_te_tep "Trusted Execution and Trusted Execution Path enabled" \
               NOT_ASSESSED med "not assessed — trustchk -p TE TEP output unparseable (rc=0)" \
-              "The successful capture did not have the expected shape (three lines: TE=, boolean TEP=, and a TEP= PATH), so AIXray cannot determine the TE/TEP state." \
+              "The successful capture did not have the expected shape (three lines: TE=, boolean TEP=, and a TEP= PATH), so PTxray cannot determine the TE/TEP state." \
               "as root, run 'trustchk -p TE TEP' manually and inspect the output shape." "cis-l2"
           ;;
       esac
@@ -33506,13 +33113,13 @@ _AIXRAY_SESSION_KEYS=""
     127)
       add security trustchk_te_tep "Trusted Execution and Trusted Execution Path enabled" \
           NOT_ASSESSED med "not assessed — trustchk not executable (rc=127)" \
-          "trustchk is mode 500 (owner root); a non-root run cannot execute it, and an absent binary also returns rc=127. AIXray cannot determine the TE/TEP state." \
-          "run AIXray as root, or run 'trustchk -p TE TEP' manually as root." "cis-l2"
+          "trustchk is mode 500 (owner root); a non-root run cannot execute it, and an absent binary also returns rc=127. PTxray cannot determine the TE/TEP state." \
+          "run PTxray as root, or run 'trustchk -p TE TEP' manually as root." "cis-l2"
       ;;
     *)
       add security trustchk_te_tep "Trusted Execution and Trusted Execution Path enabled" \
           NOT_ASSESSED med "not assessed — trustchk -p TE TEP capture failed (rc=$TCHK_RC)" \
-          "trustchk returned a non-zero exit status for an unknown reason, so AIXray cannot determine the TE/TEP state." \
+          "trustchk returned a non-zero exit status for an unknown reason, so PTxray cannot determine the TE/TEP state." \
           "as root, run 'trustchk -p TE TEP' manually and inspect the error." "cis-l2"
       ;;
   esac
@@ -33552,13 +33159,13 @@ _AIXRAY_SESSION_KEYS=""
           TLS_STATUS=FAIL
           TLS_OBS="kernel security policies are not locked (LOCK_KERN_POLICIES=OFF)"
           TLS_MEAN="Kernel security policies are unlocked and can be modified at runtime, so the policy set in force is not necessarily the one loaded at boot."
-          TLS_FIX="set LOCK_KERN_POLICIES=ON with 'trustchk -p LOCK_KERN_POLICIES=ON' and reboot so the locked policy set is loaded at boot; AIXray only recommends this action."
+          TLS_FIX="set LOCK_KERN_POLICIES=ON with 'trustchk -p LOCK_KERN_POLICIES=ON' and reboot so the locked policy set is loaded at boot; PTxray only recommends this action."
           ;;
         *)
           TLS_STATUS=NOT_ASSESSED
           TLS_OBS="not assessed - trustchk -p LOCK_KERN_POLICIES output was unparseable"
-          TLS_MEAN="AIXray could not interpret the trustchk output, so the kernel policy lock state is unknown."
-          TLS_FIX="ensure 'trustchk -p LOCK_KERN_POLICIES' returns a single LOCK_KERN_POLICIES=ON or LOCK_KERN_POLICIES=OFF line, then rerun AIXray."
+          TLS_MEAN="PTxray could not interpret the trustchk output, so the kernel policy lock state is unknown."
+          TLS_FIX="ensure 'trustchk -p LOCK_KERN_POLICIES' returns a single LOCK_KERN_POLICIES=ON or LOCK_KERN_POLICIES=OFF line, then rerun PTxray."
           ;;
       esac
       ;;
@@ -33569,8 +33176,8 @@ _AIXRAY_SESSION_KEYS=""
       if aix_capture_missing trustchk_lock_kern; then
         TLS_STATUS=NOT_ASSESSED
         TLS_OBS="not assessed - trustchk_lock_kern probe was not captured for this system"
-        TLS_MEAN="The trustchk -p LOCK_KERN_POLICIES capture is absent from this scan fixture set, so AIXray cannot tell whether trustchk is genuinely absent or merely unrecorded."
-        TLS_FIX="capture 'trustchk -p LOCK_KERN_POLICIES' from a representative AIX host, then rerun AIXray."
+        TLS_MEAN="The trustchk -p LOCK_KERN_POLICIES capture is absent from this scan fixture set, so PTxray cannot tell whether trustchk is genuinely absent or merely unrecorded."
+        TLS_FIX="capture 'trustchk -p LOCK_KERN_POLICIES' from a representative AIX host, then rerun PTxray."
       else
         TLS_STATUS=NOT_APPLICABLE
         TLS_OBS="not applicable - trustchk not found; Trusted Execution subsystem absent"
@@ -33581,8 +33188,8 @@ _AIXRAY_SESSION_KEYS=""
     *)
       TLS_STATUS=NOT_ASSESSED
       TLS_OBS="not assessed - trustchk -p LOCK_KERN_POLICIES capture failed (rc=$TLS_KERN_RC)"
-      TLS_MEAN="AIXray could not read the kernel policy lock state, so the state is unknown."
-      TLS_FIX="ensure 'trustchk -p LOCK_KERN_POLICIES' runs without error, then rerun AIXray."
+      TLS_MEAN="PTxray could not read the kernel policy lock state, so the state is unknown."
+      TLS_FIX="ensure 'trustchk -p LOCK_KERN_POLICIES' runs without error, then rerun PTxray."
       ;;
   esac
 
@@ -33686,8 +33293,8 @@ _AIXRAY_SESSION_KEYS=""
     uncaptured)
       TC_STATUS=NOT_ASSESSED; TC_SEV=low
       TC_OBS="not assessed - trustchk_te_chkexec probe was not captured for this system"
-      TC_MEAN="The trustchk -p TE CHKEXEC capture is absent from this scan fixture set, so AIXray cannot tell whether Trusted Execution is genuinely absent or merely unrecorded."
-      TC_FIX="capture '/usr/sbin/trustchk -p TE CHKEXEC' from a representative AIX host, then rerun AIXray."
+      TC_MEAN="The trustchk -p TE CHKEXEC capture is absent from this scan fixture set, so PTxray cannot tell whether Trusted Execution is genuinely absent or merely unrecorded."
+      TC_FIX="capture '/usr/sbin/trustchk -p TE CHKEXEC' from a representative AIX host, then rerun PTxray."
       ;;
     disabled)
       TC_STATUS=FAIL; TC_SEV=high
@@ -33699,13 +33306,13 @@ _AIXRAY_SESSION_KEYS=""
         TC_OBS="Trusted Execution disabled - CHKEXEC is off"
       fi
       TC_MEAN="Trusted Execution is not enforcing executable integrity with CHKEXEC; the control requires both attributes on."
-      TC_FIX="enable TE and CHKEXEC with trustchk, restart the trustchk daemon, and re-run AIXray."
+      TC_FIX="enable TE and CHKEXEC with trustchk, restart the trustchk daemon, and re-run PTxray."
       ;;
     failed)
       TC_STATUS=NOT_ASSESSED; TC_SEV=high
       TC_OBS="not assessed - trustchk -p TE CHKEXEC probe failed (rc=$TRUST_RC)"
-      TC_MEAN="AIXray could not read the Trusted Execution CHKEXEC state, so no enforcement verdict is possible."
-      TC_FIX="run /usr/sbin/trustchk -p TE CHKEXEC manually, resolve the failure, and re-run AIXray."
+      TC_MEAN="PTxray could not read the Trusted Execution CHKEXEC state, so no enforcement verdict is possible."
+      TC_FIX="run /usr/sbin/trustchk -p TE CHKEXEC manually, resolve the failure, and re-run PTxray."
       ;;
     enabled)
       case "$SYS_STATE" in
@@ -33730,16 +33337,16 @@ _AIXRAY_SESSION_KEYS=""
         *)
           TC_STATUS=NOT_ASSESSED; TC_SEV=low
           TC_OBS="not assessed - syslog kern.info probe returned an unanticipated rc ($SYS_RC)"
-          TC_MEAN="AIXray could not determine whether kern.info logging is configured."
-          TC_FIX="inspect /etc/syslog.conf and re-run AIXray."
+          TC_MEAN="PTxray could not determine whether kern.info logging is configured."
+          TC_FIX="inspect /etc/syslog.conf and re-run PTxray."
           ;;
       esac
       ;;
     *)
       TC_STATUS=NOT_ASSESSED; TC_SEV=high
       TC_OBS="not assessed - trustchk probe returned an unanticipated rc ($TRUST_RC)"
-      TC_MEAN="AIXray could not read the Trusted Execution CHKEXEC state."
-      TC_FIX="run /usr/sbin/trustchk -p TE CHKEXEC manually, resolve the failure, and re-run AIXray."
+      TC_MEAN="PTxray could not read the Trusted Execution CHKEXEC state."
+      TC_FIX="run /usr/sbin/trustchk -p TE CHKEXEC manually, resolve the failure, and re-run PTxray."
       ;;
   esac
 
@@ -33868,12 +33475,12 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       TRUSTCK_MEANING="A Trusted Execution policy key is set so the host will run binaries that were never validated."
-      TRUSTCK_FIX="as the TE admin, set each offending key to its compliant value with trustchk; AIXray only recommends these actions."
+      TRUSTCK_FIX="as the TE admin, set each offending key to its compliant value with trustchk; PTxray only recommends these actions."
       TRUSTCK_SEV=med
       ;;
     *)
-      TRUSTCK_MEANING="AIXray did not obtain trustworthy Trusted Execution policy evidence."
-      TRUSTCK_FIX="run \"trustchk -p stop_untrustd stop_on_chkfail te\" as root, resolve the read or shape problem, and rerun AIXray."
+      TRUSTCK_MEANING="PTxray did not obtain trustworthy Trusted Execution policy evidence."
+      TRUSTCK_FIX="run \"trustchk -p stop_untrustd stop_on_chkfail te\" as root, resolve the read or shape problem, and rerun PTxray."
       TRUSTCK_SEV=low
       ;;
   esac
@@ -33917,7 +33524,7 @@ _AIXRAY_SESSION_KEYS=""
     add security trustchk_untrusted_scan "Untrusted file scan" NOT_ASSESSED low \
         "not assessed — trustchk not found (rc=$TRUSTCHK_AVAILABLE_RC)" \
         "The trusted-signature scan tool is not present on this system, so the installed software inventory could not be compared against the trusted signature database." \
-        "install the trustchk tool and its trusted signature database, then rerun AIXray." \
+        "install the trustchk tool and its trusted signature database, then rerun PTxray." \
         "cis-l2"
   else
     # Probe 2: run the scan. trustchk writes its report to stderr, so capture
@@ -33991,7 +33598,7 @@ _AIXRAY_SESSION_KEYS=""
       add security trustchk_untrusted_scan "Untrusted file scan" FAIL high \
           "$TRUSTCHK_SUMMARY" \
           "At least one installed file did not match the trusted signature database. The installed inventory deviates from the system's trusted signatures and must be investigated and remediated." \
-          "review the untrusted files named by 'trustchk -i -n tree /', verify their provenance, and restore or remove them, then rerun AIXray." \
+          "review the untrusted files named by 'trustchk -i -n tree /', verify their provenance, and restore or remove them, then rerun PTxray." \
           "cis-l2"
     else
       # Non-zero rc and nothing parseable: the scan did not get far enough to
@@ -34004,7 +33611,7 @@ _AIXRAY_SESSION_KEYS=""
       add security trustchk_untrusted_scan "Untrusted file scan" NOT_ASSESSED low \
           "not assessed — trustchk scan failed (rc=$TRUSTCHK_SCAN_RC)$TRUSTCHK_DIAG" \
           "The trusted-signature scan itself failed without naming a single file, so whether any installed file is untrusted is unknown." \
-          "run 'trustchk -i -n tree /' with the needed authority, resolve the scan failure, then rerun AIXray." \
+          "run 'trustchk -i -n tree /' with the needed authority, resolve the scan failure, then rerun PTxray." \
           "cis-l2"
     fi
   fi
@@ -34064,8 +33671,8 @@ _AIXRAY_SESSION_KEYS=""
       SLD_FIX="remove each dangling symlink, or retarget it to the path it should resolve to."
       ;;
     *)
-      SLD_MEANING="AIXray could not determine whether dangling symlinks exist because the scan did not complete."
-      SLD_FIX="investigate why the local-filesystem find scan did not complete, then rerun AIXray."
+      SLD_MEANING="PTxray could not determine whether dangling symlinks exist because the scan did not complete."
+      SLD_FIX="investigate why the local-filesystem find scan did not complete, then rerun PTxray."
       ;;
   esac
 
@@ -34113,8 +33720,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$UD_REASON" ]; then
     add security umask_default "Default umask" NOT_ASSESSED med \
         "not assessed — umask $UD_REASON" \
-        "AIXray did not obtain one trustworthy default umask assignment, so it cannot claim the boundary is satisfied." \
-        "run 'lssec -f /etc/security/user -s default -a umask', correct the capture or ambiguity, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy default umask assignment, so it cannot claim the boundary is satisfied." \
+        "run 'lssec -f /etc/security/user -s default -a umask', correct the capture or ambiguity, and rerun PTxray." \
         "cis-l1"
   elif [ "$UD_STATUS" = "PASS" ]; then
     add security umask_default "Default umask" PASS med \
@@ -34125,7 +33732,7 @@ _AIXRAY_SESSION_KEYS=""
     add security umask_default "Default umask" FAIL med \
         "$UD_FAILURE" \
         "The default umask is missing or less restrictive than 027, so new files can be created with wider permissions than intended." \
-        "set the default stanza umask attribute to 027 or stricter after validating local policy; AIXray recommends this change and never executes it." \
+        "set the default stanza umask attribute to 027 or stricter after validating local policy; PTxray recommends this change and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -34187,8 +33794,8 @@ _AIXRAY_SESSION_KEYS=""
       WWD_FIX="set the sticky bit with 'chmod +t <path>' on each listed directory, after confirming no workflow depends on unowned deletion there."
       ;;
     *)
-      WWD_MEANING="AIXray did not obtain trustworthy evidence of the world-writable directory state."
-      WWD_FIX="run the find probe as root, resolve the probe problem, and rerun AIXray."
+      WWD_MEANING="PTxray did not obtain trustworthy evidence of the world-writable directory state."
+      WWD_FIX="run the find probe as root, resolve the probe problem, and rerun PTxray."
       ;;
   esac
 
@@ -34221,14 +33828,14 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$WWO_RC" -ne 0 ] && [ -z "$WWO_RAW" ]; then
     add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
         "not assessed — ww_objects failed (rc=$WWO_RC) and produced no listing" \
-        "The group-writable-object scan did not complete and returned nothing, so AIXray cannot enumerate the objects that would need group-write review." \
-        "Confirm the group-writable-object scan completes without error, then rerun AIXray." \
+        "The group-writable-object scan did not complete and returned nothing, so PTxray cannot enumerate the objects that would need group-write review." \
+        "Confirm the group-writable-object scan completes without error, then rerun PTxray." \
         "cis-l2"
   elif [ "$ADM_RC" -ne 0 ]; then
     add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
         "not assessed — admin_groups failed (rc=$ADM_RC)" \
-        "The administrative-group enumeration did not complete, so AIXray cannot identify which objects' group-write would require review." \
-        "Confirm the administrative-group enumeration completes without error, then rerun AIXray." \
+        "The administrative-group enumeration did not complete, so PTxray cannot identify which objects' group-write would require review." \
+        "Confirm the administrative-group enumeration completes without error, then rerun PTxray." \
         "cis-l2"
   elif [ -z "$WWO_RAW" ]; then
     # Reached only when the scan completed (rc=0), so empty output is a determinate
@@ -34297,8 +33904,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$WWO_PARSE_RC" -ne 0 ]; then
       add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
           "not assessed — worldwrite_objects parse failed (rc=$WWO_PARSE_RC)" \
-          "The group-writable-object listing could not be parsed, so AIXray cannot enumerate the objects that would need group-write review." \
-          "Rerun AIXray and report the parse failure." \
+          "The group-writable-object listing could not be parsed, so PTxray cannot enumerate the objects that would need group-write review." \
+          "Rerun PTxray and report the parse failure." \
           "cis-l2"
     elif [ "$WWO_HITS" -eq 0 ] && [ "$WWO_RC" -ne 0 ]; then
       # Nothing found, but the traversal did not complete. Absence is exactly what an
@@ -34306,7 +33913,7 @@ _AIXRAY_SESSION_KEYS=""
       add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
           "not assessed — scan incomplete (rc=$WWO_RC) and no admin-group object was observed" \
           "No administratively-owned group-writable object was seen, but the filesystem traversal did not complete, so their absence is not established." \
-          "Resolve the traversal errors (commonly unreadable paths or dangling symlinks under 'find -L'), then rerun AIXray." \
+          "Resolve the traversal errors (commonly unreadable paths or dangling symlinks under 'find -L'), then rerun PTxray." \
           "cis-l2"
     elif [ "$WWO_HITS" -eq 0 ]; then
       add security worldwrite_objects "group-writable admin-group objects" PASS low \
@@ -34317,7 +33924,7 @@ _AIXRAY_SESSION_KEYS=""
       add security worldwrite_objects "group-writable admin-group objects" FAIL high \
           "$WWO_PATHS" \
           "$WWO_HITS group-writable non-directory object(s) on local jfs/jfs2 filesystems are owned by an administrative group; their group-write permission has not been shown reviewed and approved." \
-          "Review each listed object and either remove group-write where it is not required or record the approval. AIXray recommends the chmod command and never executes it." \
+          "Review each listed object and either remove group-write where it is not required or record the approval. PTxray recommends the chmod command and never executes it." \
           "cis-l2"
     fi
   fi
@@ -34356,11 +33963,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       WW_MEANING="At least one regular file on a local JFS or JFS2 filesystem grants world write, exposing an unauthenticated file-modification path."
-      WW_FIX="after confirming no application depends on the bit, remove world write with 'chmod o-w <path>' per listed file; AIXray only recommends this action."
+      WW_FIX="after confirming no application depends on the bit, remove world write with 'chmod o-w <path>' per listed file; PTxray only recommends this action."
       ;;
     *)
-      WW_MEANING="AIXray did not obtain a trustworthy world-writable file listing."
-      WW_FIX="run 'find / \\( -fstype jfs -o -fstype jfs2 \\) -type f -perm -o+w -ls' as root, resolve the probe failure, and rerun AIXray."
+      WW_MEANING="PTxray did not obtain a trustworthy world-writable file listing."
+      WW_FIX="run 'find / \\( -fstype jfs -o -fstype jfs2 \\) -type f -perm -o+w -ls' as root, resolve the probe failure, and rerun PTxray."
       ;;
   esac
 
@@ -34407,8 +34014,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$GWS_REASON" ]; then
     add security groupwrite_staff_files "Group-staff-writable files" NOT_ASSESSED med \
         "not assessed — $GWS_REASON" \
-        "AIXray could not obtain one trustworthy file listing, so it cannot assert whether any regular file is both staff-group-owned and group-writable on a JFS or JFS2 filesystem." \
-        "run 'find / \\( -fstype jfs -o -fstype jfs2 \\) -type f -perm -g+w -group staff -ls' manually, resolve the error, then rerun AIXray."
+        "PTxray could not obtain one trustworthy file listing, so it cannot assert whether any regular file is both staff-group-owned and group-writable on a JFS or JFS2 filesystem." \
+        "run 'find / \\( -fstype jfs -o -fstype jfs2 \\) -type f -perm -g+w -group staff -ls' manually, resolve the error, then rerun PTxray."
   elif [ -z "$GWS_RAW" ]; then
     add security groupwrite_staff_files "Group-staff-writable files" PASS low \
         "no matching files" \
@@ -34418,12 +34025,12 @@ _AIXRAY_SESSION_KEYS=""
     add security groupwrite_staff_files "Group-staff-writable files" FAIL med \
         "$GWS_VALID matching file(s)" \
         "At least one regular file on a JFS or JFS2 filesystem is both staff-group-owned and writable by that group; each such file is a violation regardless of path, mode, or content." \
-        "confirm the listed files are intended, then remove group write where it is not: 'chmod g-w <path>'; AIXray recommends this command and never executes it."
+        "confirm the listed files are intended, then remove group write where it is not: 'chmod g-w <path>'; PTxray recommends this command and never executes it."
   else
     add security groupwrite_staff_files "Group-staff-writable files" NOT_ASSESSED med \
         "listing unparseable" \
         "The file search returned text that is not recognizable as file-listing records, so no violation count can be trusted." \
-        "rerun AIXray; if the same text persists, investigate why the find command produced it."
+        "rerun PTxray; if the same text persists, investigate why the find command produced it."
   fi
 _AIXRAY_SESSION_KEYS=""
 # unowned_files — control 3.6: local (jfs/jfs2) filesystem ownership boundary.
@@ -34467,7 +34074,7 @@ if [ "$UF_RC" -eq 0 ]; then
     add security unowned_files "Unowned or ungrouped files on local filesystems" FAIL high \
         "$UF_OBS" \
         "Entries whose owner or group does not resolve to a known identity are detached from accountable identities and from any lifecycle that reassigns or removes them." \
-        "Assign the correct owner and group after validating the entry, or remove it if orphaned; AIXray only recommends, never executes." "cis-l1"
+        "Assign the correct owner and group after validating the entry, or remove it if orphaned; PTxray only recommends, never executes." "cis-l1"
   fi
 elif [ "$UF_RC" -eq 1 ]; then
   if [ "$UF_COUNT" -ne 0 ]; then
@@ -34480,13 +34087,13 @@ elif [ "$UF_RC" -eq 1 ]; then
     add security unowned_files "Unowned or ungrouped files on local filesystems" NOT_ASSESSED low \
         "scan incomplete; no unowned or ungrouped entries in the traversable portion" \
         "Traversal errors (typically a non-root run) prevented a complete scan and no violations were found in what could be scanned, so completeness is unknown." \
-        "Rerun AIXray as root for a complete traversal." "cis-l1"
+        "Rerun PTxray as root for a complete traversal." "cis-l1"
   fi
 else
   add security unowned_files "Unowned or ungrouped files on local filesystems" NOT_ASSESSED low \
         "probe failed (find rc=$UF_RC)" \
         "The find probe failed fatally, so the local filesystem ownership boundary could not be assessed." \
-        "Inspect why find exited with rc=$UF_RC and rerun AIXray." "cis-l1"
+        "Inspect why find exited with rc=$UF_RC and rerun PTxray." "cis-l1"
 fi
 _AIXRAY_SESSION_KEYS=""
 # cron_command_paths — CIS 4.1.1.17-aligned walk of every absolute-path command
@@ -34612,20 +34219,20 @@ if [ -n "$CCP_REASON" ]; then
     *)
       add security cron_command_paths "cron command paths" NOT_ASSESSED med \
         "not assessed — $CCP_REASON" \
-        "AIXray could not enumerate the crontab command paths, so it cannot assess them." \
-        "run 'crontab -l', correct the probe problem, and rerun AIXray." "cis-l1"
+        "PTxray could not enumerate the crontab command paths, so it cannot assess them." \
+        "run 'crontab -l', correct the probe problem, and rerun PTxray." "cis-l1"
       ;;
   esac
 elif [ "$CCP_BAD" -eq 1 ]; then
   add security cron_command_paths "cron command paths" FAIL med \
     "a cron command path component is group-writable, world-writable, or owned by neither root(0) nor bin(2)" \
     "Every absolute-path command in the crontab, and each ancestor directory up to the root, must be not group-writable, not world-writable, and owned by uid 0 or 2. At least one inspected component ($CCP_VIOL) violates that boundary." \
-    "after validation, correct the mode and owner of each offending path component; AIXray recommends this remediation and never executes it." "cis-l1"
+    "after validation, correct the mode and owner of each offending path component; PTxray recommends this remediation and never executes it." "cis-l1"
 elif [ "$CCP_NA" -eq 1 ]; then
   add security cron_command_paths "cron command paths" NOT_ASSESSED med \
     "not assessed — ls -ldn failed for at least one path component" \
-    "AIXray could not obtain trustworthy metadata for every inspected path component, so it cannot certify the full command chain." \
-    "run 'ls -ldn' on each crontab command path, correct the probe problem, and rerun AIXray." "cis-l1"
+    "PTxray could not obtain trustworthy metadata for every inspected path component, so it cannot certify the full command chain." \
+    "run 'ls -ldn' on each crontab command path, correct the probe problem, and rerun PTxray." "cis-l1"
 else
   add security cron_command_paths "cron command paths" PASS med \
     "all inspected cron command path components are clean" \
@@ -34660,8 +34267,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$HCFP_LSUSER_RC" -ne 0 ]; then
     HCFP_STATUS=NOT_ASSESSED
     HCFP_OBS="not assessed — user enumeration failed (rc=$HCFP_LSUSER_RC)"
-    HCFP_MEAN="AIXray could not enumerate local users, so it cannot tell which home directories hold user configuration files."
-    HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun AIXray."
+    HCFP_MEAN="PTxray could not enumerate local users, so it cannot tell which home directories hold user configuration files."
+    HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun PTxray."
   else
     HCFP_HOME_COUNT=$(printf '%s\n' "$HCFP_LSUSER_RAW" | awk '
       NF {
@@ -34678,8 +34285,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$HCFP_HOME_PARSE_RC" -ne 0 ] || [ -z "$HCFP_HOME_COUNT" ]; then
       HCFP_STATUS=NOT_ASSESSED
       HCFP_OBS="not assessed — user home enumeration unparseable"
-      HCFP_MEAN="AIXray could not derive the set of qualifying home directories from the captured user list."
-      HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun AIXray."
+      HCFP_MEAN="PTxray could not derive the set of qualifying home directories from the captured user list."
+      HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun PTxray."
     elif [ "$HCFP_HOME_COUNT" -eq 0 ]; then
       HCFP_STATUS=NOT_APPLICABLE
       HCFP_OBS="not applicable — no qualifying home directories"
@@ -34702,8 +34309,8 @@ _AIXRAY_SESSION_KEYS=""
       if [ "$HCFP_CAND_RC" -ne 0 ] || [ -z "$HCFP_CANDIDATES" ]; then
         HCFP_STATUS=NOT_ASSESSED
         HCFP_OBS="not assessed — could not extract candidate homes from user list"
-        HCFP_MEAN="AIXray could not derive the set of qualifying home directories from the captured user list."
-        HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun AIXray."
+        HCFP_MEAN="PTxray could not derive the set of qualifying home directories from the captured user list."
+        HCFP_FIX="run 'lsuser -a home ALL', correct the capture problem, and rerun PTxray."
       else
         HCFP_PARSED_COUNT=0
         HCFP_VIOLATED=0
@@ -34761,8 +34368,8 @@ _AIXRAY_SESSION_KEYS=""
         if [ -n "$HCFP_REFUSAL" ]; then
           HCFP_STATUS=NOT_ASSESSED
           HCFP_OBS="not assessed — $HCFP_REFUSAL"
-          HCFP_MEAN="AIXray could not enumerate configuration files in every qualifying home directory, so it cannot render a trustworthy verdict."
-          HCFP_FIX="correct the home directory listing captures and rerun AIXray."
+          HCFP_MEAN="PTxray could not enumerate configuration files in every qualifying home directory, so it cannot render a trustworthy verdict."
+          HCFP_FIX="correct the home directory listing captures and rerun PTxray."
         elif [ "$HCFP_VIOLATED" -ne 0 ]; then
           HCFP_STATUS=FAIL
           if [ -n "$HCFP_UNLISTABLE" ]; then
@@ -34771,7 +34378,7 @@ _AIXRAY_SESSION_KEYS=""
             HCFP_OBS="$HCFP_VIOLATED of $HCFP_PARSED_COUNT user configuration files writable by group or other"
           fi
           HCFP_MEAN="At least one user configuration file is writable by group or other, letting an unauthorized local identity alter a user's shell environment or stored credentials."
-          HCFP_FIX="remove the group- and other-write bits after validation, e.g. 'chmod go-w <file>'; AIXray recommends this command and never executes it."
+          HCFP_FIX="remove the group- and other-write bits after validation, e.g. 'chmod go-w <file>'; PTxray recommends this command and never executes it."
         elif [ "$HCFP_PARSED_COUNT" -gt 0 ]; then
           HCFP_STATUS=PASS
           if [ -n "$HCFP_UNLISTABLE" ]; then
@@ -34786,7 +34393,7 @@ _AIXRAY_SESSION_KEYS=""
             HCFP_STATUS=PASS
             HCFP_OBS="no user configuration files found; home(s) not listable: $HCFP_UNLISTABLE"
             HCFP_MEAN="No regular dotfile exists in any listable qualifying home directory, so none can carry a group- or other-write bit. One or more home directories could not be listed; their contents were not inspected."
-            HCFP_FIX="verify the unlistable home directories exist and are accessible, then rerun AIXray."
+            HCFP_FIX="verify the unlistable home directories exist and are accessible, then rerun PTxray."
           else
             HCFP_STATUS=PASS
             HCFP_OBS="no user configuration files found in any qualifying home directory"
@@ -34811,8 +34418,8 @@ _AIXRAY_SESSION_KEYS=""
   #      never executed and no capture ever carried suid_sgid_local /
   #      suid_sgid_all at all.
   #   2. Authorization, decided by the first layer that applies:
-  #        a. site baseline   /etc/security/aixray-suid-sgid-baseline
-  #        b. not-maintained  /etc/security/aixray-suid-sgid-baseline.override
+  #        a. site baseline   /etc/security/ptxray-suid-sgid-baseline
+  #        b. not-maintained  /etc/security/ptxray-suid-sgid-baseline.override
   #                           (consulted only when no site baseline exists)
   #        c. shipped default: vendor ownership read from AIX's own package
   #           database, one `lslpp -w <path>` probe per discovered path.
@@ -34831,7 +34438,7 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSI_PATHS SSI_P SSI_KEY SSI_LW SSI_LW_RC SSI_CLASS
   typeset SSI_UNOWNED SSI_UNKNOWN
 
-  SSI_BASELINE=/etc/security/aixray-suid-sgid-baseline
+  SSI_BASELINE=/etc/security/ptxray-suid-sgid-baseline
   SSI_ALLOW=${SSI_BASELINE}.allow
   SSI_OVERRIDE=${SSI_BASELINE}.override
   SSI_ALLOW_SRC=/dev/null
@@ -35069,7 +34676,7 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       SSI_MEANING="At least one setuid/setgid file exists on disk that no approved baseline entry, site exception, or installed fileset accounts for; it may be unauthorized."
-      SSI_FIX="review each unaccounted file, approve or remove it, then record approvals in the baseline or the .allow exception file; AIXray only recommends this action."
+      SSI_FIX="review each unaccounted file, approve or remove it, then record approvals in the baseline or the .allow exception file; PTxray only recommends this action."
       SSI_SEV=high
       ;;
     NOT_APPLICABLE)
@@ -35078,8 +34685,8 @@ _AIXRAY_SESSION_KEYS=""
       SSI_SEV=med
       ;;
     *)
-      SSI_MEANING="AIXray could not resolve every setuid/setgid file to an authorization: either the inventory probe failed or fileset ownership could not be read for at least one path."
-      SSI_FIX="rerun as root, confirm lslpp can query the software vital product database, or provision a readable baseline at /etc/security/aixray-suid-sgid-baseline, then rerun AIXray."
+      SSI_MEANING="PTxray could not resolve every setuid/setgid file to an authorization: either the inventory probe failed or fileset ownership could not be read for at least one path."
+      SSI_FIX="rerun as root, confirm lslpp can query the software vital product database, or provision a readable baseline at /etc/security/ptxray-suid-sgid-baseline, then rerun PTxray."
       SSI_SEV=med
       ;;
   esac
@@ -35116,7 +34723,7 @@ _AIXRAY_SESSION_KEYS=""
   # user removal. RBAC role assignments (lsuser -a roles) are NOT in scope:
   # covering them would need a capture key that no fixture or live capture
   # carries, and the admin attribute plus UID 0 is the privileged definition
-  # the rest of AIXray already reasons about.
+  # the rest of PTxray already reasons about.
   #
   # The snapshot lives with the report, in the operator's --out directory, and
   # never inside the audited system's configuration; writing to /etc/security
@@ -35160,7 +34767,7 @@ _AIXRAY_SESSION_KEYS=""
   [ -n "$AID_HOSTKEY" ] || AID_HOSTKEY=unknown
   AID_SNAP_DIR=${AIXRAY_ACCOUNT_SNAPSHOT_DIR:-${OUT_DIR:-}}
   if [ -n "$AID_SNAP_DIR" ]; then
-    AID_SNAPSHOT_FILE="$AID_SNAP_DIR/aixray-account-inventory-$AID_HOSTKEY.snapshot"
+    AID_SNAPSHOT_FILE="$AID_SNAP_DIR/ptxray-account-inventory-$AID_HOSTKEY.snapshot"
   fi
 
   AID_UID0=$(aix passwd_uid0 awk -F: '$3==0 {print $1}' /etc/passwd)
@@ -35343,12 +34950,12 @@ _AIXRAY_SESSION_KEYS=""
     FAIL)
       AID_SEV=high
       AID_MEAN="At least one account has gained administrator standing since the previous scan. A new administrator is new standing privilege on this host, and it is the one account change that is an access grant rather than a bookkeeping event."
-      AID_FIX="attribute each added administrator to an approved request, remove any that has none, and record the survivors in the account inventory; AIXray recommends this, it never changes an account."
+      AID_FIX="attribute each added administrator to an approved request, remove any that has none, and record the survivors in the account inventory; PTxray recommends this, it never changes an account."
       ;;
     WARN)
       AID_SEV=med
       AID_MEAN="The set of accounts has changed since the previous scan without any account gaining administrator standing. Nothing here grants new privilege, but the inventory is now out of date until each change is attributed."
-      AID_FIX="attribute each added or removed account to an approved joiner, mover or leaver record and bring the account inventory back into line; AIXray recommends this, it never changes an account."
+      AID_FIX="attribute each added or removed account to an approved joiner, mover or leaver record and bring the account inventory back into line; PTxray recommends this, it never changes an account."
       ;;
     NOT_APPLICABLE)
       AID_SEV=low
@@ -35357,8 +34964,8 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     *)
       AID_SEV=med
-      AID_MEAN="AIXray did not obtain a trustworthy read of the account database, so it cannot say which accounts exist, let alone which of them changed."
-      AID_FIX="rerun AIXray as an identity that can read the account database (root), then rerun to establish the comparison."
+      AID_MEAN="PTxray did not obtain a trustworthy read of the account database, so it cannot say which accounts exist, let alone which of them changed."
+      AID_FIX="rerun PTxray as an identity that can read the account database (root), then rerun to establish the comparison."
       ;;
   esac
 
@@ -35383,8 +34990,8 @@ AHE_REFUSE=0
 if [ "$AHE_RC" -ne 0 ]; then
   add security account_home_exists "account home directories exist" NOT_ASSESSED med \
       "lsuser capture failed (rc=$AHE_RC)" \
-      "AIXray could not enumerate local account home attributes, so it cannot assess whether every qualifying account has an existing home directory." \
-      "correct the lsuser capture failure and rerun AIXray." \
+      "PTxray could not enumerate local account home attributes, so it cannot assess whether every qualifying account has an existing home directory." \
+      "correct the lsuser capture failure and rerun PTxray." \
       "cis-l1"
 else
   AHE_CANDIDATES=$(printf '%s\n' "$AHE_RAW" | awk '
@@ -35414,8 +35021,8 @@ else
   if [ "$AHE_PARSE_RC" -ne 0 ]; then
     add security account_home_exists "account home directories exist" NOT_ASSESSED med \
         "capture unparseable" \
-        "AIXray obtained lsuser output that did not match the expected one-line-per-account format, so it cannot determine which home directories are present." \
-        "inspect the lsuser capture and rerun AIXray once the output is well-formed." \
+        "PTxray obtained lsuser output that did not match the expected one-line-per-account format, so it cannot determine which home directories are present." \
+        "inspect the lsuser capture and rerun PTxray once the output is well-formed." \
         "cis-l1"
   elif [ -z "$AHE_CANDIDATES" ]; then
     add security account_home_exists "account home directories exist" PASS med \
@@ -35451,8 +35058,8 @@ else
       else
         add security account_home_exists "account home directories exist" NOT_ASSESSED med \
             "home probe failed for $AHE_ACCT (rc=$AHE_HOME_RC)" \
-            "AIXray could not read the home directory of account $AHE_ACCT, so it cannot establish whether every qualifying account has an existing home directory." \
-            "resolve why the home directory of $AHE_ACCT could not be read, then rerun AIXray." \
+            "PTxray could not read the home directory of account $AHE_ACCT, so it cannot establish whether every qualifying account has an existing home directory." \
+            "resolve why the home directory of $AHE_ACCT could not be read, then rerun PTxray." \
             "cis-l1"
         AHE_REFUSE=1
         break
@@ -35464,7 +35071,7 @@ else
         add security account_home_exists "account home directories exist" FAIL med \
             "accounts_checked=$AHE_COUNT missing=$AHE_MISSING" \
             "At least one qualifying local account has a home directory that does not exist on the filesystem." \
-            "create the missing home directory or correct the account home attribute, then rerun AIXray." \
+            "create the missing home directory or correct the account home attribute, then rerun PTxray." \
             "cis-l1"
       else
         add security account_home_exists "account home directories exist" PASS med \
@@ -35526,8 +35133,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ -n "$AHO_REASON" ]; then
     add security account_home_owner "account home owner" NOT_ASSESSED high \
         "not assessed — $AHO_REASON" \
-        "AIXray did not obtain a trustworthy account inventory, so it cannot claim every non-system account's home boundary is satisfied." \
-        "run 'lsuser -R files -a id home account_locked ALL', correct the capture problem, and rerun AIXray." \
+        "PTxray did not obtain a trustworthy account inventory, so it cannot claim every non-system account's home boundary is satisfied." \
+        "run 'lsuser -R files -a id home account_locked ALL', correct the capture problem, and rerun PTxray." \
         "cis-l1"
   elif [ -z "$AHO_CANDIDATES" ]; then
     add security account_home_owner "account home owner" PASS med \
@@ -35550,7 +35157,7 @@ _AIXRAY_SESSION_KEYS=""
         add security account_home_owner "account home owner" FAIL high \
             "account=$AHO_ACCT home=$AHO_HOME missing" \
             "The home directory of account $AHO_ACCT does not exist on the filesystem, so that account has no home boundary." \
-            "create the missing home directory and set correct ownership after validation; AIXray recommends these commands and never executes them." \
+            "create the missing home directory and set correct ownership after validation; PTxray recommends these commands and never executes them." \
             "cis-l1"
         AHO_FAIL_COUNT=$(( AHO_FAIL_COUNT + 1 ))
       elif [ "$AHO_HOME_RC" -eq 0 ]; then
@@ -35570,8 +35177,8 @@ _AIXRAY_SESSION_KEYS=""
         if [ "$AHO_OWNER_RC" -ne 0 ] || [ -z "$AHO_OWNER" ]; then
           add security account_home_owner "account home owner" NOT_ASSESSED high \
               "not assessed — home metadata unparseable for account=$AHO_ACCT home=$AHO_HOME" \
-              "AIXray could not read a trustworthy owner for the home directory of account $AHO_ACCT, so it cannot assess that account's home boundary." \
-              "run 'ls -ldn <home>' for the named account, correct the metadata problem, and rerun AIXray." \
+              "PTxray could not read a trustworthy owner for the home directory of account $AHO_ACCT, so it cannot assess that account's home boundary." \
+              "run 'ls -ldn <home>' for the named account, correct the metadata problem, and rerun PTxray." \
               "cis-l1"
           AHO_ERR_COUNT=$(( AHO_ERR_COUNT + 1 ))
         elif [ "$AHO_OWNER" = "$AHO_ID" ] || [ "$AHO_OWNER" = "0" ]; then
@@ -35580,15 +35187,15 @@ _AIXRAY_SESSION_KEYS=""
           add security account_home_owner "account home owner" FAIL high \
               "account=$AHO_ACCT home=$AHO_HOME owner_uid=$AHO_OWNER" \
               "The home directory of account $AHO_ACCT is owned by uid $AHO_OWNER, which is neither the account's own uid ($AHO_ID) nor root." \
-              "change only the home directory owner after validation: 'chown <uid> <home>'; AIXray recommends this command and never executes it." \
+              "change only the home directory owner after validation: 'chown <uid> <home>'; PTxray recommends this command and never executes it." \
               "cis-l1"
           AHO_FAIL_COUNT=$(( AHO_FAIL_COUNT + 1 ))
         fi
       else
         add security account_home_owner "account home owner" NOT_ASSESSED high \
             "not assessed — home probe failed for account=$AHO_ACCT home=$AHO_HOME (rc=$AHO_HOME_RC)" \
-            "AIXray could not read the home directory of account $AHO_ACCT, so it cannot assess that account's home boundary." \
-            "run 'ls -ldn <home>' for the named account, correct the probe problem, and rerun AIXray." \
+            "PTxray could not read the home directory of account $AHO_ACCT, so it cannot assess that account's home boundary." \
+            "run 'ls -ldn <home>' for the named account, correct the probe problem, and rerun PTxray." \
             "cis-l1"
         AHO_ERR_COUNT=$(( AHO_ERR_COUNT + 1 ))
       fi
@@ -35620,13 +35227,13 @@ _AIXRAY_SESSION_KEYS=""
   if aix_capture_missing lsuser_id_home; then
     add security account_home "Account home existence and permissions" NOT_ASSESSED med \
         "not assessed — lsuser_id_home probe was not captured for this system" \
-        "The lsuser -R files -a id home ALL capture is absent from this scan's fixture set, so AIXray cannot enumerate the home directories that must be constrained." \
-        "capture 'lsuser -R files -a id home ALL' from a representative AIX host, then rerun AIXray." "cis-l1"
+        "The lsuser -R files -a id home ALL capture is absent from this scan's fixture set, so PTxray cannot enumerate the home directories that must be constrained." \
+        "capture 'lsuser -R files -a id home ALL' from a representative AIX host, then rerun PTxray." "cis-l1"
   elif [ "$AHM_LSUSER_RC" -ne 0 ]; then
     add security account_home "Account home existence and permissions" NOT_ASSESSED med \
         "not assessed — local user enumeration failed (rc=$AHM_LSUSER_RC)" \
-        "AIXray could not read the local user table, so it cannot enumerate the home directories that must be constrained." \
-        "restore read access to the local user database, then rerun AIXray." "cis-l1"
+        "PTxray could not read the local user table, so it cannot enumerate the home directories that must be constrained." \
+        "restore read access to the local user database, then rerun PTxray." "cis-l1"
   else
     AHM_SCOPE=$(printf '%s\n' "$AHM_LSUSER" | awk '
       NF {
@@ -35668,7 +35275,7 @@ _AIXRAY_SESSION_KEYS=""
           add security account_home_missing "non-system account home missing" FAIL low \
               "home $AHM_HOME of $AHM_NAME is absent" \
               "The home directory of a non-system account does not exist, so the account has no constrained, usable home." \
-              "create the home with the intended owner, mode, and ACL, then rerun AIXray." "cis-l1"
+              "create the home with the intended owner, mode, and ACL, then rerun PTxray." "cis-l1"
         elif [ "$AHM_LS_RC" -eq 0 ]; then
           AHM_MODE=$(printf '%s\n' "$AHM_LS" | awk 'NF { print $1; exit }')
           AHM_MODELEN=${#AHM_MODE}
@@ -35687,13 +35294,13 @@ _AIXRAY_SESSION_KEYS=""
               add security account_home_mode "non-system account home permissions" FAIL med \
                   "home $AHM_HOME of $AHM_NAME is group- or world-writable" \
                   "The home directory of a non-system account grants group or other users write access, so another identity can alter the account's files." \
-                  "remove group and world write permission from the home, then rerun AIXray." "cis-l1"
+                  "remove group and world write permission from the home, then rerun PTxray." "cis-l1"
             elif [ "$AHM_ACL" -eq 1 ]; then
               AHM_ANYFAIL=1
               add security account_home_acl "non-system account home ACL" FAIL med \
                   "home $AHM_HOME of $AHM_NAME carries an access control list" \
                   "The home directory of a non-system account carries an extended ACL, so the mode string alone does not bound who can access the account's files." \
-                  "clear the extended ACL from the home, then rerun AIXray." "cis-l1"
+                  "clear the extended ACL from the home, then rerun PTxray." "cis-l1"
             fi
           fi
         else
@@ -35706,8 +35313,8 @@ AHM_SCOPE_EOF
         if [ "$AHM_UNASSESSED" -eq 1 ]; then
           add security account_home "Account home existence and permissions" NOT_ASSESSED med \
               "not assessed — at least one in-scope home could not be probed" \
-              "AIXray could not obtain trustworthy metadata for every in-scope home, so it cannot claim the constrained-home boundary is satisfied." \
-              "confirm the missing or unreadable home directories exist, then rerun AIXray." "cis-l1"
+              "PTxray could not obtain trustworthy metadata for every in-scope home, so it cannot claim the constrained-home boundary is satisfied." \
+              "confirm the missing or unreadable home directories exist, then rerun PTxray." "cis-l1"
         else
           add security account_home "Account home existence and permissions" PASS low \
               "every in-scope non-system account home exists and grants no group or world write and carries no ACL" \
@@ -35732,8 +35339,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${MYUID:-0}" != "0" ]; then
     add security login_path_empty_entry "PATH entry boundaries" NOT_ASSESSED low \
         "not assessed — root required to inspect all PATH directories." \
-        "AIXray cannot verify every PATH directory without authority to read each one's metadata." \
-        "rerun AIXray with root authority so every PATH directory can be inspected." \
+        "PTxray cannot verify every PATH directory without authority to read each one's metadata." \
+        "rerun PTxray with root authority so every PATH directory can be inspected." \
         "cis-l1"
   else
     LPE_PATH_RAW=$(aix path_value echo "${PATH}")
@@ -35741,8 +35348,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$LPE_PATH_RC" -ne 0 ]; then
       add security login_path_empty_entry "PATH entry boundaries" NOT_ASSESSED low \
           "not assessed — cannot read PATH (rc=$LPE_PATH_RC)" \
-          "AIXray could not obtain the PATH value, so no PATH directory could be verified." \
-          "confirm the PATH environment variable is readable and rerun AIXray." \
+          "PTxray could not obtain the PATH value, so no PATH directory could be verified." \
+          "confirm the PATH environment variable is readable and rerun PTxray." \
           "cis-l1"
     else
       LPE_POS=1
@@ -35831,8 +35438,8 @@ _AIXRAY_SESSION_KEYS=""
       elif [ -n "$LPE_NA_MSG" ]; then
         add security login_path_empty_entry "PATH entry boundaries" NOT_ASSESSED low \
             "$LPE_NA_MSG" \
-            "AIXray did not obtain a trustworthy read of every PATH directory, so it cannot confirm the PATH boundary holds." \
-            "run 'ls -ld' on the named PATH entries with root authority and rerun AIXray." \
+            "PTxray did not obtain a trustworthy read of every PATH directory, so it cannot confirm the PATH boundary holds." \
+            "run 'ls -ld' on the named PATH entries with root authority and rerun PTxray." \
             "cis-l1"
       else
         add security login_path_empty_entry "PATH entry boundaries" PASS low \
@@ -35881,12 +35488,12 @@ _AIXRAY_SESSION_KEYS=""
     FAIL)
       NIS_CLIENT_SEVERITY=high
       NIS_CLIENT_MEANING="The NIS client fileset is present in the installed-software database; the host can provide NIS client services."
-      NIS_CLIENT_FIX="after confirming no workload needs NIS client services, remove the fileset with 'installp -ug bos.net.nis.client'; AIXray only recommends these actions."
+      NIS_CLIENT_FIX="after confirming no workload needs NIS client services, remove the fileset with 'installp -ug bos.net.nis.client'; PTxray only recommends these actions."
       ;;
     *)
       NIS_CLIENT_SEVERITY=low
-      NIS_CLIENT_MEANING="AIXray did not obtain a determinate lslpp result for bos.net.nis.client."
-      NIS_CLIENT_FIX="run 'lslpp -L bos.net.nis.client' and rerun AIXray once the query returns a determinate rc."
+      NIS_CLIENT_MEANING="PTxray did not obtain a determinate lslpp result for bos.net.nis.client."
+      NIS_CLIENT_FIX="run 'lslpp -L bos.net.nis.client' and rerun PTxray once the query returns a determinate rc."
       ;;
   esac
 
@@ -35911,27 +35518,27 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$NIS_SRV_RC" -ne 0 ] && [ "$NIS_SRV_RC" -ne 1 ]; then
     NIS_SRV_STATUS=NOT_ASSESSED
     NIS_SRV_OBSERVED="not assessed - lslpp -L bos.net.nis.server failed (rc=$NIS_SRV_RC)"
-    NIS_SRV_MEANING="AIXray did not obtain a trustworthy installed-fileset query result."
-    NIS_SRV_FIX="make 'lslpp -L' return a readable result, then rerun AIXray."
+    NIS_SRV_MEANING="PTxray did not obtain a trustworthy installed-fileset query result."
+    NIS_SRV_FIX="make 'lslpp -L' return a readable result, then rerun PTxray."
   elif [ -z "$NIS_SRV_RAW" ]; then
     NIS_SRV_STATUS=NOT_ASSESSED
     NIS_SRV_OBSERVED="not assessed - lslpp -L bos.net.nis.server returned empty output (rc=$NIS_SRV_RC)"
-    NIS_SRV_MEANING="AIXray did not obtain a trustworthy installed-fileset query result."
-    NIS_SRV_FIX="make 'lslpp -L' return a readable result, then rerun AIXray."
+    NIS_SRV_MEANING="PTxray did not obtain a trustworthy installed-fileset query result."
+    NIS_SRV_FIX="make 'lslpp -L' return a readable result, then rerun PTxray."
   else
     NIS_SRV_FOUND=$(printf '%s\n' "$NIS_SRV_RAW" | awk '$1=="bos.net.nis.server"{found=1} END{print (found?1:0)}')
     NIS_SRV_FILTER_RC=$?
     if [ "$NIS_SRV_FILTER_RC" -ne 0 ]; then
       NIS_SRV_STATUS=NOT_ASSESSED
       NIS_SRV_OBSERVED="not assessed - NIS server inventory filter failed (rc=$NIS_SRV_FILTER_RC)"
-      NIS_SRV_MEANING="AIXray could not safely filter the installed-fileset query output."
-      NIS_SRV_FIX="make 'awk' available and rerun AIXray."
+      NIS_SRV_MEANING="PTxray could not safely filter the installed-fileset query output."
+      NIS_SRV_FIX="make 'awk' available and rerun PTxray."
     elif [ "$NIS_SRV_FOUND" -eq 1 ]; then
       NIS_SRV_STATUS=FAIL
       NIS_SRV_SEVERITY=med
       NIS_SRV_OBSERVED="bos.net.nis.server is installed"
       NIS_SRV_MEANING="The NIS server fileset appears in the installed-software inventory; a present NIS server fileset widens the network-authentication attack surface."
-      NIS_SRV_FIX="after local-policy approval, remove the unused fileset with 'installp -ug bos.net.nis.server'; AIXray only recommends this action."
+      NIS_SRV_FIX="after local-policy approval, remove the unused fileset with 'installp -ug bos.net.nis.server'; PTxray only recommends this action."
     else
       NIS_SRV_STATUS=PASS
       NIS_SRV_OBSERVED="bos.net.nis.server not installed"
@@ -35985,14 +35592,14 @@ _AIXRAY_SESSION_KEYS=""
       fi
       NIS_PGP_OBSERVED="$NIS_PGP_EVID"
       NIS_PGP_MEANING="A line beginning with '+' exists in /etc/passwd or /etc/group, enabling NIS compatibility mode so NIS-domain entries — including users and groups not locally defined — can participate in authentication and authorization."
-      NIS_PGP_FIX="after service-owner approval, remove or comment every line whose first character is '+' from /etc/passwd and /etc/group, or replace the NIS entries with local definitions; AIXray only recommends these actions."
+      NIS_PGP_FIX="after service-owner approval, remove or comment every line whose first character is '+' from /etc/passwd and /etc/group, or replace the NIS entries with local definitions; PTxray only recommends these actions."
       ;;
     *)
       NIS_PGP_STATUS=NOT_ASSESSED
       NIS_PGP_SEV=low
       NIS_PGP_OBSERVED="not assessed — grep failed (rc=$NIS_PGP_RC)"
-      NIS_PGP_MEANING="AIXray could not read /etc/passwd or /etc/group, so the '+' entry state is unproven."
-      NIS_PGP_FIX="verify both files exist and are readable, then rerun AIXray."
+      NIS_PGP_MEANING="PTxray could not read /etc/passwd or /etc/group, so the '+' entry state is unproven."
+      NIS_PGP_FIX="verify both files exist and are readable, then rerun PTxray."
       ;;
   esac
 
@@ -36022,14 +35629,14 @@ _AIXRAY_SESSION_KEYS=""
     # rc not in {0,2}: unexpected stat failure.
     add security hosts_equiv_entries "hosts.equiv trust entries" NOT_ASSESSED low \
         "not assessed — stat probe failed (rc=$HHE_STAT_RC)" \
-        "AIXray did not establish whether /etc/hosts.equiv exists, so its content cannot be assessed." \
-        "run 'ls -ld /etc/hosts.equiv', resolve the stat failure, and rerun AIXray." "cis-l2"
+        "PTxray did not establish whether /etc/hosts.equiv exists, so its content cannot be assessed." \
+        "run 'ls -ld /etc/hosts.equiv', resolve the stat failure, and rerun PTxray." "cis-l2"
   elif [ -z "$HHE_STAT" ]; then
     # rc=0 with empty stdout: contradictory probe output.
     add security hosts_equiv_entries "hosts.equiv trust entries" NOT_ASSESSED low \
         "not assessed — stat probe returned empty output" \
-        "AIXray obtained a zero exit status with no stat output, which is not a trustworthy existence record." \
-        "run 'ls -ld /etc/hosts.equiv', correct the capture or path problem, and rerun AIXray." "cis-l2"
+        "PTxray obtained a zero exit status with no stat output, which is not a trustworthy existence record." \
+        "run 'ls -ld /etc/hosts.equiv', correct the capture or path problem, and rerun PTxray." "cis-l2"
   else
     # rc=0 with non-empty stdout: file confirmed present; read active entries.
     HHE_ENTRIES=$(aix hosts_equiv_entries grep -v "^\s*#" /etc/hosts.equiv); HHE_ENTRIES_RC=$?
@@ -36045,19 +35652,19 @@ _AIXRAY_SESSION_KEYS=""
       add security hosts_equiv_entries "hosts.equiv trust entries" FAIL high \
           "active entries: $HHE_ENTRIES" \
           "/etc/hosts.equiv contains at least one active host-equivalence entry, granting unauthenticated trust to those hosts." \
-          "remove every active (non-comment, non-blank) line from /etc/hosts.equiv; AIXray only recommends this action." "cis-l2"
+          "remove every active (non-comment, non-blank) line from /etc/hosts.equiv; PTxray only recommends this action." "cis-l2"
     elif [ "$HHE_ENTRIES_RC" -eq 2 ]; then
       # rc=2 against a confirmed-present file: read error.
       add security hosts_equiv_entries "hosts.equiv trust entries" NOT_ASSESSED low \
           "not assessed — entries probe failed (rc=$HHE_ENTRIES_RC)" \
-          "AIXray could not read /etc/hosts.equiv, so its active entries could not be assessed." \
-          "restore read access to /etc/hosts.equiv and rerun AIXray." "cis-l2"
+          "PTxray could not read /etc/hosts.equiv, so its active entries could not be assessed." \
+          "restore read access to /etc/hosts.equiv and rerun PTxray." "cis-l2"
     else
       # rc not in {0,1,2}: unexpected grep outcome.
       add security hosts_equiv_entries "hosts.equiv trust entries" NOT_ASSESSED low \
           "not assessed — entries probe returned rc=$HHE_ENTRIES_RC" \
-          "AIXray did not obtain a trustworthy read of /etc/hosts.equiv, so its active entries could not be assessed." \
-          "run 'grep -v \"^[[:space:]]*#\" /etc/hosts.equiv', resolve the read problem, and rerun AIXray." "cis-l2"
+          "PTxray did not obtain a trustworthy read of /etc/hosts.equiv, so its active entries could not be assessed." \
+          "run 'grep -v \"^[[:space:]]*#\" /etc/hosts.equiv', resolve the read problem, and rerun PTxray." "cis-l2"
     fi
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -36143,13 +35750,13 @@ _AIXRAY_SESSION_KEYS=""
     RDA_SEVERITY=high
     RDA_OBSERVED="present: $RDA_PATTERNS"
     RDA_MEANING='A scan of every local JFS/JFS2 filesystem found at least one host-based trust dotfile. Such files permit logins without an interactive password exchange.'
-    RDA_FIX='remove every matching .netrc, .rhosts, and .shosts file from JFS/JFS2 filesystems; AIXray only recommends these actions.'
+    RDA_FIX='remove every matching .netrc, .rhosts, and .shosts file from JFS/JFS2 filesystems; PTxray only recommends these actions.'
   elif [ "$RDA_ERROR" -eq 1 ]; then
     RDA_STATUS=NOT_ASSESSED
     RDA_SEVERITY=med
     RDA_OBSERVED="not assessed — $RDA_ERR_REASON"
     RDA_MEANING='The JFS/JFS2 scan did not complete for at least one trust-dotfile pattern, so absence of the remaining patterns cannot be asserted; the state is unknown.'
-    RDA_FIX='resolve the scan failure (permissions or I/O), verify the filesystems are traversable, then rerun AIXray.'
+    RDA_FIX='resolve the scan failure (permissions or I/O), verify the filesystems are traversable, then rerun PTxray.'
   else
     RDA_STATUS=PASS
     RDA_SEVERITY=med
@@ -36382,11 +35989,11 @@ EOF
       ;;
     FAIL)
       RRFS_MEANING="At least one file owned by the legacy r-command filesets exposes a read, write, or execute permission bit, so the r-command attack surface may be reachable."
-      RRFS_FIX="after validating each path, remove every permission bit with 'chmod 000 <path>', or uninstall the filesets with 'installp -ug bos.net.tcp.rcmd' and 'installp -ug bos.net.tcp.rcmd_server' once no workload needs them; AIXray recommends these commands and never executes them."
+      RRFS_FIX="after validating each path, remove every permission bit with 'chmod 000 <path>', or uninstall the filesets with 'installp -ug bos.net.tcp.rcmd' and 'installp -ug bos.net.tcp.rcmd_server' once no workload needs them; PTxray recommends these commands and never executes them."
       ;;
     *)
-      RRFS_MEANING="AIXray did not obtain trustworthy package-inventory or mode evidence for the legacy r-command filesets."
-      RRFS_FIX="run 'lslpp -L bos.net.tcp.rcmd_server' and 'lslpp -L bos.net.tcp.rcmd' as root, resolve the probe or output-shape problem, and rerun AIXray."
+      RRFS_MEANING="PTxray did not obtain trustworthy package-inventory or mode evidence for the legacy r-command filesets."
+      RRFS_FIX="run 'lslpp -L bos.net.tcp.rcmd_server' and 'lslpp -L bos.net.tcp.rcmd' as root, resolve the probe or output-shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -36432,26 +36039,26 @@ _AIXRAY_SESSION_KEYS=""
     SNMP_STATUS=NOT_ASSESSED
     SNMP_SEV=low
     SNMP_OBSERVED="not assessed - SNMP client fileset probe returned rc=0 with no data row"
-    SNMP_MEANING="AIXray did not obtain trustworthy package-inventory evidence for the SNMP client fileset."
-    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmp\" as root, resolve the query problem, and rerun AIXray."
+    SNMP_MEANING="PTxray did not obtain trustworthy package-inventory evidence for the SNMP client fileset."
+    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmp\" as root, resolve the query problem, and rerun PTxray."
   elif [ "$SNMP_SERVER_RC" -eq 0 ] && [ -z "$SNMP_SERVER_RAW" ]; then
     SNMP_STATUS=NOT_ASSESSED
     SNMP_SEV=low
     SNMP_OBSERVED="not assessed - SNMP server fileset probe returned rc=0 with no data row"
-    SNMP_MEANING="AIXray did not obtain trustworthy package-inventory evidence for the SNMP server fileset."
-    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmpd\" as root, resolve the query problem, and rerun AIXray."
+    SNMP_MEANING="PTxray did not obtain trustworthy package-inventory evidence for the SNMP server fileset."
+    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmpd\" as root, resolve the query problem, and rerun PTxray."
   elif [ "$SNMP_CLIENT_RC" -ne 0 ] && [ "$SNMP_CLIENT_RC" -ne 1 ]; then
     SNMP_STATUS=NOT_ASSESSED
     SNMP_SEV=low
     SNMP_OBSERVED="not assessed - SNMP client fileset probe failed (rc=$SNMP_CLIENT_RC)"
-    SNMP_MEANING="AIXray did not obtain trustworthy package-inventory evidence for the SNMP client fileset."
-    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmp\" as root, resolve the query failure, and rerun AIXray."
+    SNMP_MEANING="PTxray did not obtain trustworthy package-inventory evidence for the SNMP client fileset."
+    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmp\" as root, resolve the query failure, and rerun PTxray."
   elif [ "$SNMP_SERVER_RC" -ne 0 ] && [ "$SNMP_SERVER_RC" -ne 1 ]; then
     SNMP_STATUS=NOT_ASSESSED
     SNMP_SEV=low
     SNMP_OBSERVED="not assessed - SNMP server fileset probe failed (rc=$SNMP_SERVER_RC)"
-    SNMP_MEANING="AIXray did not obtain trustworthy package-inventory evidence for the SNMP server fileset."
-    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmpd\" as root, resolve the query failure, and rerun AIXray."
+    SNMP_MEANING="PTxray did not obtain trustworthy package-inventory evidence for the SNMP server fileset."
+    SNMP_FIX="run \"lslpp -Lcq bos.net.tcp.snmpd\" as root, resolve the query failure, and rerun PTxray."
   elif [ "$SNMP_CLIENT_RC" -eq 0 ] || [ "$SNMP_SERVER_RC" -eq 0 ]; then
     SNMP_STATUS=FAIL
     SNMP_SEV=med
@@ -36464,7 +36071,7 @@ _AIXRAY_SESSION_KEYS=""
       SNMP_OBSERVED="SNMP server fileset bos.net.tcp.snmpd is installed"
     fi
     SNMP_MEANING="An SNMP package is registered in the package inventory, so the SNMP service is part of this host's exposed software surface."
-    SNMP_FIX="after confirming no workload needs SNMP, preview removal with 'installp -up <fileset>' and remove with 'installp -ug <fileset>' for each installed SNMP fileset; AIXray only recommends these actions."
+    SNMP_FIX="after confirming no workload needs SNMP, preview removal with 'installp -up <fileset>' and remove with 'installp -ug <fileset>' for each installed SNMP fileset; PTxray only recommends these actions."
   else
     SNMP_STATUS=PASS
     SNMP_SEV=low
@@ -36542,11 +36149,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       RCNFS_MEANING="The rcnfs boot entry is present with an action other than off, so the NFS daemon set starts at boot."
-      RCNFS_FIX="after confirming the host needs no NFS service, disable the boot entry (lsitab -d rcnfs, or set its action field to off); AIXray only recommends this action."
+      RCNFS_FIX="after confirming the host needs no NFS service, disable the boot entry (lsitab -d rcnfs, or set its action field to off); PTxray only recommends this action."
       ;;
     *)
-      RCNFS_MEANING="AIXray did not obtain trustworthy inittab evidence for the rcnfs entry."
-      RCNFS_FIX="run 'lsitab rcnfs' as root, resolve the probe problem, and rerun AIXray."
+      RCNFS_MEANING="PTxray did not obtain trustworthy inittab evidence for the rcnfs entry."
+      RCNFS_FIX="run 'lsitab rcnfs' as root, resolve the probe problem, and rerun PTxray."
       ;;
   esac
 
@@ -36640,8 +36247,8 @@ _AIXRAY_SESSION_KEYS=""
   MR_STATUS=NOT_ASSESSED
   MR_SEV=low
   MR_OBS="not assessed"
-  MR_MEAN="AIXray did not obtain trustworthy evidence about whether the mrouted multicast routing daemon is enabled."
-  MR_FIX="make /etc/rc.tcpip readable and the mrouted subsystem status queryable, then rerun AIXray."
+  MR_MEAN="PTxray did not obtain trustworthy evidence about whether the mrouted multicast routing daemon is enabled."
+  MR_FIX="make /etc/rc.tcpip readable and the mrouted subsystem status queryable, then rerun PTxray."
 
   if [ "$MR_BOOT_STATE" = "non-compliant" ] || [ "$MR_SRC_STATE" = "non-compliant" ]; then
     MR_STATUS=FAIL
@@ -36657,7 +36264,7 @@ _AIXRAY_SESSION_KEYS=""
     fi
     MR_OBS="mrouted $MR_DETAIL"
     MR_MEAN="An enabled mrouted daemon runs multicast routing that is not required on a normal host, adding avoidable network service exposure."
-    MR_FIX="after service-owner approval, comment out the mrouted start line in /etc/rc.tcpip and stop the subsystem ('stopsrc -s mrouted'); AIXray only recommends these actions."
+    MR_FIX="after service-owner approval, comment out the mrouted start line in /etc/rc.tcpip and stop the subsystem ('stopsrc -s mrouted'); PTxray only recommends these actions."
   elif [ "$MR_BOOT_STATE" = "compliant" ] && [ "$MR_SRC_STATE" = "compliant" ]; then
     MR_STATUS=PASS
     MR_SEV=low
@@ -36706,8 +36313,8 @@ _AIXRAY_SESSION_KEYS=""
         RT_AUTOCONF6_STATUS=NOT_ASSESSED
         RT_AUTOCONF6_SEV=low
         RT_AUTOCONF6_OBS="not assessed - rc.tcpip probe returned rc=0 with no matching line"
-        RT_AUTOCONF6_MEAN="AIXray did not obtain trustworthy evidence for the autoconf6 boot state."
-        RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun AIXray."
+        RT_AUTOCONF6_MEAN="PTxray did not obtain trustworthy evidence for the autoconf6 boot state."
+        RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun PTxray."
       fi
       ;;
     1)
@@ -36716,28 +36323,28 @@ _AIXRAY_SESSION_KEYS=""
         RT_AUTOCONF6_SEV=med
         RT_AUTOCONF6_OBS="/etc/rc.tcpip has no uncommented '#start' entry for /usr/sbin/autoconf6"
         RT_AUTOCONF6_MEAN="The IPv6 stateless autoconfiguration daemon is not configured to start from /etc/rc.tcpip."
-        RT_AUTOCONF6_FIX="add the uncommented line 'start /usr/sbin/autoconf6 \"\"' to /etc/rc.tcpip and start the daemon for the current boot; AIXray only recommends these actions."
+        RT_AUTOCONF6_FIX="add the uncommented line 'start /usr/sbin/autoconf6 \"\"' to /etc/rc.tcpip and start the daemon for the current boot; PTxray only recommends these actions."
       else
         RT_AUTOCONF6_STATUS=NOT_ASSESSED
         RT_AUTOCONF6_SEV=low
         RT_AUTOCONF6_OBS="not assessed - rc.tcpip probe returned rc=1 with unexpected output"
-        RT_AUTOCONF6_MEAN="AIXray did not obtain trustworthy evidence for the autoconf6 boot state."
-        RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun AIXray."
+        RT_AUTOCONF6_MEAN="PTxray did not obtain trustworthy evidence for the autoconf6 boot state."
+        RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun PTxray."
       fi
       ;;
     2)
       RT_AUTOCONF6_STATUS=NOT_ASSESSED
       RT_AUTOCONF6_SEV=low
       RT_AUTOCONF6_OBS="not assessed - rc.tcpip probe failed (rc=2); /etc/rc.tcpip may be missing or unreadable"
-      RT_AUTOCONF6_MEAN="AIXray could not read /etc/rc.tcpip to determine the autoconf6 boot state."
-      RT_AUTOCONF6_FIX="make /etc/rc.tcpip present and readable, then rerun AIXray."
+      RT_AUTOCONF6_MEAN="PTxray could not read /etc/rc.tcpip to determine the autoconf6 boot state."
+      RT_AUTOCONF6_FIX="make /etc/rc.tcpip present and readable, then rerun PTxray."
       ;;
     *)
       RT_AUTOCONF6_STATUS=NOT_ASSESSED
       RT_AUTOCONF6_SEV=low
       RT_AUTOCONF6_OBS="not assessed - rc.tcpip probe returned unexpected rc=$RT_AUTOCONF6_RC"
-      RT_AUTOCONF6_MEAN="AIXray did not obtain a recognised result from the rc.tcpip probe."
-      RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun AIXray."
+      RT_AUTOCONF6_MEAN="PTxray did not obtain a recognised result from the rc.tcpip probe."
+      RT_AUTOCONF6_FIX="verify the autoconf6 '#start' entry in /etc/rc.tcpip, then rerun PTxray."
       ;;
   esac
 
@@ -36773,8 +36380,8 @@ _AIXRAY_SESSION_KEYS=""
         RT_NPDD_STATUS=NOT_ASSESSED
         RT_NPDD_SEV=low
         RT_NPDD_OBS="not assessed - rc.tcpip probe returned rc=0 with no matching output"
-        RT_NPDD_MEAN="AIXray did not obtain trustworthy evidence of the ndpd-host boot configuration."
-        RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun AIXray."
+        RT_NPDD_MEAN="PTxray did not obtain trustworthy evidence of the ndpd-host boot configuration."
+        RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun PTxray."
       fi
       ;;
     1)
@@ -36783,28 +36390,28 @@ _AIXRAY_SESSION_KEYS=""
         RT_NPDD_SEV=med
         RT_NPDD_OBS="no '#start /usr/sbin/ndpd-host' directive found in /etc/rc.tcpip"
         RT_NPDD_MEAN="The ndpd-host daemon has no boot start entry, so IPv6 Neighbor Discovery Protocol host functions are not started at system boot."
-        RT_NPDD_FIX="add the '#start /usr/sbin/ndpd-host' directive to /etc/rc.tcpip so the daemon starts at boot; AIXray only recommends these actions."
+        RT_NPDD_FIX="add the '#start /usr/sbin/ndpd-host' directive to /etc/rc.tcpip so the daemon starts at boot; PTxray only recommends these actions."
       else
         RT_NPDD_STATUS=NOT_ASSESSED
         RT_NPDD_SEV=low
         RT_NPDD_OBS="not assessed - rc.tcpip probe returned contradictory output (rc=1 with a match)"
-        RT_NPDD_MEAN="AIXray did not obtain trustworthy evidence of the ndpd-host boot configuration."
-        RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun AIXray."
+        RT_NPDD_MEAN="PTxray did not obtain trustworthy evidence of the ndpd-host boot configuration."
+        RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun PTxray."
       fi
       ;;
     2)
       RT_NPDD_STATUS=NOT_ASSESSED
       RT_NPDD_SEV=low
       RT_NPDD_OBS="not assessed - /etc/rc.tcpip is missing or unreadable (grep rc=2)"
-      RT_NPDD_MEAN="AIXray did not obtain trustworthy evidence of the ndpd-host boot configuration."
-      RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun AIXray."
+      RT_NPDD_MEAN="PTxray did not obtain trustworthy evidence of the ndpd-host boot configuration."
+      RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun PTxray."
       ;;
     *)
       RT_NPDD_STATUS=NOT_ASSESSED
       RT_NPDD_SEV=low
       RT_NPDD_OBS="not assessed - rc.tcpip probe failed with rc=$RT_NPDD_RC"
-      RT_NPDD_MEAN="AIXray did not obtain trustworthy evidence of the ndpd-host boot configuration."
-      RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun AIXray."
+      RT_NPDD_MEAN="PTxray did not obtain trustworthy evidence of the ndpd-host boot configuration."
+      RT_NPDD_FIX="make /etc/rc.tcpip readable and rerun PTxray."
       ;;
   esac
 
@@ -36847,8 +36454,8 @@ _AIXRAY_SESSION_KEYS=""
       else
         RT_NPD_ROUTER_STATUS=NOT_ASSESSED
         RT_NPD_ROUTER_OBS="not assessed - ndpd-router rc.tcpip probe rc=0 but output was empty after grep"
-        RT_NPD_ROUTER_MEAN="AIXray did not obtain trustworthy /etc/rc.tcpip evidence."
-        RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun AIXray."
+        RT_NPD_ROUTER_MEAN="PTxray did not obtain trustworthy /etc/rc.tcpip evidence."
+        RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun PTxray."
       fi
       ;;
     1)
@@ -36856,25 +36463,25 @@ _AIXRAY_SESSION_KEYS=""
         RT_NPD_ROUTER_STATUS=FAIL
         RT_NPD_ROUTER_OBS="ndpd-router start directive not present in /etc/rc.tcpip"
         RT_NPD_ROUTER_MEAN="The ndpd-router boot directive is absent from /etc/rc.tcpip, so the boot configuration does not match the required state."
-        RT_NPD_ROUTER_FIX="after service-owner approval, restore the ndpd-router entry in /etc/rc.tcpip; AIXray only recommends these actions."
+        RT_NPD_ROUTER_FIX="after service-owner approval, restore the ndpd-router entry in /etc/rc.tcpip; PTxray only recommends these actions."
       else
         RT_NPD_ROUTER_STATUS=NOT_ASSESSED
         RT_NPD_ROUTER_OBS="not assessed - ndpd-router rc.tcpip probe rc=1 but output was non-empty (contradictory)"
-        RT_NPD_ROUTER_MEAN="AIXray did not obtain trustworthy /etc/rc.tcpip evidence."
-        RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun AIXray."
+        RT_NPD_ROUTER_MEAN="PTxray did not obtain trustworthy /etc/rc.tcpip evidence."
+        RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun PTxray."
       fi
       ;;
     2)
       RT_NPD_ROUTER_STATUS=NOT_ASSESSED
       RT_NPD_ROUTER_OBS="not assessed - ndpd-router rc.tcpip probe grep error (rc=2)"
-      RT_NPD_ROUTER_MEAN="AIXray did not obtain trustworthy /etc/rc.tcpip evidence."
-      RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun AIXray."
+      RT_NPD_ROUTER_MEAN="PTxray did not obtain trustworthy /etc/rc.tcpip evidence."
+      RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun PTxray."
       ;;
     *)
       RT_NPD_ROUTER_STATUS=NOT_ASSESSED
       RT_NPD_ROUTER_OBS="not assessed - ndpd-router rc.tcpip probe failed (rc=$RT_NPD_ROUTER_RC)"
-      RT_NPD_ROUTER_MEAN="AIXray did not obtain trustworthy /etc/rc.tcpip evidence."
-      RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun AIXray."
+      RT_NPD_ROUTER_MEAN="PTxray did not obtain trustworthy /etc/rc.tcpip evidence."
+      RT_NPD_ROUTER_FIX="inspect /etc/rc.tcpip, resolve the read problem, and rerun PTxray."
       ;;
   esac
 
@@ -36956,11 +36563,11 @@ case "$NFS_STATUS" in
     ;;
   FAIL)
     NFS_MEANING="The NFS server fileset is installed, so this host can export filesystems over NFS."
-    NFS_FIX="after confirming no workload needs the NFS server, preview the removal with 'installp -up bos.net.nfs.server' and remove with 'installp -ug bos.net.nfs.server'; AIXray only recommends these actions."
+    NFS_FIX="after confirming no workload needs the NFS server, preview the removal with 'installp -up bos.net.nfs.server' and remove with 'installp -ug bos.net.nfs.server'; PTxray only recommends these actions."
     ;;
   *)
-    NFS_MEANING="AIXray did not obtain a trustworthy package-inventory result, so NFS server presence could not be assessed."
-    NFS_FIX="run \"lslpp -L\" with read access to the package inventory, resolve the failure, and rerun AIXray."
+    NFS_MEANING="PTxray did not obtain a trustworthy package-inventory result, so NFS server presence could not be assessed."
+    NFS_FIX="run \"lslpp -L\" with read access to the package inventory, resolve the failure, and rerun PTxray."
     ;;
 esac
 
@@ -36968,58 +36575,22 @@ add security nfs_server_absent "NFS server fileset" \
   "$NFS_STATUS" high "$NFS_OBSERVED" \
   "$NFS_MEANING" "$NFS_FIX" "cis-l1"
 _AIXRAY_SESSION_KEYS=""
-  # nfs_export_everyone — active NFS exports accessible to unauthenticated clients.
-  # All reads are fixture-routed and side-effect free. showmount -e lists the
-  # local NFS server's currently exported directories with their access lists;
-  # an export line listing (everyone) imposes no client restriction.
-  #
-  # showmount -e is an RPC query to the local mount daemon, and on a host that
-  # exports nothing it exits non-zero with empty stdout — the state captured on
-  # both lab boxes on 2026-08-06 (showmount_e.out empty, showmount_e.rc 1).
-  # Refusing there would leave this check able only to refuse, which is not
-  # coverage. A non-zero rc is therefore resolved against two local, non-RPC
-  # probes that ck-nfs-exports already uses: the no-argument exportfs listing
-  # (/etc/xtab — the active export table) and /etc/exports (the definition
-  # file). The empty conclusion is drawn only when BOTH independently show an
-  # empty export set; a failed exportfs, an inconclusive listing, or an
-  # unestablished /etc/exports state still refuses, so an rc=1 that actually
-  # means "mountd unreachable" can never be laundered into a clean verdict.
-  typeset SHOWMOUNT SHOWMOUNT_RC NEE_EVERYONE NEE_ROWS
-  typeset NEE_LIVE NEE_LIVE_RC NEE_LIVE_NONE
+  # nfs_export_everyone — active NFS exports without an access allow list.
+  # The no-argument exportfs form reads AIX's local active export table
+  # (/etc/xtab). /etc/exports is a second local read used only to corroborate
+  # an empty active table. No RPC or other network probe is permitted here.
+  typeset NEE_LIVE NEE_LIVE_RC NEE_STATE NEE_DETAIL NEE_RESULT
   typeset NEE_CONF NEE_CONF_RC NEE_CONF_EXISTS_OUT NEE_CONF_EXISTS_RC
-  typeset NEE_CONF_NONE NEE_WHY
+  typeset NEE_CONF_NONE NEE_TAB
 
-  SHOWMOUNT=$(aix showmount_e showmount -e); SHOWMOUNT_RC=$?
   NEE_LIVE=$(aix exportfs exportfs); NEE_LIVE_RC=$?
   NEE_CONF_EXISTS_OUT=$(aix etc_exports_exists test -e /etc/exports)
   NEE_CONF_EXISTS_RC=$?
   NEE_CONF=$(aix etc_exports cat /etc/exports); NEE_CONF_RC=$?
 
-  # Corroborator 1 — the active export table. rc is settled before any parsing.
-  # AIX prints the no-export sentinel with or without its message number.
-  NEE_LIVE_NONE=0
-  if [ "$NEE_LIVE_RC" -eq 0 ] && [ -n "$NEE_LIVE" ]; then
-    case "$NEE_LIVE" in
-      "exportfs: nothing exported") NEE_LIVE_NONE=1 ;;
-      "exportfs: "[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]" nothing exported")
-        NEE_LIVE_NONE=1 ;;
-      *)
-        NEE_LIVE_NONE=$(printf '%s\n' "$NEE_LIVE" | awk '
-          {
-            text=$0
-            sub(/^[ \t]+/, "", text)
-            if (text == "") next
-            nonblank=1
-            if (text !~ /^#/) rows=1
-          }
-          END {print (nonblank && !rows) ? 1 : 0}
-        ')
-        ;;
-    esac
-  fi
-
-  # Corroborator 2 — the definition file. A read failure only settles anything
-  # when the existence probe reports the file as genuinely absent.
+  # The definition file cannot prove that an export is active. It is used only
+  # to keep the no-export PASS fail-closed when the local definitions disagree
+  # with an otherwise empty active table.
   NEE_CONF_NONE=0
   if [ "$NEE_CONF_RC" -eq 0 ]; then
     NEE_CONF_NONE=$(printf '%s\n' "$NEE_CONF" | awk '
@@ -37034,64 +36605,90 @@ _AIXRAY_SESSION_KEYS=""
     NEE_CONF_NONE=1
   fi
 
-  # showmount evidence is parsed only after its rc is known to be 0. OBSERVED is
-  # capped at 120 characters so the finding stays one bounded TSV field.
-  NEE_EVERYONE=""
-  NEE_ROWS=0
-  if [ "$SHOWMOUNT_RC" -eq 0 ] && [ -n "$SHOWMOUNT" ]; then
-    NEE_EVERYONE=$(printf '%s\n' "$SHOWMOUNT" | awk '
-      index($0, "(everyone)") > 0 {
-        n++
-        if (n <= 3) list = (list == "" ? $1 : list " " $1)
+  NEE_STATE=UNKNOWN
+  NEE_DETAIL="local active export table could not be classified"
+  if [ "$NEE_LIVE_RC" -eq 0 ]; then
+    NEE_RESULT=$(printf '%s\n' "$NEE_LIVE" | awk '
+      {
+        text=$0
+        sub(/^[ \t]+/, "", text)
+        sub(/[ \t]+$/, "", text)
+        if (text == "" || text ~ /^#/) next
+        if (text == "exportfs: nothing exported" ||
+            text ~ /^exportfs: [0-9][0-9][0-9][0-9]-[0-9][0-9][0-9] nothing exported$/) {
+          none++
+          next
+        }
+        if (substr(text, 1, 1) != "/") {
+          malformed++
+          next
+        }
+        rows++
+        split(text, field, /[ \t]+/)
+        path=field[1]
+        if (text !~ /(^|[, \t])access=/) {
+          unrestricted++
+          if (unrestricted <= 3)
+            list=(list == "" ? path : list " " path)
+        }
       }
       END {
-        if (n == 0) exit 0
-        text = n " export(s) shared with everyone: " list
-        if (n > 3) text = text " (+" (n - 3) " more)"
-        if (substr(text, 118, 1) != "") text = substr(text, 1, 117) "..."
-        print text
+        if (malformed || (none && rows)) {
+          print "UNKNOWN\tlocal active export table contained unrecognized or contradictory rows"
+        } else if (unrestricted) {
+          detail=unrestricted " active export(s) have no access allow list: " list
+          if (unrestricted > 3) detail=detail " (+" (unrestricted - 3) " more)"
+          if (substr(detail, 118, 1) != "") detail=substr(detail, 1, 117) "..."
+          print "UNRESTRICTED\t" detail
+        } else if (rows) {
+          print "RESTRICTED\t" rows " active export(s); every export has an explicit access allow list"
+        } else {
+          print "NONE\tlocal active export table lists no exported directory"
+        }
       }
     ')
-    NEE_ROWS=$(printf '%s\n' "$SHOWMOUNT" | awk '$1 ~ /^\// {n++} END {print n+0}')
+    NEE_TAB=$(printf '\t')
+    NEE_STATE=${NEE_RESULT%%"$NEE_TAB"*}
+    NEE_DETAIL=${NEE_RESULT#*"$NEE_TAB"}
+    [ "$NEE_DETAIL" != "$NEE_RESULT" ] \
+      || { NEE_STATE=UNKNOWN; NEE_DETAIL="local active export table parser returned malformed evidence"; }
+  else
+    NEE_DETAIL="exportfs failed while reading the local active export table (rc=$NEE_LIVE_RC)"
   fi
 
-  if [ "$SHOWMOUNT_RC" -eq 0 ]; then
-    NEE_WHY="showmount -e listed no export (rc=0)"
-  else
-    NEE_WHY="showmount -e failed (rc=$SHOWMOUNT_RC)"
-  fi
-
-  if [ -n "$NEE_EVERYONE" ]; then
-    add security nfs_export_everyone "NFS export access" FAIL high \
-        "$NEE_EVERYONE" \
-        "At least one currently exported directory is accessible to unauthenticated clients; the NFS server imposes no client restriction on it." \
-        "remove (everyone) from the access list of each affected export and re-export through the approved change process." "cis-l2"
-  elif [ "$SHOWMOUNT_RC" -eq 0 ] && [ "$NEE_ROWS" -gt 0 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "$NEE_ROWS active export(s); every export lists explicit clients" \
-        "Every currently exported directory has a client restriction; showmount -e listed no (everyone) access target." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -eq 1 ] && [ "$NEE_CONF_NONE" -eq 1 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "no NFS export is active; exportfs and /etc/exports both list none" \
-        "This host exports nothing: the active export table reports no exported directory and /etc/exports defines none, so no export is shared with unauthenticated clients." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_RC" -ne 0 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY and exportfs failed (rc=$NEE_LIVE_RC)" \
-        "Neither the advertised export list nor the local active export table could be read, so no claim about world-accessible exports is possible." \
-        "restore access to the local NFS mount daemon and the no-argument exportfs listing, then rerun AIXray." "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -ne 1 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; exportfs did not confirm an empty export set" \
-        "The advertised export list was unavailable and the local active export table neither proved an empty export set nor could be read for (everyone) access targets." \
-        "restore access to the local NFS mount daemon, verify the complete no-argument exportfs listing, then rerun AIXray." "cis-l2"
-  else
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; /etc/exports state not established (rc=$NEE_CONF_RC)" \
-        "The active export table reported nothing exported, but /etc/exports could not be read or shows definitions, so the empty export set is not corroborated." \
-        "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun AIXray." "cis-l2"
-  fi
+  case "$NEE_STATE" in
+    UNRESTRICTED)
+      add security nfs_export_everyone "NFS export access" FAIL high \
+          "$NEE_DETAIL" \
+          "At least one currently exported directory has no access allow list, so the NFS server does not restrict it to approved clients." \
+          "add an explicit access allow list to each affected export and re-export it through the approved change process." "cis-l2"
+      ;;
+    RESTRICTED)
+      add security nfs_export_everyone "NFS export access" PASS high \
+          "$NEE_DETAIL" \
+          "Every directory in the local active export table has an explicit client access allow list." \
+          "n/a" "cis-l2"
+      ;;
+    NONE)
+      if [ "$NEE_CONF_NONE" -eq 1 ]; then
+        add security nfs_export_everyone "NFS export access" PASS high \
+            "no NFS export is active; exportfs and /etc/exports both list none" \
+            "The local active export table reports no exported directory and /etc/exports defines none, so no export is available without a client allow list." \
+            "n/a" "cis-l2"
+      else
+        add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+            "not assessed — local active export table is empty but /etc/exports state was not corroborated (rc=$NEE_CONF_RC)" \
+            "The active table reported no exports, but local definitions could not be read or still define exports, so the empty state is not independently corroborated." \
+            "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
+      fi
+      ;;
+    *)
+      add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+          "not assessed — $NEE_DETAIL" \
+          "The local active export table did not provide complete, trustworthy evidence about access allow lists." \
+          "restore access to the no-argument exportfs listing, verify the complete local active export table, then rerun PTxray." "cis-l2"
+      ;;
+  esac
 _AIXRAY_SESSION_KEYS=""
   # nfs_export_sec — every NFS export must declare a sec= security flavour and
   # that flavour list must not include none. Reads the lsnfsexp listing once and
@@ -37106,8 +36703,8 @@ _AIXRAY_SESSION_KEYS=""
   if aix_capture_missing lsnfsexp; then
     add security nfs_export_sec "NFS export security" NOT_ASSESSED low \
         "not assessed — lsnfsexp probe was not captured for this system" \
-        "The lsnfsexp capture is absent from this scan's fixture set, so AIXray cannot tell whether the command is genuinely absent or merely unrecorded." \
-        "capture 'lsnfsexp' from a representative AIX host, then rerun AIXray." "cis-l2"
+        "The lsnfsexp capture is absent from this scan's fixture set, so PTxray cannot tell whether the command is genuinely absent or merely unrecorded." \
+        "capture 'lsnfsexp' from a representative AIX host, then rerun PTxray." "cis-l2"
   elif [ "$NSE_RC" -eq 127 ]; then
     add security nfs_export_sec "NFS export security" NOT_APPLICABLE low \
         "lsnfsexp not found (rc=127)" \
@@ -37118,7 +36715,7 @@ _AIXRAY_SESSION_KEYS=""
     add security nfs_export_sec "NFS export security" NOT_ASSESSED low \
         "not assessed — lsnfsexp probe failed (rc=$NSE_RC)" \
         "The lsnfsexp probe exited $NSE_RC, so the exported file system set and its security flavours are unknown." \
-        "inspect why lsnfsexp failed, then re-run AIXray." "cis-l2"
+        "inspect why lsnfsexp failed, then re-run PTxray." "cis-l2"
   else
     NSE_CLASS=$(printf '%s\n' "$NSE_RAW" | awk '
       {
@@ -37255,12 +36852,12 @@ _AIXRAY_SESSION_KEYS=""
     FAIL)
       CLIC_SEVERITY=med
       CLIC_MEANING="CLiC cryptographic software is not fully installed and active."
-      CLIC_FIX="install the CLiC package and ensure its kernel extension is loaded, then rerun AIXray; AIXray only recommends these actions."
+      CLIC_FIX="install the CLiC package and ensure its kernel extension is loaded, then rerun PTxray; PTxray only recommends these actions."
       ;;
     *)
       CLIC_SEVERITY=low
-      CLIC_MEANING="AIXray did not obtain trustworthy evidence for the CLiC software state."
-      CLIC_FIX="resolve the failed probe so lslpp -L and genkex return complete output, then rerun AIXray."
+      CLIC_MEANING="PTxray did not obtain trustworthy evidence for the CLiC software state."
+      CLIC_FIX="resolve the failed probe so lslpp -L and genkex return complete output, then rerun PTxray."
       ;;
   esac
 
@@ -37317,7 +36914,7 @@ _AIXRAY_SESSION_KEYS=""
       FSJ_BAD1=$(printf '%s' "$FSJ_LSFS_BAD $FSJ_MNT_BAD" | tr '\n' ' ')
       FSJ_OBSERVED="JFS filesystem(s) without nodev: $FSJ_BAD1"
       FSJ_MEANING="A JFS filesystem is defined or mounted without the nodev mount option, so device nodes on that filesystem are interpreted by the kernel — a local user able to create a file there can forge a device node and escalate privilege. The root filesystem on /dev/hd4 is the single allowed exception."
-      FSJ_FIX="add nodev to the filesystem's mount options (e.g. chfs -a options=+nodev <mountpoint>) and remount so it takes effect, then confirm with 'mount'. AIXray only reports this; it does not remediate."
+      FSJ_FIX="add nodev to the filesystem's mount options (e.g. chfs -a options=+nodev <mountpoint>) and remount so it takes effect, then confirm with 'mount'. PTxray only reports this; it does not remediate."
     else
       FSJ_LSFS_JFS=$(printf '%s\n' "$FSJ_LSFS" | grep jfs)
       FSJ_MNT_JFS=$(printf '%s\n' "$FSJ_MNT" | grep jfs)
@@ -37337,7 +36934,7 @@ _AIXRAY_SESSION_KEYS=""
     FSJ_STATUS=NOT_ASSESSED
     FSJ_OBSERVED="not assessed — lsfs/mount capture failed (lsfs rc=$FSJ_LSFS_RC, mount rc=$FSJ_MNT_RC)"
     FSJ_MEANING="The nodev state of JFS filesystems could not be assessed because the lsfs or mount probe failed; the state is genuinely unknown."
-    FSJ_FIX="run 'lsfs' and 'mount' manually, then rerun AIXray."
+    FSJ_FIX="run 'lsfs' and 'mount' manually, then rerun PTxray."
   fi
 
   add security fs_jfs_nodev "JFS nodev mount option" \
@@ -37374,7 +36971,7 @@ _AIXRAY_SESSION_KEYS=""
       FTRD_SEV=high
       FTRD_OBSERVED="/etc/ftpusers exists but contains no root line, so the FTP daemon permits root login"
       FTRD_MEANING="Without a root entry in the FTP deny list the daemon accepts root, exposing the account to remote password attacks."
-      FTRD_FIX="append a line reading 'root' to /etc/ftpusers; AIXray only recommends this action"
+      FTRD_FIX="append a line reading 'root' to /etc/ftpusers; PTxray only recommends this action"
       ;;
     2)
       # grep error: /etc/ftpusers does not exist (or is unreadable).  The deny
@@ -37383,15 +36980,15 @@ _AIXRAY_SESSION_KEYS=""
       FTRD_SEV=high
       FTRD_OBSERVED="/etc/ftpusers is absent (rc=2), so no FTP deny entry for root exists"
       FTRD_MEANING="With the deny mechanism missing there is no entry blocking root, so root login over FTP is permitted if the daemon runs."
-      FTRD_FIX="create /etc/ftpusers containing a line reading 'root'; AIXray only recommends this action"
+      FTRD_FIX="create /etc/ftpusers containing a line reading 'root'; PTxray only recommends this action"
       ;;
     *)
       # An rc the probe did not anticipate: the state is genuinely unknown.
       FTRD_STATUS=NOT_ASSESSED
       FTRD_SEV=med
       FTRD_OBSERVED="not assessed - /etc/ftpusers probe returned an unexpected status (rc=$FTRD_RC)"
-      FTRD_MEANING="AIXray did not obtain a determinate result from the FTP deny-list probe, so it cannot judge root FTP access."
-      FTRD_FIX="verify /etc/ftpusers exists and is readable, then rerun AIXray"
+      FTRD_MEANING="PTxray did not obtain a determinate result from the FTP deny-list probe, so it cannot judge root FTP access."
+      FTRD_FIX="verify /etc/ftpusers exists and is readable, then rerun PTxray"
       ;;
   esac
 
@@ -37456,15 +37053,15 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       FTP_LB_MEANING="An active ftpd service is missing the required authorized-use banner, so users are not warned that the system is monitored."
-      FTP_LB_FIX="install the bos.msg.en_US.net.tcp.client fileset and set catalog set 1 message 9 of ftpd.cat to the prescribed warning text; AIXray only recommends these actions."
+      FTP_LB_FIX="install the bos.msg.en_US.net.tcp.client fileset and set catalog set 1 message 9 of ftpd.cat to the prescribed warning text; PTxray only recommends these actions."
       ;;
     NOT_APPLICABLE)
       FTP_LB_MEANING="The ftpd service is not configured, so no ftpd login banner is required."
       FTP_LB_FIX="n/a"
       ;;
     *)
-      FTP_LB_MEANING="AIXray did not obtain trustworthy evidence for the ftpd login banner configuration."
-      FTP_LB_FIX="verify the ftpd service state, the message catalog fileset, and the ftpd.cat message as root, then rerun AIXray."
+      FTP_LB_MEANING="PTxray did not obtain trustworthy evidence for the ftpd login banner configuration."
+      FTP_LB_FIX="verify the ftpd service state, the message catalog fileset, and the ftpd.cat message as root, then rerun PTxray."
       ;;
   esac
 
@@ -37542,8 +37139,8 @@ _AIXRAY_SESSION_KEYS=""
       if [ -z "$ID_FTPD_RAW" ]; then
         ID_FTPD_STATUS=NOT_ASSESSED
         ID_FTPD_OBSERVED="not assessed - ftp inetd probe rc=0 but output was empty after grep" # network-lint: allow -- prose finding text, no network call
-        ID_FTPD_MEANING="AIXray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
-        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_FTPD_MEANING="PTxray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
+        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       else
         case "$ID_FTPD_CLASS" in
           pass)
@@ -37556,19 +37153,19 @@ _AIXRAY_SESSION_KEYS=""
             ID_FTPD_STATUS=FAIL
             ID_FTPD_OBSERVED="ftp service in /etc/inetd.conf does not set umask 027" # network-lint: allow -- prose finding text, no network call
             ID_FTPD_MEANING="The ftp daemon arguments either omit the -u flag or set a umask other than 027, so files it creates may be exposed to unintended access." # network-lint: allow -- prose finding text, no network call
-            ID_FTPD_FIX="after service-owner approval, edit the ftp definition in /etc/inetd.conf to include -u 027 in the server arguments and refresh inetd; AIXray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+            ID_FTPD_FIX="after service-owner approval, edit the ftp definition in /etc/inetd.conf to include -u 027 in the server arguments and refresh inetd; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
             ;;
           multiple)
             ID_FTPD_STATUS=NOT_ASSESSED
             ID_FTPD_OBSERVED="not assessed - ftp inetd probe matched more than one service line" # network-lint: allow -- prose finding text, no network call
-            ID_FTPD_MEANING="AIXray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
-            ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the duplicate-definition ambiguity, and rerun AIXray."
+            ID_FTPD_MEANING="PTxray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
+            ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the duplicate-definition ambiguity, and rerun PTxray."
             ;;
           *)
             ID_FTPD_STATUS=NOT_ASSESSED
             ID_FTPD_OBSERVED="not assessed - ftp inetd probe output could not be classified" # network-lint: allow -- prose finding text, no network call
-            ID_FTPD_MEANING="AIXray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
-            ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+            ID_FTPD_MEANING="PTxray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
+            ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
             ;;
         esac
       fi
@@ -37582,15 +37179,15 @@ _AIXRAY_SESSION_KEYS=""
       else
         ID_FTPD_STATUS=NOT_ASSESSED
         ID_FTPD_OBSERVED="not assessed - ftp inetd probe rc=1 but output was non-empty (contradictory)" # network-lint: allow -- prose finding text, no network call
-        ID_FTPD_MEANING="AIXray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
-        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+        ID_FTPD_MEANING="PTxray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
+        ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       fi
       ;;
     *)
       ID_FTPD_STATUS=NOT_ASSESSED
       ID_FTPD_OBSERVED="not assessed - ftp inetd probe grep failed (rc=$ID_FTPD_RC)" # network-lint: allow -- prose finding text, no network call
-      ID_FTPD_MEANING="AIXray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
-      ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun AIXray."
+      ID_FTPD_MEANING="PTxray did not obtain trustworthy ftp service-definition evidence." # network-lint: allow -- prose finding text, no network call
+      ID_FTPD_FIX="inspect /etc/inetd.conf, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
@@ -37615,8 +37212,8 @@ _AIXRAY_SESSION_KEYS=""
   SSHV_STATUS=NOT_ASSESSED
   SSHV_SEVERITY=low
   SSHV_OBSERVED=''
-  SSHV_MEANING='AIXray did not obtain one trustworthy parseable SSH daemon version, so it cannot establish whether the daemon is current.'
-  SSHV_FIX='resolve why the SSH daemon version could not be read, then rerun AIXray.'
+  SSHV_MEANING='PTxray did not obtain one trustworthy parseable SSH daemon version, so it cannot establish whether the daemon is current.'
+  SSHV_FIX='resolve why the SSH daemon version could not be read, then rerun PTxray.'
   SSHV_REASON=''
 
   # Probe via `sshd -V`, not `sshd -i`. Two defects made this check refuse on every
@@ -37642,8 +37239,8 @@ _AIXRAY_SESSION_KEYS=""
   if aix_capture_missing sshd_version; then
     SSHV_STATUS=NOT_ASSESSED
     SSHV_OBSERVED='not assessed — sshd_version probe was not captured for this system'
-    SSHV_MEANING='The sshd -V capture is absent from this scan fixture set, so AIXray cannot tell whether sshd is genuinely absent or merely unrecorded.'
-    SSHV_FIX='capture sshd -V from a representative AIX host, then rerun AIXray.'
+    SSHV_MEANING='The sshd -V capture is absent from this scan fixture set, so PTxray cannot tell whether sshd is genuinely absent or merely unrecorded.'
+    SSHV_FIX='capture sshd -V from a representative AIX host, then rerun PTxray.'
     SSHV_REASON='probe not captured'
   elif [ "$SSHV_RC" -eq 127 ]; then
     SSHV_STATUS=NOT_APPLICABLE
@@ -37671,7 +37268,7 @@ _AIXRAY_SESSION_KEYS=""
           SSHV_SEVERITY=high
           SSHV_OBSERVED=$SSHV_CUT
           SSHV_MEANING="The SSH daemon is major version $SSHV_CUT, older than the required major version 9."
-          SSHV_FIX='update the SSH daemon to major version 9 or later; AIXray only recommends these actions.'
+          SSHV_FIX='update the SSH daemon to major version 9 or later; PTxray only recommends these actions.'
         fi
         ;;
     esac
@@ -37701,7 +37298,7 @@ _AIXRAY_SESSION_KEYS=""
     add security hosts_equiv_absent "Host-based trust databases absent" FAIL med \
         "one or both of /etc/rhosts.equiv and /etc/shosts.equiv exist" \
         "A host-based trust database is present, granting host-equivalent access to accounts on this system without per-user credentials." \
-        "remove both /etc/rhosts.equiv and /etc/shosts.equiv after confirming no workflow depends on host-based trust; AIXray only recommends this action." \
+        "remove both /etc/rhosts.equiv and /etc/shosts.equiv after confirming no workflow depends on host-based trust; PTxray only recommends this action." \
         "cis-l1 cis-l2"
   elif [ "$HEQ_RC" -eq 2 ] && [ -z "$HEQ_RAW" ]; then
     add security hosts_equiv_absent "Host-based trust databases absent" PASS med \
@@ -37711,8 +37308,8 @@ _AIXRAY_SESSION_KEYS=""
   else
     add security hosts_equiv_absent "Host-based trust databases absent" NOT_ASSESSED med \
         "not assessed — probe failed (rc=$HEQ_RC)" \
-        "AIXray did not obtain one trustworthy listing of /etc/rhosts.equiv and /etc/shosts.equiv, so their absence or presence could not be established." \
-        "run 'ls -l /etc/[rs]hosts.equiv', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy listing of /etc/rhosts.equiv and /etc/shosts.equiv, so their absence or presence could not be established." \
+        "run 'ls -l /etc/[rs]hosts.equiv', correct the capture or path problem, and rerun PTxray." \
         "cis-l1 cis-l2"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -37722,8 +37319,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSH_SFTP_PARSE SSH_SFTP_STATUS SSH_SFTP_OBSERVED SSH_SFTP_MEANING SSH_SFTP_FIX SSH_SFTP_REASON
   SSH_SFTP_STATUS=NOT_ASSESSED
   SSH_SFTP_OBSERVED=''
-  SSH_SFTP_MEANING='AIXray did not obtain one trustworthy effective SFTP subsystem line, so it cannot establish the SFTP umask and logging policy.'
-  SSH_SFTP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_SFTP_MEANING='PTxray did not obtain one trustworthy effective SFTP subsystem line, so it cannot establish the SFTP umask and logging policy.'
+  SSH_SFTP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_SFTP_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -37800,15 +37397,15 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       SSH_SFTP_MEANING='The effective SFTP subsystem does not enforce the required umask and logging policy, so transfers may be exposed or go unlogged.'
-      SSH_SFTP_FIX="set the SFTP subsystem to run 'sftp-server' or 'internal-sftp' with '-u 027 -f AUTH -l INFO' (or VERBOSE) in sshd_config, validate with 'sshd -T', and restart sshd; AIXray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+      SSH_SFTP_FIX="set the SFTP subsystem to run 'sftp-server' or 'internal-sftp' with '-u 027 -f AUTH -l INFO' (or VERBOSE) in sshd_config, validate with 'sshd -T', and restart sshd; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
       ;;
     NOT_APPLICABLE)
       SSH_SFTP_MEANING='sshd is not installed, so there is no SFTP subsystem to constrain.'
       SSH_SFTP_FIX='n/a'
       ;;
     *)
-      SSH_SFTP_MEANING='AIXray did not obtain one trustworthy effective SFTP subsystem line, so it cannot establish the SFTP umask and logging policy.'
-      SSH_SFTP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+      SSH_SFTP_MEANING='PTxray did not obtain one trustworthy effective SFTP subsystem line, so it cannot establish the SFTP umask and logging policy.'
+      SSH_SFTP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
       ;;
   esac
 
@@ -37831,8 +37428,8 @@ _AIXRAY_SESSION_KEYS=""
   SSH_ACL_STATUS=NOT_ASSESSED
   SSH_ACL_SEV=low
   SSH_ACL_OBSERVED=''
-  SSH_ACL_MEANING='AIXray did not obtain trustworthy effective sshd access-control evidence, so it cannot determine whether logins are restricted by user or group.'
-  SSH_ACL_FIX='run sshd -T as root, resolve any configuration or capture error, and rerun AIXray.'
+  SSH_ACL_MEANING='PTxray did not obtain trustworthy effective sshd access-control evidence, so it cannot determine whether logins are restricted by user or group.'
+  SSH_ACL_FIX='run sshd -T as root, resolve any configuration or capture error, and rerun PTxray.'
   SSH_ACL_REASON=''
 
   # 1. sshd package presence — an absent openssh.base.server fileset means the
@@ -37851,8 +37448,8 @@ _AIXRAY_SESSION_KEYS=""
   if aix_capture_missing sshd_package; then
     SSH_ACL_STATUS=NOT_ASSESSED
     SSH_ACL_OBSERVED="not assessed - sshd_package probe was not captured for this system"
-    SSH_ACL_MEANING="The lslpp -L openssh.base.server capture is absent from this scan fixture set, so AIXray cannot tell whether the fileset is genuinely absent or merely unrecorded."
-    SSH_ACL_FIX="capture 'lslpp -L openssh.base.server' from a representative AIX host, then rerun AIXray."
+    SSH_ACL_MEANING="The lslpp -L openssh.base.server capture is absent from this scan fixture set, so PTxray cannot tell whether the fileset is genuinely absent or merely unrecorded."
+    SSH_ACL_FIX="capture 'lslpp -L openssh.base.server' from a representative AIX host, then rerun PTxray."
     SSH_ACL_REASON='probe not captured'
   elif [ "$SSH_ACL_PKG_ROW" -eq 0 ]; then
     SSH_ACL_STATUS=NOT_APPLICABLE
@@ -37890,7 +37487,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_ACL_SEV=med
           SSH_ACL_OBSERVED="no AllowUsers/AllowGroups/DenyUsers/DenyGroups directive in the effective sshd configuration"
           SSH_ACL_MEANING="The SSH daemon has no user-level or group-level access restriction configured, so the effective configuration does not constrain who may authenticate."
-          SSH_ACL_FIX="configure at least one of AllowUsers, AllowGroups, DenyUsers, or DenyGroups with a non-empty value, validate sshd_config, and restart sshd; AIXray only recommends these actions."
+          SSH_ACL_FIX="configure at least one of AllowUsers, AllowGroups, DenyUsers, or DenyGroups with a non-empty value, validate sshd_config, and restart sshd; PTxray only recommends these actions."
         fi
         ;;
       *)
@@ -37916,8 +37513,8 @@ _AIXRAY_SESSION_KEYS=""
   SSH_KEX_STATUS=NOT_ASSESSED
   SSH_KEX_SEVERITY=high
   SSH_KEX_OBSERVED=''
-  SSH_KEX_MEANING='AIXray did not obtain one trustworthy global effective key-exchange algorithm list, so it cannot establish that no deprecated SSH key-exchange algorithm is in use.'
-  SSH_KEX_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_KEX_MEANING='PTxray did not obtain one trustworthy global effective key-exchange algorithm list, so it cannot establish that no deprecated SSH key-exchange algorithm is in use.'
+  SSH_KEX_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_KEX_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -37983,7 +37580,7 @@ _AIXRAY_SESSION_KEYS=""
             SSH_KEX_STATUS=FAIL
             SSH_KEX_OBSERVED="kexalgorithms $SSH_KEX_VALUE; barred member(s) $SSH_KEX_BAD"
             SSH_KEX_MEANING='The global effective SSH key-exchange list includes a deprecated algorithm, weakening key-exchange security.'
-            SSH_KEX_FIX='remove the barred algorithm from the KexAlgorithms setting, validate it with sshd -T, and restart sshd; AIXray only recommends these actions.'
+            SSH_KEX_FIX='remove the barred algorithm from the KexAlgorithms setting, validate it with sshd -T, and restart sshd; PTxray only recommends these actions.'
           else
             SSH_KEX_STATUS=PASS
             SSH_KEX_OBSERVED="kexalgorithms $SSH_KEX_VALUE"
@@ -38008,8 +37605,8 @@ _AIXRAY_SESSION_KEYS=""
   SSH_PEP_STATUS=NOT_ASSESSED
   SSH_PEP_SEVERITY=med
   SSH_PEP_OBSERVED=''
-  SSH_PEP_MEANING='AIXray did not obtain one trustworthy global effective PermitEmptyPasswords value, so it cannot establish whether sshd rejects empty-password authentication.'
-  SSH_PEP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  SSH_PEP_MEANING='PTxray did not obtain one trustworthy global effective PermitEmptyPasswords value, so it cannot establish whether sshd rejects empty-password authentication.'
+  SSH_PEP_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   SSH_PEP_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -38053,7 +37650,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_PEP_SEVERITY=high
           SSH_PEP_OBSERVED='PermitEmptyPasswords yes'
           SSH_PEP_MEANING='sshd permits accounts with empty passwords to log in, so any account left without a password is reachable without credentials.'
-          SSH_PEP_FIX="set 'PermitEmptyPasswords no' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          SSH_PEP_FIX="set 'PermitEmptyPasswords no' in sshd_config, validate the global effective configuration with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
         __COUNT__)
           SSH_PEP_REASON='effective row is missing or duplicate'
@@ -38081,8 +37678,8 @@ _AIXRAY_SESSION_KEYS=""
   SSH_PR_STATUS=NOT_ASSESSED
   SSH_PR_SEV=low
   SSH_PR_OBSERVED=''
-  SSH_PR_MEANING='AIXray did not obtain one unambiguous PermitRootLogin directive, so it cannot establish whether direct root login is refused.'
-  SSH_PR_FIX='set PermitRootLogin to no in /etc/ssh/sshd_config; AIXray only recommends this action.' # network-lint: allow -- prose finding text, no network call
+  SSH_PR_MEANING='PTxray did not obtain one unambiguous PermitRootLogin directive, so it cannot establish whether direct root login is refused.'
+  SSH_PR_FIX='set PermitRootLogin to no in /etc/ssh/sshd_config; PTxray only recommends this action.' # network-lint: allow -- prose finding text, no network call
   SSH_PR_REASON=''
 
   SSH_PR_RAW=$(aix egrep_permitrootlogin /usr/bin/egrep "^PermitRootLogin" /etc/ssh/sshd_config) # network-lint: allow -- aix() runs the LOCAL egrep on sshd_config capture text; egrep makes no network call
@@ -38107,7 +37704,7 @@ _AIXRAY_SESSION_KEYS=""
           SSH_PR_SEV=high
           SSH_PR_OBSERVED=$SSH_PR_RAW
           SSH_PR_MEANING='A PermitRootLogin directive is present but its value is not no, so direct root login is not refused.'
-          SSH_PR_FIX="set 'PermitRootLogin no' in /etc/ssh/sshd_config and restart sshd; AIXray only recommends this action." # network-lint: allow -- prose finding text, no network call
+          SSH_PR_FIX="set 'PermitRootLogin no' in /etc/ssh/sshd_config and restart sshd; PTxray only recommends this action." # network-lint: allow -- prose finding text, no network call
         fi
         ;;
       *)
@@ -38119,7 +37716,7 @@ _AIXRAY_SESSION_KEYS=""
     SSH_PR_SEV=high
     SSH_PR_OBSERVED='PermitRootLogin not configured'
     SSH_PR_MEANING='No uncommented PermitRootLogin directive is present; the OpenSSH default does not refuse direct root login.'
-    SSH_PR_FIX="set 'PermitRootLogin no' in /etc/ssh/sshd_config and restart sshd; AIXray only recommends this action." # network-lint: allow -- prose finding text, no network call
+    SSH_PR_FIX="set 'PermitRootLogin no' in /etc/ssh/sshd_config and restart sshd; PTxray only recommends this action." # network-lint: allow -- prose finding text, no network call
   elif [ "$SSH_PR_RC" -eq 2 ]; then
     SSH_PR_STATUS=NOT_APPLICABLE
     SSH_PR_OBSERVED='sshd_config absent'
@@ -38142,8 +37739,8 @@ _AIXRAY_SESSION_KEYS=""
   RKL_STATUS=NOT_ASSESSED
   RKL_SEVERITY=med
   RKL_OBSERVED=''
-  RKL_MEANING='AIXray did not obtain one trustworthy global effective rekeylimit value, so it cannot establish the session-key renegotiation boundary.'
-  RKL_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun AIXray.'
+  RKL_MEANING='PTxray did not obtain one trustworthy global effective rekeylimit value, so it cannot establish the session-key renegotiation boundary.'
+  RKL_FIX='run sshd -T as root, resolve any configuration or host-key error, and rerun PTxray.'
   RKL_REASON=''
 
   if [ "${MYUID:-0}" != "0" ]; then
@@ -38197,7 +37794,7 @@ _AIXRAY_SESSION_KEYS=""
           RKL_STATUS=FAIL
           RKL_OBSERVED="rekeylimit $RKL_PARSED"
           RKL_MEANING='The SSH server does not enforce the required session-key renegotiation boundary because the effective rekeylimit differs from 1073741824 bytes and 3600 seconds.'
-          RKL_FIX="set 'RekeyLimit 1073741824 3600' in the global sshd_config, validate it with 'sshd -T', and restart sshd; AIXray only recommends these actions."
+          RKL_FIX="set 'RekeyLimit 1073741824 3600' in the global sshd_config, validate it with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
       esac
     fi
@@ -38290,15 +37887,15 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       SMG_MEANING="The sendmail SMTP greeting reveals the server host name or the sendmail version before authentication, or the configured helpfile is absent, giving reconnaissance information to any SMTP client." # network-lint: allow -- prose finding text, no network call
-      SMG_FIX="set a static O SmtpGreetingMessage value in /etc/mail/sendmail.cf that uses no \$j or \$b macro, and ensure /etc/mail/helpfile exists; AIXray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+      SMG_FIX="set a static O SmtpGreetingMessage value in /etc/mail/sendmail.cf that uses no \$j or \$b macro, and ensure /etc/mail/helpfile exists; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
       ;;
     NOT_APPLICABLE)
       SMG_MEANING="No /etc/mail/sendmail.cf exists, so this host serves no sendmail SMTP greeting to assess." # network-lint: allow -- prose finding text, no network call
       SMG_FIX="n/a"
       ;;
     *)
-      SMG_MEANING="AIXray did not obtain trustworthy evidence for the sendmail SMTP greeting configuration." # network-lint: allow -- prose finding text, no network call
-      SMG_FIX="verify /etc/mail/sendmail.cf is present and readable, then rerun AIXray." # network-lint: allow -- prose finding text, no network call
+      SMG_MEANING="PTxray did not obtain trustworthy evidence for the sendmail SMTP greeting configuration." # network-lint: allow -- prose finding text, no network call
+      SMG_FIX="verify /etc/mail/sendmail.cf is present and readable, then rerun PTxray." # network-lint: allow -- prose finding text, no network call
       ;;
   esac
 
@@ -38412,15 +38009,15 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       SP_MEAN="Without the required PrivacyOptions, sendmail answers VRFY/EXPN queries and omits authentication warnings, leaking account information over SMTP." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="add 'O PrivacyOptions=authwarnings,novrfy,noexpn' to /etc/mail/sendmail.cf and restart sendmail; AIXray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+      SP_FIX="add 'O PrivacyOptions=authwarnings,novrfy,noexpn' to /etc/mail/sendmail.cf and restart sendmail; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
       ;;
     NOT_APPLICABLE)
       SP_MEAN="The sendmail configuration file does not exist, so there is no PrivacyOptions setting to enforce." # network-lint: allow -- prose finding text, no network call
       SP_FIX="n/a"
       ;;
     *)
-      SP_MEAN="AIXray did not obtain trustworthy evidence about the sendmail configuration." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="resolve the probe failure and rerun AIXray."
+      SP_MEAN="PTxray did not obtain trustworthy evidence about the sendmail configuration." # network-lint: allow -- prose finding text, no network call
+      SP_FIX="resolve the probe failure and rerun PTxray."
       ;;
   esac
 
@@ -38518,8 +38115,8 @@ _AIXRAY_SESSION_KEYS=""
     # network-lint: allow-next=4 -- NOT_ASSESSED finding prose names the mailer config file; no network call
     add security fileperm_sendmailcf "sendmail.cf owner/group/mode" NOT_ASSESSED med \
         "not assessed — /etc/mail/sendmail.cf metadata $FSC_REASON" \
-        "AIXray did not obtain one trustworthy metadata row proving the sendmail.cf owner, group, and mode, so it cannot claim the boundary is satisfied." \
-        "run 'ls -l /etc/mail/sendmail.cf', correct the capture or path problem, and rerun AIXray." \
+        "PTxray did not obtain one trustworthy metadata row proving the sendmail.cf owner, group, and mode, so it cannot claim the boundary is satisfied." \
+        "run 'ls -l /etc/mail/sendmail.cf', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   else
     FSC_OBSERVED="/etc/mail/sendmail.cf mode=$FSC_MODE owner=$FSC_OWNER group=$FSC_GROUP" # network-lint: allow -- observed-state prose naming the local config file, no network call
@@ -38539,7 +38136,7 @@ _AIXRAY_SESSION_KEYS=""
       add security fileperm_sendmailcf "sendmail.cf owner/group/mode" FAIL med \
           "$FSC_OBSERVED" \
           "/etc/mail/sendmail.cf deviates from the required root:system owner/group and -rw-r----- mode boundary and could let an unintended identity alter trusted mail configuration." \
-          "restore ownership and mode after validating local policy: 'chown root:system /etc/mail/sendmail.cf' and 'chmod 0640 /etc/mail/sendmail.cf'; AIXray recommends these commands and never executes them." \
+          "restore ownership and mode after validating local policy: 'chown root:system /etc/mail/sendmail.cf' and 'chmod 0640 /etc/mail/sendmail.cf'; PTxray recommends these commands and never executes them." \
           "cis-l1"
     fi
   fi
@@ -38562,13 +38159,13 @@ _AIXRAY_SESSION_KEYS=""
   elif [ "$CK_RC" -ne 0 ]; then
     add security diracc_clientmqueue "/var/spool/clientmqueue access" NOT_ASSESSED med \
         "probe failed (rc=$CK_RC)" \
-        "AIXray did not obtain a trustworthy ls record, so it cannot claim the directory access boundary is satisfied." \
-        "run 'ls -ld /var/spool/clientmqueue', correct the capture or path problem, and rerun AIXray." "cis-l1"
+        "PTxray did not obtain a trustworthy ls record, so it cannot claim the directory access boundary is satisfied." \
+        "run 'ls -ld /var/spool/clientmqueue', correct the capture or path problem, and rerun PTxray." "cis-l1"
   elif [ -z "$CK_RAW" ]; then
     add security diracc_clientmqueue "/var/spool/clientmqueue access" NOT_ASSESSED med \
         "probe returned no output" \
-        "AIXray did not obtain a trustworthy ls record, so it cannot claim the directory access boundary is satisfied." \
-        "run 'ls -ld /var/spool/clientmqueue' and confirm the path state, then rerun AIXray." "cis-l1"
+        "PTxray did not obtain a trustworthy ls record, so it cannot claim the directory access boundary is satisfied." \
+        "run 'ls -ld /var/spool/clientmqueue' and confirm the path state, then rerun PTxray." "cis-l1"
   else
     CK_REC=$(printf '%s\n' "$CK_RAW" | awk '{print $1 " " $3 " " $4 " " $9}')
     if [ "$CK_REC" = "drwxrwx--- smmsp smmsp /var/spool/clientmqueue" ]; then
@@ -38595,8 +38192,8 @@ _AIXRAY_SESSION_KEYS=""
       if [ "$CK_VALID_RC" -ne 0 ] || [ -z "$CK_VALID" ]; then
         add security diracc_clientmqueue "/var/spool/clientmqueue access" NOT_ASSESSED med \
             "ls output unparseable" \
-            "AIXray did not obtain one trustworthy metadata row, so it cannot claim the directory access boundary is satisfied." \
-            "run 'ls -ld /var/spool/clientmqueue', correct the capture or path problem, and rerun AIXray." "cis-l1"
+            "PTxray did not obtain one trustworthy metadata row, so it cannot claim the directory access boundary is satisfied." \
+            "run 'ls -ld /var/spool/clientmqueue', correct the capture or path problem, and rerun PTxray." "cis-l1"
       else
         CK_MODE=${CK_VALID%%\|*}
         CK_REMAIN=${CK_VALID#*\|}
@@ -38619,7 +38216,7 @@ _AIXRAY_SESSION_KEYS=""
         add security diracc_clientmqueue "/var/spool/clientmqueue access" FAIL med \
             "mode=$CK_MODE owner=$CK_OWNER group=$CK_GROUP" \
             "/var/spool/clientmqueue diverges from the required directory access boundary in: $CK_DIVERGED." \
-            "observed mode=$CK_MODE owner=$CK_OWNER group=$CK_GROUP; expected drwxrwx--- smmsp smmsp. after validation, run '$CK_REMEDIATE'; AIXray recommends this command and never executes it." "cis-l1"
+            "observed mode=$CK_MODE owner=$CK_OWNER group=$CK_GROUP; expected drwxrwx--- smmsp smmsp. after validation, run '$CK_REMEDIATE'; PTxray recommends this command and never executes it." "cis-l1"
       fi
     fi
   fi
@@ -38707,11 +38304,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       DQM_MEANING="A missing or wrongly-accessed /var/spool/mqueue lets an unintended identity read or alter queued mail files."
-      DQM_FIX="ensure the directory exists and is owned by root:system with mode 0700: 'mkdir -p /var/spool/mqueue'; 'chown root:system /var/spool/mqueue'; 'chmod 0700 /var/spool/mqueue'. AIXray only recommends these actions and never executes them."
+      DQM_FIX="ensure the directory exists and is owned by root:system with mode 0700: 'mkdir -p /var/spool/mqueue'; 'chown root:system /var/spool/mqueue'; 'chmod 0700 /var/spool/mqueue'. PTxray only recommends these actions and never executes them."
       ;;
     *)
-      DQM_MEANING="AIXray did not obtain one trustworthy metadata row for /var/spool/mqueue, so it cannot claim the boundary is satisfied."
-      DQM_FIX="run 'ls -ld /var/spool/mqueue' as root, correct any capture or path problem, and rerun AIXray."
+      DQM_MEANING="PTxray did not obtain one trustworthy metadata row for /var/spool/mqueue, so it cannot claim the boundary is satisfied."
+      DQM_FIX="run 'ls -ld /var/spool/mqueue' as root, correct any capture or path problem, and rerun PTxray."
       ;;
   esac
 
@@ -38737,12 +38334,12 @@ _AIXRAY_SESSION_KEYS=""
         NOT_ASSESSED low \
         "not assessed — /etc/profile TMOUT/TIMEOUT capture failed (rc=$STR_RC)" \
         "Could not read TMOUT/TIMEOUT evidence from /etc/profile, so idle-shell readonly-timeout enforcement is unknown." \
-        "restore read access to /etc/profile, then rerun AIXray." "cis-l2"
+        "restore read access to /etc/profile, then rerun PTxray." "cis-l2"
   elif [ "$STR_RC" -eq 1 ]; then
     add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
         "no TMOUT, TIMEOUT, or readonly declaration in /etc/profile (grep rc=1)" \
         "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-        "set TMOUT=900, TIMEOUT=900, and readonly TMOUT TIMEOUT in /etc/profile, then rerun AIXray." "cis-l2"
+        "set TMOUT=900, TIMEOUT=900, and readonly TMOUT TIMEOUT in /etc/profile, then rerun PTxray." "cis-l2"
   else
     # Parse assignments and readonly declarations.  Comments are stripped;
     # inline trailing shell comments are removed from values.  Assignment
@@ -38912,28 +38509,28 @@ _AIXRAY_SESSION_KEYS=""
         add security shell_timeout_readonly "Interactive shell inactivity timeout" \
             NOT_ASSESSED low \
             "not assessed — /etc/profile TMOUT/TIMEOUT lines are not parseable" \
-            "AIXray found lines matching TMOUT/TIMEOUT in /etc/profile but none parse as an assignment or readonly declaration, so timeout enforcement cannot be established." \
-            "inspect TMOUT/TIMEOUT lines in /etc/profile, correct malformed entries, and rerun AIXray." "cis-l2"
+            "PTxray found lines matching TMOUT/TIMEOUT in /etc/profile but none parse as an assignment or readonly declaration, so timeout enforcement cannot be established." \
+            "inspect TMOUT/TIMEOUT lines in /etc/profile, correct malformed entries, and rerun PTxray." "cis-l2"
         ;;
       value_conflict)
         add security shell_timeout_readonly "Interactive shell inactivity timeout" \
             NOT_ASSESSED low \
             "not assessed — conflicting assignments for the same variable in /etc/profile" \
-            "AIXray observed different values assigned to TMOUT or TIMEOUT across multiple lines in /etc/profile; the effective value cannot be determined from grep output alone." \
-            "consolidate TMOUT and TIMEOUT to one assignment each in /etc/profile, then rerun AIXray." "cis-l2"
+            "PTxray observed different values assigned to TMOUT or TIMEOUT across multiple lines in /etc/profile; the effective value cannot be determined from grep output alone." \
+            "consolidate TMOUT and TIMEOUT to one assignment each in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       absent)
         add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
             "no active TMOUT or TIMEOUT assignment in /etc/profile" \
             "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-            "set TMOUT=900, TIMEOUT=900, and readonly TMOUT TIMEOUT in /etc/profile, then rerun AIXray." "cis-l2"
+            "set TMOUT=900, TIMEOUT=900, and readonly TMOUT TIMEOUT in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       missing)
         STR_MISSING=$STR_REST
         add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
             "$STR_MISSING is not configured in /etc/profile; both TMOUT and TIMEOUT must be set" \
             "Only one timeout variable is configured in /etc/profile; both are required by the standard." \
-            "add a $STR_MISSING assignment (1–900) and a readonly declaration covering both variables in /etc/profile, then rerun AIXray." "cis-l2"
+            "add a $STR_MISSING assignment (1–900) and a readonly declaration covering both variables in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       no_readonly)
         STR_TMO_CLS=${STR_REST%%\|*}
@@ -38945,7 +38542,7 @@ _AIXRAY_SESSION_KEYS=""
         add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
             "TMOUT and TIMEOUT are set but not readonly; the interactive user can alter or unset them" \
             "Without readonly, an interactive user can change or unset the timeout, defeating the inactivity lock." \
-            "add \"readonly TMOUT TIMEOUT\" as the last relevant statement in /etc/profile, then rerun AIXray." "cis-l2"
+            "add \"readonly TMOUT TIMEOUT\" as the last relevant statement in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       partial_readonly)
         STR_MISSING=${STR_REST%%\|*}
@@ -38959,7 +38556,7 @@ _AIXRAY_SESSION_KEYS=""
         add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
             "$STR_MISSING is not readonly; both TMOUT and TIMEOUT must be readonly" \
             "Only one timeout variable carries the readonly marker; the other can still be altered or unset by the interactive user." \
-            "add $STR_MISSING to the readonly declaration in /etc/profile, then rerun AIXray." "cis-l2"
+            "add $STR_MISSING to the readonly declaration in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       order)
         STR_TMO_CLS=${STR_REST%%\|*}
@@ -38971,7 +38568,7 @@ _AIXRAY_SESSION_KEYS=""
         add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
             "readonly declaration precedes TMOUT/TIMEOUT assignment; the standard requires readonly to be the last statement" \
             "A readonly declaration that appears before an assignment line is ineffective: the later assignment would fail at shell parse time, or the readonly would not cover it." \
-            "move \"readonly TMOUT TIMEOUT\" to be the last statement among the timeout lines in /etc/profile, then rerun AIXray." "cis-l2"
+            "move \"readonly TMOUT TIMEOUT\" to be the last statement among the timeout lines in /etc/profile, then rerun PTxray." "cis-l2"
         ;;
       both)
         STR_TMO_CLS=${STR_REST%%\|*}
@@ -38989,7 +38586,7 @@ _AIXRAY_SESSION_KEYS=""
           add security shell_timeout_readonly "Interactive shell inactivity timeout" WARN low \
               "${STR_BAD} above the 900-second cap" \
               "A readonly timeout above 900 seconds still leaves an idle session open for an excessive period." \
-              "lower TMOUT and TIMEOUT to 900 seconds or less, keep both readonly, and rerun AIXray." "cis-l2"
+              "lower TMOUT and TIMEOUT to 900 seconds or less, keep both readonly, and rerun PTxray." "cis-l2"
         elif [ "$STR_TMO_CLS" = empty ] || [ "$STR_TMO_CLS" = nonnum ] || [ "$STR_TMO_CLS" = zero ] ||
              [ "$STR_TO_CLS" = empty ] || [ "$STR_TO_CLS" = nonnum ] || [ "$STR_TO_CLS" = zero ]; then
           STR_BAD=""
@@ -39007,7 +38604,7 @@ _AIXRAY_SESSION_KEYS=""
           add security shell_timeout_readonly "Interactive shell inactivity timeout" FAIL high \
               "${STR_BAD}; idle-shell auto-logout is disabled or unreadable" \
               "A zero, empty, or non-numeric timeout value breaks the enforced inactivity logout even when readonly is set." \
-              "set TMOUT and TIMEOUT to a positive integer from 1 through 900, keep both readonly, and rerun AIXray." "cis-l2"
+              "set TMOUT and TIMEOUT to a positive integer from 1 through 900, keep both readonly, and rerun PTxray." "cis-l2"
         else
           add security shell_timeout_readonly "Interactive shell inactivity timeout" PASS low \
               "TMOUT=${STR_TMO_VAL} and TIMEOUT=${STR_TO_VAL}, both readonly" \
@@ -39020,7 +38617,7 @@ _AIXRAY_SESSION_KEYS=""
             NOT_ASSESSED low \
             "not assessed — /etc/profile TMOUT/TIMEOUT parse returned unrecognised state" \
             "The parsed TMOUT/TIMEOUT evidence from /etc/profile did not map to a known shape, so timeout enforcement is unknown." \
-            "inspect /etc/profile TMOUT/TIMEOUT configuration and rerun AIXray." "cis-l2"
+            "inspect /etc/profile TMOUT/TIMEOUT configuration and rerun PTxray." "cis-l2"
         ;;
     esac
   fi
@@ -39036,15 +38633,15 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$ROOT_SU_RC" -ne 0 ]; then
     add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
         "not assessed — lsuser returned exit code $ROOT_SU_RC" \
-        "AIXray could not read the root account login and su attributes, so their state is unknown." \
-        "run 'lsuser -a login rlogin su sugroups root' with authority to read account attributes and rerun AIXray." \
+        "PTxray could not read the root account login and su attributes, so their state is unknown." \
+        "run 'lsuser -a login rlogin su sugroups root' with authority to read account attributes and rerun PTxray." \
         "" \
         "cis-l1"
   elif [ -z "$ROOT_SU_RAW" ]; then
     add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
         "not assessed — lsuser returned no attributes (rc=0)" \
-        "The root account exists but lsuser produced no output, so AIXray could not discriminate its state." \
-        "verify 'lsuser -a login rlogin su sugroups root' returns the four attributes and rerun AIXray." \
+        "The root account exists but lsuser produced no output, so PTxray could not discriminate its state." \
+        "verify 'lsuser -a login rlogin su sugroups root' returns the four attributes and rerun PTxray." \
         "" \
         "cis-l1"
   else
@@ -39086,7 +38683,7 @@ EOF
         add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
             "not assessed — lsuser attributes could not be fully parsed (rc=0)" \
             "At least one of login, rlogin, su, or sugroups was missing from the lsuser output, so the root account state is unknown." \
-            "confirm 'lsuser -a login rlogin su sugroups root' reports all four attributes and rerun AIXray." \
+            "confirm 'lsuser -a login rlogin su sugroups root' reports all four attributes and rerun PTxray." \
             "" \
             "cis-l1"
         ;;
@@ -39122,8 +38719,8 @@ _AIXRAY_SESSION_KEYS=""
   if [ "${MYUID:-1}" != "0" ]; then
     add security login_root_shell "root login shell" NOT_ASSESSED med \
         "not assessed — non-root run (uid=${MYUID:-1})" \
-        "AIXray requires root privileges to read the root account's shell attribute." \
-        "rerun AIXray as root." \
+        "PTxray requires root privileges to read the root account's shell attribute." \
+        "rerun PTxray as root." \
         "cis-l1"
   else
     LRS_RAW=$(aix login_root_shell lsuser -a shell root)
@@ -39155,8 +38752,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ -n "$LRS_REASON" ]; then
       add security login_root_shell "root login shell" NOT_ASSESSED med \
           "not assessed — $LRS_REASON" \
-          "AIXray did not obtain a trustworthy root shell attribute, so it cannot claim the login-shell requirement is satisfied." \
-          "run 'lsuser -a shell root', correct the capture problem, and rerun AIXray." \
+          "PTxray did not obtain a trustworthy root shell attribute, so it cannot claim the login-shell requirement is satisfied." \
+          "run 'lsuser -a shell root', correct the capture problem, and rerun PTxray." \
           "cis-l1"
     elif [ "$LRS_SHELL" = "/usr/bin/ksh" ]; then
       add security login_root_shell "root login shell" PASS med \
@@ -39343,8 +38940,8 @@ _AIXRAY_SESSION_KEYS=""
   else
     add security login_core_limit "Default core file size limits and fullcore tunable" NOT_ASSESSED med \
         "not assessed — $LOGIN_CL_REASON" \
-        "AIXray did not obtain trustworthy core limit and fullcore values." \
-        "inspect the default-stanza core attributes in /etc/security/limits and the sys0 fullcore attribute as root, correct capture ambiguity, and rerun AIXray." \
+        "PTxray did not obtain trustworthy core limit and fullcore values." \
+        "inspect the default-stanza core attributes in /etc/security/limits and the sys0 fullcore attribute as root, correct capture ambiguity, and rerun PTxray." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -39363,8 +38960,8 @@ _AIXRAY_SESSION_KEYS=""
   PATH_ENV_CHECK_RAW=""
   PATH_ENV_STATUS=NOT_ASSESSED
   PATH_ENV_OBSERVED=""
-  PATH_ENV_MEANING="AIXray did not obtain trustworthy evidence about the PATH assignment in /etc/environment, so it cannot establish whether the value is secure."
-  PATH_ENV_FIX="verify /etc/environment exists and is readable, then rerun AIXray."
+  PATH_ENV_MEANING="PTxray did not obtain trustworthy evidence about the PATH assignment in /etc/environment, so it cannot establish whether the value is secure."
+  PATH_ENV_FIX="verify /etc/environment exists and is readable, then rerun PTxray."
 
   PATH_ENV_STAT_RAW=$(aix path_env_stat ls -ld /etc/environment)
   PATH_ENV_STAT_RC=$?
@@ -39381,8 +38978,8 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$PATH_ENV_LINE_RC" -eq 127 ]; then
       PATH_ENV_STATUS=NOT_ASSESSED
       PATH_ENV_OBSERVED="not assessed — PATH capture is absent or grep is missing (rc=127)"
-      PATH_ENV_MEANING="AIXray has no captured PATH lines from /etc/environment, so it cannot establish whether the value is secure."
-      PATH_ENV_FIX="capture /etc/environment for this check, then rerun AIXray."
+      PATH_ENV_MEANING="PTxray has no captured PATH lines from /etc/environment, so it cannot establish whether the value is secure."
+      PATH_ENV_FIX="capture /etc/environment for this check, then rerun PTxray."
     elif [ "$PATH_ENV_LINE_RC" -eq 1 ]; then
       PATH_ENV_STATUS=PASS
       PATH_ENV_OBSERVED="no PATH assignment in /etc/environment"
@@ -39391,13 +38988,13 @@ _AIXRAY_SESSION_KEYS=""
     elif [ "$PATH_ENV_LINE_RC" -ne 0 ]; then
       PATH_ENV_STATUS=NOT_ASSESSED
       PATH_ENV_OBSERVED="not assessed — PATH probe failed (rc=$PATH_ENV_LINE_RC)"
-      PATH_ENV_MEANING="AIXray could not read the PATH assignment from /etc/environment, so it cannot establish whether the value is secure."
-      PATH_ENV_FIX="verify /etc/environment is readable, then rerun AIXray."
+      PATH_ENV_MEANING="PTxray could not read the PATH assignment from /etc/environment, so it cannot establish whether the value is secure."
+      PATH_ENV_FIX="verify /etc/environment is readable, then rerun PTxray."
     elif [ -z "$PATH_ENV_LINE_RAW" ]; then
       PATH_ENV_STATUS=NOT_ASSESSED
       PATH_ENV_OBSERVED="not assessed — PATH capture was empty (grep returned success but the capture contained no bytes)"
       PATH_ENV_MEANING="The probe reported success but produced no PATH content; the evidence is insufficient to judge the PATH assignment."
-      PATH_ENV_FIX="verify /etc/environment contains a readable PATH= line, capture it, then rerun AIXray."
+      PATH_ENV_FIX="verify /etc/environment contains a readable PATH= line, capture it, then rerun PTxray."
     else
       PATH_ENV_CHECK_RAW=$(printf '%s\n' "$PATH_ENV_LINE_RAW" | awk '
         /^PATH=/ {
@@ -39414,7 +39011,7 @@ _AIXRAY_SESSION_KEYS=""
         PATH_ENV_STATUS=FAIL
         PATH_ENV_OBSERVED="insecure $PATH_ENV_CHECK_RAW"
         PATH_ENV_MEANING="The PATH assignment in /etc/environment contains a dot entry, an empty path component, or a single-character relative entry; all directories must be explicitly defined in PATH, and an unprivileged user could place an executable ahead of system binaries."
-        PATH_ENV_FIX="remove the dot entry or empty path component from the PATH assignment in /etc/environment, then rerun AIXray."
+        PATH_ENV_FIX="remove the dot entry or empty path component from the PATH assignment in /etc/environment, then rerun PTxray."
       else
         PATH_ENV_STATUS=PASS
         PATH_ENV_OBSERVED="PATH assignment in /etc/environment is clean"
@@ -39434,7 +39031,7 @@ _AIXRAY_SESSION_KEYS=""
   # as an explicit '.'. The live runtime PATH is not obtainable honestly: opening
   # a root login shell through the su command (as the deleted probe did) would run
   # customer-authored login-shell code as root and would write /var/adm/sulog,
-  # both of which violate AIXray's read-only charter. Instead this check reads the
+  # both of which violate PTxray's read-only charter. Instead this check reads the
   # files that DECLARE root's login PATH —
   # /etc/environment, /etc/profile, and /.profile (root's home directory is /) —
   # with a plain grep that executes nothing and writes nothing. It therefore
@@ -39454,7 +39051,7 @@ _AIXRAY_SESSION_KEYS=""
   LS_RC=$?
 
   # Default to indeterminate: a declaration file the capture says nothing about
-  # is a file AIXray did not read, and that must refuse rather than be assumed
+  # is a file PTxray did not read, and that must refuse rather than be assumed
   # absent. The classification below only ever moves a path OFF this default on
   # positive evidence.
   ENV_PRESENT="indeterminate"
@@ -39531,14 +39128,14 @@ LPEOF
   if aix_capture_missing login_path_decl; then
     add security login_root_path "Root login PATH" NOT_ASSESSED med \
         "not assessed — no capture exists for the declared login PATH probe" \
-        "AIXray has no captured read of /etc/environment, /etc/profile, or /.profile, so the PATH declared for root's login shell is unknown." \
-        "capture /etc/environment, /etc/profile, and /.profile for this check, then re-run AIXray." "cis-l1"
+        "PTxray has no captured read of /etc/environment, /etc/profile, or /.profile, so the PATH declared for root's login shell is unknown." \
+        "capture /etc/environment, /etc/profile, and /.profile for this check, then re-run PTxray." "cis-l1"
 
   elif [ -n "$INDETERMINATE_PATHS" ]; then
     add security login_root_path "Root login PATH" NOT_ASSESSED med \
         "not assessed — cannot establish whether ${INDETERMINATE_PATHS} exists (ls probe rc=$LS_RC)" \
-        "AIXray cannot determine whether ${INDETERMINATE_PATHS} exists on this host; this file may declare a violating PATH that was not read. The ls -l probe returned rc $LS_RC." \
-        "verify the file exists and is readable, then re-run AIXray." "cis-l1"
+        "PTxray cannot determine whether ${INDETERMINATE_PATHS} exists on this host; this file may declare a violating PATH that was not read. The ls -l probe returned rc $LS_RC." \
+        "verify the file exists and is readable, then re-run PTxray." "cis-l1"
 
   elif [ "$LP_RC" -ge 2 ] && [ -z "$LP_RAW" ]; then
     # grep rc 2 means at least one named file could not be opened, but every
@@ -39547,14 +39144,14 @@ LPEOF
     # PATH lines captured, this is the same refusal as rc 1.
     add security login_root_path "Root login PATH" NOT_ASSESSED med \
         "not assessed — no PATH assignment found in the declaration files that exist${ABSENT_DISCLOSURE}" \
-        "The declaration files that exist on this host were read but no PATH assignment was captured; root's login shell would fall back to a default PATH that AIXray did not measure.${ABSENT_MEANING}" \
-        "add an explicit PATH assignment to /etc/environment or a login profile, then re-run AIXray." "cis-l1"
+        "The declaration files that exist on this host were read but no PATH assignment was captured; root's login shell would fall back to a default PATH that PTxray did not measure.${ABSENT_MEANING}" \
+        "add an explicit PATH assignment to /etc/environment or a login profile, then re-run PTxray." "cis-l1"
 
   elif [ "$LP_RC" -eq 1 ]; then
     add security login_root_path "Root login PATH" NOT_ASSESSED med \
         "not assessed — no PATH assignment found in the declaration files that exist${ABSENT_DISCLOSURE}" \
-        "The declaration files that exist on this host were read but no PATH assignment was captured; root's login shell would fall back to a default PATH that AIXray did not measure.${ABSENT_MEANING}" \
-        "add an explicit PATH assignment to /etc/environment or a login profile, then re-run AIXray." "cis-l1"
+        "The declaration files that exist on this host were read but no PATH assignment was captured; root's login shell would fall back to a default PATH that PTxray did not measure.${ABSENT_MEANING}" \
+        "add an explicit PATH assignment to /etc/environment or a login profile, then re-run PTxray." "cis-l1"
 
   else
     # LP_RC is 0 (grep matched at least one PATH line), or LP_RC >= 2
@@ -39700,26 +39297,26 @@ LPEOF
       2)
         add security login_root_path "Root login PATH" NOT_ASSESSED med \
             "not assessed — a declared PATH carries a ';' suffix that is not 'export PATH' and could not be judged${ABSENT_DISCLOSURE}" \
-            "A PATH declaration captured from /etc/environment, /etc/profile, or /.profile contains a ';' suffix that is not 'export PATH' (for example, an additional command on the same line). AIXray cannot tell whether the PATH value is clean, so the declared login PATH is not assessed.${ABSENT_MEANING}" \
-            "declare root's login PATH as a single assignment with no trailing command, then re-run AIXray." "cis-l1"
+            "A PATH declaration captured from /etc/environment, /etc/profile, or /.profile contains a ';' suffix that is not 'export PATH' (for example, an additional command on the same line). PTxray cannot tell whether the PATH value is clean, so the declared login PATH is not assessed.${ABSENT_MEANING}" \
+            "declare root's login PATH as a single assignment with no trailing command, then re-run PTxray." "cis-l1"
         ;;
       3)
         if [ -n "$UNRESOLVED_LINE" ]; then
           add security login_root_path "Root login PATH" NOT_ASSESSED med \
               "not assessed — declared PATH '${UNRESOLVED_LINE}' is built entirely from unresolved variable references${ABSENT_DISCLOSURE}" \
-              "The PATH declaration \"${UNRESOLVED_LINE}\" is composed only of variable references (\$VAR) that AIXray cannot statically resolve, so zero of its elements were adjudicated. PASS requires at least one adjudicated element; a declaration that reduces to none cannot be confirmed clean.${ABSENT_MEANING}" \
-              "declare a concrete absolute PATH for root's login shell, or include at least one absolute, non-variable component, then re-run AIXray." "cis-l1"
+              "The PATH declaration \"${UNRESOLVED_LINE}\" is composed only of variable references (\$VAR) that PTxray cannot statically resolve, so zero of its elements were adjudicated. PASS requires at least one adjudicated element; a declaration that reduces to none cannot be confirmed clean.${ABSENT_MEANING}" \
+              "declare a concrete absolute PATH for root's login shell, or include at least one absolute, non-variable component, then re-run PTxray." "cis-l1"
         else
           add security login_root_path "Root login PATH" NOT_ASSESSED med \
               "not assessed — no PATH element in the capture was adjudicated${ABSENT_DISCLOSURE}" \
               "No PATH element captured from /etc/environment, /etc/profile, and /.profile was adjudicated: every declaration reduced to unresolved variable references, or the capture carried no parseable declaration at all. PASS requires at least one adjudicated element, so the declared login PATH cannot be confirmed clean.${ABSENT_MEANING}" \
-              "declare a concrete absolute PATH for root's login shell, or include at least one absolute, non-variable component, then re-run AIXray." "cis-l1"
+              "declare a concrete absolute PATH for root's login shell, or include at least one absolute, non-variable component, then re-run PTxray." "cis-l1"
         fi
         ;;
       *)
         add security login_root_path "Root login PATH" NOT_ASSESSED med \
             "not assessed — declared PATH discriminator failed (awk rc=$AWK_RC)${ABSENT_DISCLOSURE}" \
-            "AIXray could not test the declared PATH assignments: the discriminator exited with an unexpected status, or a PATH line could not be parsed (for example, more than one command on the line).${ABSENT_MEANING}" \
+            "PTxray could not test the declared PATH assignments: the discriminator exited with an unexpected status, or a PATH line could not be parsed (for example, more than one command on the line).${ABSENT_MEANING}" \
             "re-run the check; if it persists, collect the captured PATH lines and inspect them manually." "cis-l1"
         ;;
     esac
@@ -39778,14 +39375,14 @@ _AIXRAY_SESSION_KEYS=""
   elif [ -n "$FMW_REASON" ]; then
     add security fileperm_motd_write "/etc/motd write bits" NOT_ASSESSED med \
       "not assessed — /etc/motd $FMW_REASON" \
-      "AIXray did not obtain one trustworthy mode row for /etc/motd, so it cannot claim the group/other write boundary is satisfied." \
-      "run 'ls -ld /etc/motd', correct the capture or path problem, and rerun AIXray." \
+      "PTxray did not obtain one trustworthy mode row for /etc/motd, so it cannot claim the group/other write boundary is satisfied." \
+      "run 'ls -ld /etc/motd', correct the capture or path problem, and rerun PTxray." \
       "cis-l1"
   elif [ "$FMW_GW" = "w" ] || [ "$FMW_OW" = "w" ]; then
     add security fileperm_motd_write "/etc/motd write bits" FAIL high \
       "/etc/motd mode=$FMW_MODE group-write=$FMW_GW other-write=$FMW_OW" \
       "/etc/motd is writable by group or other, so a non-owner subject could tamper with the text displayed at login." \
-      "remove group and other write bits after validation: 'chmod og-w /etc/motd'; AIXray recommends this command and never executes it." \
+      "remove group and other write bits after validation: 'chmod og-w /etc/motd'; PTxray recommends this command and never executes it." \
       "cis-l1"
   else
     add security fileperm_motd_write "/etc/motd write bits" PASS low \
@@ -39805,11 +39402,11 @@ ASLR=$(aix aslr_tunables /usr/sbin/vmo -aF); ASLRRC=$?
 if [ "$ASLRRC" -ne 0 ]; then
   add security system_aslr "System ASLR" NOT_ASSESSED med "not assessed - vmo probe failed (rc=$ASLRRC)" \
       "ASLR state could not be read because 'vmo -aF' failed (rc=$ASLRRC); without the six aslr tunables no strength verdict is possible." \
-      "run '/usr/sbin/vmo -aF' manually and confirm it succeeds, then rerun AIXray." "cis-l1"
+      "run '/usr/sbin/vmo -aF' manually and confirm it succeeds, then rerun PTxray." "cis-l1"
 elif [ -z "$ASLR" ]; then
   add security system_aslr "System ASLR" NOT_ASSESSED med "not assessed - vmo returned no output (rc=0)" \
       "ASLR state could not be read because 'vmo -aF' produced no output; the aslr tunables are not observable." \
-      "run '/usr/sbin/vmo -aF' manually and confirm it lists tunables, then rerun AIXray." "cis-l1"
+      "run '/usr/sbin/vmo -aF' manually and confirm it lists tunables, then rerun PTxray." "cis-l1"
 else
   ASLRV=$(printf '%s\n' "$ASLR" | awk '
     {
@@ -39864,7 +39461,7 @@ else
     *)
       add security system_aslr "System ASLR" NOT_ASSESSED med "not assessed - vmo output unparseable (rc=0)" \
           "ASLR state could not be assessed because 'vmo -aF' produced no parseable tunable lines; the output shape is unknown." \
-          "run '/usr/sbin/vmo -aF' manually and confirm it lists 'key = value' tunable lines, then rerun AIXray." "cis-l1"
+          "run '/usr/sbin/vmo -aF' manually and confirm it lists 'key = value' tunable lines, then rerun PTxray." "cis-l1"
       ;;
   esac
 fi
@@ -39885,7 +39482,7 @@ _AIXRAY_SESSION_KEYS=""
     PW_READ_RC=$?
     case "$PW_READ_RC" in
       0)
-        PW_SCAN_RAW=$(aix pw_blank_scan /usr/bin/egrep -p "password = +$" /etc/security/passwd)
+        PW_SCAN_RAW=$(aix pw_blank_scan /usr/bin/egrep -p 'password = +$' /etc/security/passwd)
         PW_SCAN_RC=$?
         if [ "$PW_SCAN_RC" -ge 2 ]; then
           PW_STATUS=NOT_ASSESSED
@@ -39934,14 +39531,14 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_blank_absent "Accounts with blank passwords" FAIL high \
           "$PW_OBSERVED" \
           "At least one account stanza has nothing stored after 'password =', so that account can be signed into without supplying a credential." \
-          "give each listed account a password ('passwd <user>') or disable it ('chsec -f /etc/security/passwd -s <user> -a flags=ADMIN_LOCKED'); AIXray recommends these commands and never executes them." \
+          "give each listed account a password ('passwd <user>') or disable it ('chsec -f /etc/security/passwd -s <user> -a flags=ADMIN_LOCKED'); PTxray recommends these commands and never executes them." \
           "cis-l1"
       ;;
     *)
       add security pw_blank_absent "Accounts with blank passwords" NOT_ASSESSED high \
           "not assessed — blank-password scan $PW_REASON" \
-          "AIXray could not read /etc/security/passwd trustworthily, so it cannot verify whether any account has a blank password." \
-          "verify /etc/security/passwd is present and readable as root, then rerun AIXray." \
+          "PTxray could not read /etc/security/passwd trustworthily, so it cannot verify whether any account has a blank password." \
+          "verify /etc/security/passwd is present and readable as root, then rerun PTxray." \
           "cis-l1"
       ;;
   esac
@@ -39955,8 +39552,8 @@ ACD_RC=$?
 if [ "$ACD_RC" -ne 0 ]; then
   add security account_uid_duplicate "/etc/passwd duplicate account identities" NOT_ASSESSED med \
       "not assessed — /etc/passwd capture failed (rc=$ACD_RC)" \
-      "AIXray could not read /etc/passwd, so it cannot determine whether any two entries share a UID or a username." \
-      "run 'cat /etc/passwd', correct the capture or path problem, and rerun AIXray." \
+      "PTxray could not read /etc/passwd, so it cannot determine whether any two entries share a UID or a username." \
+      "run 'cat /etc/passwd', correct the capture or path problem, and rerun PTxray." \
       "cis-l1"
 elif [ -z "$ACD_RAW" ]; then
   # Zero bytes is not evidence of uniqueness. The awk duplicate scan on an
@@ -39965,8 +39562,8 @@ elif [ -z "$ACD_RAW" ]; then
   # would be a false pass.
   add security account_uid_duplicate "/etc/passwd duplicate account identities" NOT_ASSESSED med \
       "not assessed — passwd file capture is empty" \
-      "The /etc/passwd capture contained no records, so AIXray has no evidence either way about UID and username uniqueness." \
-      "confirm /etc/passwd is readable and non-empty, then rerun AIXray." \
+      "The /etc/passwd capture contained no records, so PTxray has no evidence either way about UID and username uniqueness." \
+      "confirm /etc/passwd is readable and non-empty, then rerun PTxray." \
       "cis-l1"
 else
   ACD_DUPS=$(printf '%s\n' "$ACD_RAW" | awk -F: '
@@ -39999,8 +39596,8 @@ else
     *)
       add security account_uid_duplicate "/etc/passwd duplicate account identities" NOT_ASSESSED med \
           "not assessed — duplicate scan failed (awk rc=$ACD_AWK_RC)" \
-          "AIXray could not parse the captured /etc/passwd content, so it cannot determine whether duplicate account identities exist." \
-          "run 'cat /etc/passwd', correct the capture or path problem, and rerun AIXray." \
+          "PTxray could not parse the captured /etc/passwd content, so it cannot determine whether duplicate account identities exist." \
+          "run 'cat /etc/passwd', correct the capture or path problem, and rerun PTxray." \
           "cis-l1"
       ;;
   esac
@@ -40020,8 +39617,8 @@ if [ "$GGD_RC" -ne 0 ]; then
   GGD_STATUS=NOT_ASSESSED
   GGD_SEV=low
   GGD_OBSERVED="not assessed — group file probe failed (rc=$GGD_RC)"
-  GGD_MEANING="AIXray could not reduce /etc/group to its duplicate GIDs and names, so group uniqueness is unproven."
-  GGD_FIX="confirm /etc/group is readable, then rerun AIXray."
+  GGD_MEANING="PTxray could not reduce /etc/group to its duplicate GIDs and names, so group uniqueness is unproven."
+  GGD_FIX="confirm /etc/group is readable, then rerun PTxray."
 elif [ -z "$GGD_RAW" ]; then
   # Zero bytes is not evidence of uniqueness. Under the old two-probe form,
   # empty output was the reduction's own answer -- `uniq -d` printing nothing
@@ -40032,8 +39629,8 @@ elif [ -z "$GGD_RAW" ]; then
   GGD_STATUS=NOT_ASSESSED
   GGD_SEV=low
   GGD_OBSERVED="not assessed — group file capture is empty"
-  GGD_MEANING="The /etc/group capture contained no records, so AIXray has no evidence either way about GID and group-name uniqueness."
-  GGD_FIX="confirm /etc/group is readable and non-empty, then rerun AIXray."
+  GGD_MEANING="The /etc/group capture contained no records, so PTxray has no evidence either way about GID and group-name uniqueness."
+  GGD_FIX="confirm /etc/group is readable and non-empty, then rerun PTxray."
 else
   GGD_AWK_OUT=$(printf '%s' "$GGD_RAW" | awk -F: '
     NF < 3 { bad = 1; next }
@@ -40082,14 +39679,14 @@ else
         fi
       fi
       GGD_MEANING="Two or more /etc/group entries share a GID or a group name, so group identity is ambiguous."
-      GGD_FIX="give every group a unique numeric GID and a unique name via the directory service, then rerun AIXray."
+      GGD_FIX="give every group a unique numeric GID and a unique name via the directory service, then rerun PTxray."
       ;;
     *)
       GGD_STATUS=NOT_ASSESSED
       GGD_SEV=low
       GGD_OBSERVED="not assessed — group file capture unparseable"
-      GGD_MEANING="AIXray could not reduce /etc/group to its duplicate GIDs and names, so group uniqueness is unproven."
-      GGD_FIX="confirm /etc/group is readable, then rerun AIXray."
+      GGD_MEANING="PTxray could not reduce /etc/group to its duplicate GIDs and names, so group uniqueness is unproven."
+      GGD_FIX="confirm /etc/group is readable, then rerun PTxray."
       ;;
   esac
 fi
@@ -40176,13 +39773,13 @@ _AIXRAY_SESSION_KEYS=""
     add security account_pwdck_valid "account database integrity" FAIL high \
       "$PWDCK_OBSERVED" \
       "pwdck -n ALL exited 114, which is how it reports that it found problems, and it wrote defect lines, so at least one /etc/passwd or /etc/security/passwd stanza is inconsistent." \
-      "inspect the reported stanzas and repair the malformed account entries; AIXray recommends a review but never executes a repair." \
+      "inspect the reported stanzas and repair the malformed account entries; PTxray recommends a review but never executes a repair." \
       "cis-l1"
   else
     add security account_pwdck_valid "account database integrity" NOT_ASSESSED high \
       "not assessed — pwdck -n ALL returned rc=$PWDCK_RC with an output shape this check cannot judge" \
       "pwdck -n ALL produced neither of its two conclusive results (rc=0 with no output, or rc=114 with a defect report), so the account database state is unknown." \
-      "confirm pwdck is present and the capture is healthy, then rerun AIXray." \
+      "confirm pwdck is present and the capture is healthy, then rerun PTxray." \
       "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -40282,13 +39879,13 @@ _AIXRAY_SESSION_KEYS=""
       add security pw_maxage_cis "Default password maximum age" FAIL high \
           "$MAXAGE_CIS_OBSERVED" \
           "The default stanza's maxage value is outside the approved 1-52 week window; zero disables password expiry and values above 52 keep passwords valid too long." \
-          "after access-impact review, set the boundary with 'chsec -f /etc/security/user -s default -a maxage=N'; AIXray only recommends this command." \
+          "after access-impact review, set the boundary with 'chsec -f /etc/security/user -s default -a maxage=N'; PTxray only recommends this command." \
           "cis-l1"
       ;;
     *)
       add security pw_maxage_cis "Default password maximum age" NOT_ASSESSED high \
           "not assessed — lssec maxage $MAXAGE_CIS_REASON" \
-          "AIXray did not obtain one trustworthy numeric default value." \
+          "PTxray did not obtain one trustworthy numeric default value." \
           "run 'lssec -f /etc/security/user -s default -a maxage' as root, resolve the evidence problem, and rerun." \
           "cis-l1"
       ;;
@@ -40318,13 +39915,13 @@ _AIXRAY_SESSION_KEYS=""
       if [ "$SU_VER_RC" -ne 0 ]; then
         add security sudo_version "sudo version currency" NOT_ASSESSED low \
           "not assessed — sudo --version probe failed (rc=$SU_VER_RC)" \
-          "AIXray could not read the installed sudo release, so it cannot judge whether the version requirement is met." \
-          "run /usr/bin/sudo --version to confirm the installed release, then rerun AIXray." "cis-l2"
+          "PTxray could not read the installed sudo release, so it cannot judge whether the version requirement is met." \
+          "run /usr/bin/sudo --version to confirm the installed release, then rerun PTxray." "cis-l2"
       elif [ -z "$SU_VER_RAW" ]; then
         add security sudo_version "sudo version currency" NOT_ASSESSED low \
           "not assessed — sudo --version returned no version text (rc=0)" \
-          "AIXray obtained no version line from the sudo binary, so the installed release is unknown." \
-          "run /usr/bin/sudo --version to confirm the installed release, then rerun AIXray." "cis-l2"
+          "PTxray obtained no version line from the sudo binary, so the installed release is unknown." \
+          "run /usr/bin/sudo --version to confirm the installed release, then rerun PTxray." "cis-l2"
       else
         SU_VER_STATE=$(printf '%s\n' "$SU_VER_RAW" | awk '
           {
@@ -40386,13 +39983,13 @@ _AIXRAY_SESSION_KEYS=""
             add security sudo_version "sudo version currency" FAIL high \
               "installed sudo $SU_VER_DETAIL is older than the required release" \
               "The installed sudo command reports a release below the required baseline, so defects corrected in later releases are not covered by this build." \
-              "update the sudo package to the required release or later, then rerun AIXray." "cis-l2"
+              "update the sudo package to the required release or later, then rerun PTxray." "cis-l2"
             ;;
           *)
             add security sudo_version "sudo version currency" NOT_ASSESSED low \
               "not assessed — sudo --version output unparseable (rc=0)" \
-              "AIXray found no recognizable version line in the sudo --version output, so the installed release is unknown." \
-              "run /usr/bin/sudo --version to confirm the installed release, then rerun AIXray." "cis-l2"
+              "PTxray found no recognizable version line in the sudo --version output, so the installed release is unknown." \
+              "run /usr/bin/sudo --version to confirm the installed release, then rerun PTxray." "cis-l2"
             ;;
         esac
       fi
@@ -40400,8 +39997,8 @@ _AIXRAY_SESSION_KEYS=""
     *)
       add security sudo_version "sudo version currency" NOT_ASSESSED low \
         "not assessed — sudo presence probe failed (rc=$SU_BIN_RC)" \
-        "AIXray could not determine whether the sudo command is installed, so the version requirement is unassessed." \
-        "confirm /usr/bin/sudo is accessible and readable, then rerun AIXray." "cis-l2"
+        "PTxray could not determine whether the sudo command is installed, so the version requirement is unassessed." \
+        "confirm /usr/bin/sudo is accessible and readable, then rerun PTxray." "cis-l2"
       ;;
   esac
 _AIXRAY_SESSION_KEYS=""
@@ -40427,8 +40024,8 @@ _AIXRAY_SESSION_KEYS=""
     SSP_STATUS=NOT_ASSESSED
     SSP_SEV=low
     SSP_OBS="not assessed - /etc/sudoers stat probe gave no usable result (rc=$SSP_SUDOERS_RC)"
-    SSP_MEAN="AIXray did not obtain trustworthy evidence that a sudoers file exists."
-    SSP_FIX="verify /etc/sudoers is present and statable, then rerun AIXray."
+    SSP_MEAN="PTxray did not obtain trustworthy evidence that a sudoers file exists."
+    SSP_FIX="verify /etc/sudoers is present and statable, then rerun PTxray."
   else
     SSP_FILE_LIST="/etc/sudoers"
     SSP_D_RAW=$(aix sudoers_d_exists ls -ld /etc/sudoers.d)
@@ -40450,8 +40047,8 @@ _AIXRAY_SESSION_KEYS=""
       SSP_STATUS=NOT_ASSESSED
       SSP_SEV=low
       SSP_OBS="not assessed - a sudoers probe failed (badpri rc=$SSP_BADPRI_RC goodpri rc=$SSP_GOODPRI_RC logfile rc=$SSP_LOGFILE_RC)"
-      SSP_MEAN="AIXray could not read every path in the sudoers file list, so the sudo logging state is unknown."
-      SSP_FIX="make /etc/sudoers and any /etc/sudoers.d entries readable, then rerun AIXray."
+      SSP_MEAN="PTxray could not read every path in the sudoers file list, so the sudo logging state is unknown."
+      SSP_FIX="make /etc/sudoers and any /etc/sudoers.d entries readable, then rerun PTxray."
     elif [ "$SSP_BADPRI_RC" -eq 1 ] && [ "$SSP_GOODPRI_RC" -eq 1 ]; then
       SSP_STATUS=PASS
       SSP_SEV=low
@@ -40469,7 +40066,7 @@ _AIXRAY_SESSION_KEYS=""
       SSP_SEV=med
       SSP_OBS="a syslog priority is set to none and no dedicated logfile is configured"
       SSP_MEAN="sudo activity has no configured logging destination, so command execution may leave no audit trail."
-      SSP_FIX="set syslog_badpri and syslog_goodpri to a real facility.priority, or configure a Defaults logfile; AIXray only recommends these actions."
+      SSP_FIX="set syslog_badpri and syslog_goodpri to a real facility.priority, or configure a Defaults logfile; PTxray only recommends these actions."
     fi
   fi
 
@@ -40484,8 +40081,8 @@ _AIXRAY_SESSION_KEYS=""
   typeset SUDO_PTY_STATUS SUDO_PTY_OBSERVED SUDO_PTY_MEANING SUDO_PTY_FIX SUDO_PTY_REASON
   SUDO_PTY_STATUS=NOT_ASSESSED
   SUDO_PTY_OBSERVED=''
-  SUDO_PTY_MEANING='AIXray could not establish whether sudo runs each command inside an allocated pseudo-terminal.'
-  SUDO_PTY_FIX='make the sudoers tree readable and rerun AIXray.'
+  SUDO_PTY_MEANING='PTxray could not establish whether sudo runs each command inside an allocated pseudo-terminal.'
+  SUDO_PTY_FIX='make the sudoers tree readable and rerun PTxray.'
   SUDO_PTY_REASON=''
 
   SUDO_PTY_USE_OUT=$(aix sudoers_use_pty grep -Eir '^\s*Defaults\s+([^#]+,\s*)?use_pty(,\s+\S+\s*)*(\s+#.*)?$' /etc/sudoers*) # network-lint: allow -- reads the LOCAL sudoers tree only
@@ -40501,7 +40098,7 @@ _AIXRAY_SESSION_KEYS=""
       SUDO_PTY_STATUS=FAIL
       SUDO_PTY_OBSERVED='Defaults !use_pty present'
       SUDO_PTY_MEANING='sudoers explicitly disables pseudo-terminal allocation for sudo commands.'
-      SUDO_PTY_FIX="remove the '!use_pty' Defaults line and confirm 'use_pty' is declared in /etc/sudoers or an included fragment; AIXray only recommends these actions."
+      SUDO_PTY_FIX="remove the '!use_pty' Defaults line and confirm 'use_pty' is declared in /etc/sudoers or an included fragment; PTxray only recommends these actions."
       ;;
     0:*)
       SUDO_PTY_STATUS=PASS
@@ -40513,7 +40110,7 @@ _AIXRAY_SESSION_KEYS=""
       SUDO_PTY_STATUS=FAIL
       SUDO_PTY_OBSERVED='Defaults use_pty absent'
       SUDO_PTY_MEANING='sudoers does not require pseudo-terminal allocation for sudo commands.'
-      SUDO_PTY_FIX="declare 'Defaults use_pty' in /etc/sudoers or an included fragment; AIXray only recommends these actions."
+      SUDO_PTY_FIX="declare 'Defaults use_pty' in /etc/sudoers or an included fragment; PTxray only recommends these actions."
       ;;
     *)
       SUDO_PTY_REASON="unexpected probe result (use_pty rc=$SUDO_PTY_USE_RC, no_use_pty rc=$SUDO_PTY_NO_RC)"
@@ -40556,13 +40153,13 @@ _AIXRAY_SESSION_KEYS=""
     add security cron_at_deny_absent "at(1) access control" FAIL high \
         "/var/adm/cron/at.deny present" \
         "/var/adm/cron/at.deny exists, so at(1) authorization is governed by a deny list; a user not listed is permitted by default instead of being required to appear in the allow list." \
-        "remove /var/adm/cron/at.deny after confirming /var/adm/cron/at.allow authorizes the intended users; AIXray recommends this command and never executes it." \
+        "remove /var/adm/cron/at.deny after confirming /var/adm/cron/at.allow authorizes the intended users; PTxray recommends this command and never executes it." \
         "cis-l1"
   elif [ "$ATD_RC" -ne 2 ]; then
     add security cron_at_deny_absent "at(1) access control" NOT_ASSESSED low \
         "not assessed — /var/adm/cron/at.deny probe failed (rc=$ATD_RC)" \
-        "AIXray could not determine whether /var/adm/cron/at.deny exists, so the at(1) authorization state is unknown." \
-        "run 'ls -ld /var/adm/cron/at.deny', correct the capture or path problem, and rerun AIXray." \
+        "PTxray could not determine whether /var/adm/cron/at.deny exists, so the at(1) authorization state is unknown." \
+        "run 'ls -ld /var/adm/cron/at.deny', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$ATA_RC" -eq 0 ] && [ "$ATA_HAS_ROOT" = "yes" ]; then
     add security cron_at_deny_absent "at(1) access control" PASS low \
@@ -40573,7 +40170,7 @@ _AIXRAY_SESSION_KEYS=""
     add security cron_at_deny_absent "at(1) access control" FAIL high \
         "/var/adm/cron/at.allow does not authorize root" \
         "/var/adm/cron/at.allow is absent, unreadable, or does not list root, so at(1) access is not governed by an allow list that grants root." \
-        "create or repair /var/adm/cron/at.allow so it lists root (and any site-authorized users); AIXray recommends this command and never executes it." \
+        "create or repair /var/adm/cron/at.allow so it lists root (and any site-authorized users); PTxray recommends this command and never executes it." \
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -40599,14 +40196,14 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$CD_STATE" = unknown ]; then
     add security cron_cron_deny_absent "cron.deny absence and cron.allow membership" NOT_ASSESSED med \
         "not assessed — cron.deny stat probe failed (rc=$CD_RC)" \
-        "AIXray could not determine whether /var/adm/cron/cron.deny exists, so it cannot judge cron access control." \
-        "run 'ls -ld /var/adm/cron/cron.deny', correct the capture or path problem, and rerun AIXray." \
+        "PTxray could not determine whether /var/adm/cron/cron.deny exists, so it cannot judge cron access control." \
+        "run 'ls -ld /var/adm/cron/cron.deny', correct the capture or path problem, and rerun PTxray." \
         "cis-l1"
   elif [ "$CD_STATE" = present ]; then
     add security cron_cron_deny_absent "cron.deny absence and cron.allow membership" FAIL high \
         "/var/adm/cron/cron.deny present" \
         "cron.deny exists, so any user not listed in it is allowed — the weaker access-control path." \
-        "remove /var/adm/cron/cron.deny after confirming cron.allow lists the required users; AIXray recommends this action and never executes it." \
+        "remove /var/adm/cron/cron.deny after confirming cron.allow lists the required users; PTxray recommends this action and never executes it." \
         "cis-l1"
   else
     CA_RAW=$(aix cron_allow_contents cat /var/adm/cron/cron.allow)
@@ -40624,7 +40221,7 @@ _AIXRAY_SESSION_KEYS=""
       add security cron_cron_deny_absent "cron.deny absence and cron.allow membership" FAIL high \
           "/var/adm/cron/cron.allow $CA_REASON" \
           "cron.deny is absent but cron.allow does not grant cron access to both root and adm, or cannot be read." \
-          "create /var/adm/cron/cron.allow listing root and adm one per line; AIXray recommends this action and never executes it." \
+          "create /var/adm/cron/cron.allow listing root and adm one per line; PTxray recommends this action and never executes it." \
           "cis-l1"
     else
       add security cron_cron_deny_absent "cron.deny absence and cron.allow membership" PASS med \
@@ -40894,22 +40491,22 @@ _AIXRAY_SESSION_KEYS=""
           ACV_SEV=high
           ACV_OBS="/etc/security/audit/config $ACV_DETAIL"
           ACV_MEAN="The audit configuration departs from the prescribed bin(ary) event-collection settings, so audit events are not collected into the prescribed bin trail."
-          ACV_FIX="set the unmet stanza values in /etc/security/audit/config to the prescribed bin(ary) collection configuration and restart the audit subsystem; AIXray recommends the edit, it never writes it."
+          ACV_FIX="set the unmet stanza values in /etc/security/audit/config to the prescribed bin(ary) collection configuration and restart the audit subsystem; PTxray recommends the edit, it never writes it."
           ;;
         *)
           ACV_STATUS=NOT_ASSESSED
           ACV_SEV=med
           ACV_OBS="not assessed — /etc/security/audit/config carries no stanza values"
-          ACV_MEAN="AIXray could not parse any stanza value out of the audit configuration, so it cannot judge whether the prescribed settings are in effect."
-          ACV_FIX="inspect /etc/security/audit/config for a valid stanza layout, then rerun AIXray."
+          ACV_MEAN="PTxray could not parse any stanza value out of the audit configuration, so it cannot judge whether the prescribed settings are in effect."
+          ACV_FIX="inspect /etc/security/audit/config for a valid stanza layout, then rerun PTxray."
           ;;
       esac
     else
       ACV_STATUS=NOT_ASSESSED
       ACV_SEV=med
       ACV_OBS="not assessed — /etc/security/audit/config read back empty"
-      ACV_MEAN="AIXray read /etc/security/audit/config successfully but got no content, so it cannot judge the prescribed settings."
-      ACV_FIX="verify /etc/security/audit/config has content, then rerun AIXray."
+      ACV_MEAN="PTxray read /etc/security/audit/config successfully but got no content, so it cannot judge the prescribed settings."
+      ACV_FIX="verify /etc/security/audit/config has content, then rerun PTxray."
     fi
   else
     case "$ACV_RAW" in
@@ -40922,13 +40519,13 @@ _AIXRAY_SESSION_KEYS=""
       ACV_SEV=high
       ACV_OBS="/etc/security/audit/config is missing"
       ACV_MEAN="The audit subsystem configuration file does not exist, so the audit subsystem cannot be in the prescribed compliant state."
-      ACV_FIX="recreate /etc/security/audit/config with the compliant stanza values, then rerun AIXray."
+      ACV_FIX="recreate /etc/security/audit/config with the compliant stanza values, then rerun PTxray."
     else
       ACV_STATUS=NOT_ASSESSED
       ACV_SEV=med
       ACV_OBS="not assessed — /etc/security/audit/config unreadable (rc=$ACV_RC)"
-      ACV_MEAN="AIXray did not obtain a trustworthy read of the audit configuration file, so it cannot assess whether the configuration is compliant."
-      ACV_FIX="verify /etc/security/audit/config exists and is readable to the running identity, then rerun AIXray."
+      ACV_MEAN="PTxray did not obtain a trustworthy read of the audit configuration file, so it cannot assess whether the configuration is compliant."
+      ACV_FIX="verify /etc/security/audit/config exists and is readable to the running identity, then rerun PTxray."
     fi
   fi
 
@@ -40950,8 +40547,8 @@ _AIXRAY_SESSION_KEYS=""
     AUDC_STATUS=NOT_ASSESSED
     AUDC_SEVERITY=med
     AUDC_OBSERVED="not assessed - reading the audit classes config requires root"
-    AUDC_MEANING="AIXray did not obtain /etc/security/audit/config, so it cannot claim the default audit class set is compliant."
-    AUDC_FIX="re-run aixray as root, or inspect /etc/security/audit/config manually."
+    AUDC_MEANING="PTxray did not obtain /etc/security/audit/config, so it cannot claim the default audit class set is compliant."
+    AUDC_FIX="re-run ptxray as root, or inspect /etc/security/audit/config manually."
   else
     AUDC_RAW=$(aix cat_audit_config cat /etc/security/audit/config)
     AUDC_RC=$?
@@ -40959,14 +40556,14 @@ _AIXRAY_SESSION_KEYS=""
       AUDC_STATUS=NOT_ASSESSED
       AUDC_SEVERITY=med
       AUDC_OBSERVED="not assessed - cannot read /etc/security/audit/config (rc=$AUDC_RC)"
-      AUDC_MEANING="AIXray did not obtain /etc/security/audit/config, so it cannot claim the default audit class set is compliant."
-      AUDC_FIX="resolve the read error on /etc/security/audit/config and rerun AIXray."
+      AUDC_MEANING="PTxray did not obtain /etc/security/audit/config, so it cannot claim the default audit class set is compliant."
+      AUDC_FIX="resolve the read error on /etc/security/audit/config and rerun PTxray."
     elif [ -z "$AUDC_RAW" ]; then
       AUDC_STATUS=FAIL
       AUDC_SEVERITY=high
       AUDC_OBSERVED="/etc/security/audit/config is empty"
       AUDC_MEANING="An empty audit configuration cannot define the required default class set, so the requirement is not met."
-      AUDC_FIX="populate /etc/security/audit/config with a classes: stanza and its default = line; AIXray recommends the edit, it never writes it."
+      AUDC_FIX="populate /etc/security/audit/config with a classes: stanza and its default = line; PTxray recommends the edit, it never writes it."
     else
       AUDC_TOKEN=$(printf '%s\n' "$AUDC_RAW" | awk '
         BEGIN {
@@ -41028,31 +40625,31 @@ _AIXRAY_SESSION_KEYS=""
           AUDC_STATUS=FAIL; AUDC_SEVERITY=high
           AUDC_OBSERVED="audit classes default omits required class(es): $AUDC_MISSING"
           AUDC_MEANING="The audit default event set omits required classes, so events in those classes are not captured by default."
-          AUDC_FIX="add the omitted class(es) to the default = line inside the classes: stanza of /etc/security/audit/config; AIXray recommends the edit, it never writes it."
+          AUDC_FIX="add the omitted class(es) to the default = line inside the classes: stanza of /etc/security/audit/config; PTxray recommends the edit, it never writes it."
           ;;
         NO_DEFAULT)
           AUDC_STATUS=FAIL; AUDC_SEVERITY=high
           AUDC_OBSERVED="classes: stanza present but no default = line"
           AUDC_MEANING="The audit configuration has a classes: stanza without a default = line, so the required class set is never selected."
-          AUDC_FIX="add a default = line naming every required class inside the classes: stanza of /etc/security/audit/config; AIXray recommends the edit, it never writes it."
+          AUDC_FIX="add a default = line naming every required class inside the classes: stanza of /etc/security/audit/config; PTxray recommends the edit, it never writes it."
           ;;
         NO_STANZA)
           AUDC_STATUS=FAIL; AUDC_SEVERITY=high
           AUDC_OBSERVED="no classes: stanza in the audit config"
           AUDC_MEANING="The audit configuration does not define a classes: stanza, so the required default class set cannot be in effect."
-          AUDC_FIX="add a classes: stanza with a default = line naming every required class to /etc/security/audit/config; AIXray recommends the edit, it never writes it."
+          AUDC_FIX="add a classes: stanza with a default = line naming every required class to /etc/security/audit/config; PTxray recommends the edit, it never writes it."
           ;;
         "")
           AUDC_STATUS=FAIL; AUDC_SEVERITY=high
           AUDC_OBSERVED="audit config is empty or carries no stanzas"
-          AUDC_MEANING="The audit configuration carries no classes AIXray could interpret, so the required default class set is not established."
-          AUDC_FIX="review /etc/security/audit/config for a classes: stanza with a default = line naming every required class; AIXray recommends the edit, it never writes it."
+          AUDC_MEANING="The audit configuration carries no classes PTxray could interpret, so the required default class set is not established."
+          AUDC_FIX="review /etc/security/audit/config for a classes: stanza with a default = line naming every required class; PTxray recommends the edit, it never writes it."
           ;;
         *)
           AUDC_STATUS=NOT_ASSESSED; AUDC_SEVERITY=med
           AUDC_OBSERVED="unexpected discriminator result '$AUDC_TOKEN'"
-          AUDC_MEANING="AIXray could not interpret the audit config discriminator, so it cannot assess the default class set."
-          AUDC_FIX="capture /etc/security/audit/config, diagnose the discriminator, and rerun AIXray."
+          AUDC_MEANING="PTxray could not interpret the audit config discriminator, so it cannot assess the default class set."
+          AUDC_FIX="capture /etc/security/audit/config, diagnose the discriminator, and rerun PTxray."
           ;;
       esac
     fi
@@ -41122,14 +40719,14 @@ _AIXRAY_SESSION_KEYS=""
     SE_STATUS=NOT_ASSESSED
     SE_SEV=low
     SE_OBS="not assessed - syslog.conf capture failed (rc=$SE_CFG_RC)"
-    SE_MEAN="AIXray could not read /etc/syslog.conf, so it cannot tell whether active logging rules exist."
-    SE_FIX="make /etc/syslog.conf readable, then re-run AIXray."
+    SE_MEAN="PTxray could not read /etc/syslog.conf, so it cannot tell whether active logging rules exist."
+    SE_FIX="make /etc/syslog.conf readable, then re-run PTxray."
   elif [ "$SE_TGT_STATE" = "failure" ]; then
     SE_STATUS=NOT_ASSESSED
     SE_SEV=low
     SE_OBS="not assessed - log-target capture failed (rc=$SE_TGT_RC)"
-    SE_MEAN="AIXray could not list the expected log destinations, so it cannot tell whether they exist on disk."
-    SE_FIX="make the log directory listable, then re-run AIXray."
+    SE_MEAN="PTxray could not list the expected log destinations, so it cannot tell whether they exist on disk."
+    SE_FIX="make the log directory listable, then re-run PTxray."
   elif [ "$SE_CONF_STATE" = "active" ] && [ "$SE_TGT_STATE" = "all" ]; then
     SE_STATUS=PASS
     SE_SEV=low
@@ -41141,20 +40738,20 @@ _AIXRAY_SESSION_KEYS=""
     SE_SEV=med
     SE_OBS="$SE_CFG_LINES active syslog.conf rule line(s); fewer than three expected log destinations present"
     SE_MEAN="syslog.conf defines logging rules but at least one of the expected log outputs is missing, so some logged events are not being collected."
-    SE_FIX="create the missing log destinations that syslog.conf expects, then re-run AIXray."
+    SE_FIX="create the missing log destinations that syslog.conf expects, then re-run PTxray."
   elif [ "$SE_CONF_STATE" = "none" ] && [ "$SE_TGT_STATE" = "all" ]; then
     SE_STATUS=FAIL
     SE_SEV=med
     SE_OBS="no active syslog.conf rule lines; all three expected log destinations present"
     SE_MEAN="syslog.conf has no active logging rules, so the syslog daemon is not collecting events even though the destinations exist."
-    SE_FIX="add at least one active logging rule to /etc/syslog.conf, then re-run AIXray."
+    SE_FIX="add at least one active logging rule to /etc/syslog.conf, then re-run PTxray."
   else
     # No active entries and at least one destination missing.
     SE_STATUS=FAIL
     SE_SEV=high
     SE_OBS="no active syslog.conf rule lines; fewer than three expected log destinations present"
     SE_MEAN="syslog.conf has no active logging rules and expected log outputs are missing, so the box is not collecting logs at all."
-    SE_FIX="add active logging rules to /etc/syslog.conf and create the missing log destinations, then re-run AIXray."
+    SE_FIX="add active logging rules to /etc/syslog.conf and create the missing log destinations, then re-run PTxray."
   fi
 
   add security syslog_entries "syslog logging rules and destinations" \
@@ -41231,7 +40828,7 @@ _AIXRAY_SESSION_KEYS=""
   else
     add monitoring syslog_remote_host "Syslog remote host" NOT_ASSESSED low "$SRH_OBS" \
         "Remote syslog forwarding could not be assessed because the syslog config capture failed or its output could not be parsed as config lines." \
-        "run 'cat /etc/syslog.conf' manually, then re-run AIXray before treating remote logging as configured." \
+        "run 'cat /etc/syslog.conf' manually, then re-run PTxray before treating remote logging as configured." \
         "cis-l2"
   fi
 _AIXRAY_SESSION_KEYS=""
@@ -41275,11 +40872,11 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     FAIL)
       SYSLOG_MEANING="The syslogd daemon is not running, or is running without -r, so inbound messages are not collected."
-      SYSLOG_FIX="start or restart syslogd with the -r flag ('/usr/sbin/syslogd -r'), confirm the process list shows the flag, then rerun AIXray."
+      SYSLOG_FIX="start or restart syslogd with the -r flag ('/usr/sbin/syslogd -r'), confirm the process list shows the flag, then rerun PTxray."
       ;;
     *)
-      SYSLOG_MEANING="AIXray did not obtain a trustworthy process list, so it cannot determine the syslogd daemon state."
-      SYSLOG_FIX="make 'ps -ef' return a complete readable process list, then rerun AIXray."
+      SYSLOG_MEANING="PTxray did not obtain a trustworthy process list, so it cannot determine the syslogd daemon state."
+      SYSLOG_FIX="make 'ps -ef' return a complete readable process list, then rerun PTxray."
       ;;
   esac
 
@@ -41465,26 +41062,26 @@ function checks_config {
     ABSENT)
       add config host_resolves "Host self-resolution" WARN low \
           "$HOST does not self-resolve locally — no matching /etc/hosts entry; $ORDERNOTE" \
-          "Tools and certs can misbehave when the box has no local entry for its own hostname; AIXray deliberately did not query DNS." \
+          "Tools and certs can misbehave when the box has no local entry for its own hostname; PTxray deliberately did not query DNS." \
           "add $HOST to /etc/hosts with the system's intended local address."
       ;;
     UNREADABLE)
       add config host_resolves "Host self-resolution" WARN low \
           "not assessed — /etc/hosts capture failed (rc=$HOSTSRC); $ORDERNOTE" \
-          "AIXray could not inspect the local hosts file and deliberately did not fall back to a live DNS lookup." \
-          "make /etc/hosts readable, then re-run AIXray."
+          "PTxray could not inspect the local hosts file and deliberately did not fall back to a live DNS lookup." \
+          "make /etc/hosts readable, then re-run PTxray."
       ;;
     NO_HOSTNAME)
       add config host_resolves "Host self-resolution" WARN low \
           "not assessed — hostname capture was empty; $ORDERNOTE" \
-          "AIXray cannot test a local hosts-file entry without a captured hostname and deliberately did not query DNS." \
-          "verify that hostname(1) returns this system's hostname, then re-run AIXray."
+          "PTxray cannot test a local hosts-file entry without a captured hostname and deliberately did not query DNS." \
+          "verify that hostname(1) returns this system's hostname, then re-run PTxray."
       ;;
     *)
       add config host_resolves "Host self-resolution" WARN low \
           "not assessed — /etc/hosts capture is empty or malformed; $ORDERNOTE" \
-          "AIXray could not safely interpret the local hosts file and deliberately did not fall back to a live DNS lookup." \
-          "repair /etc/hosts syntax, then re-run AIXray."
+          "PTxray could not safely interpret the local hosts file and deliberately did not fall back to a live DNS lookup." \
+          "repair /etc/hosts syntax, then re-run PTxray."
       ;;
   esac
 }
@@ -41520,8 +41117,8 @@ function checks_monitoring {
   if [ "$PSE_OK" -ne 1 ]; then
     add monitoring monitoring_agent "Monitoring agent" NOT_ASSESSED high \
         "$PSEWHY" \
-        "AIXray could not inspect a valid process list, so it cannot determine whether a known monitoring agent is running." \
-        "make 'ps -e -o comm' available with its normal AIX output, then re-run AIXray." ""
+        "PTxray could not inspect a valid process list, so it cannot determine whether a known monitoring agent is running." \
+        "make 'ps -e -o comm' available with its normal AIX output, then re-run PTxray." ""
   else
     AG=$(printf '%s\n' "$PSE" | grep -E "$KNOWN_AGENT_ALLOWLIST_RE" | awk 'NR==1{print $1}')
     if [ -n "$AG" ]; then
@@ -41530,7 +41127,7 @@ function checks_monitoring {
     else
       add monitoring monitoring_agent "Monitoring agent" WARN high \
           "no KNOWN monitoring agent detected (checked exact commands: $KNOWN_AGENT_ALLOWLIST)" \
-          "AIXray checked only the listed known agents and found none; other monitoring may still be present." \
+          "PTxray checked only the listed known agents and found none; other monitoring may still be present." \
           "confirm monitoring coverage; if none exists, install and point a monitoring agent at this LPAR using an accepted command ($KNOWN_AGENT_ALLOWLIST)." ""
     fi
   fi
@@ -41549,8 +41146,8 @@ _AIXRAY_SESSION_KEYS=""
   errnotify_decode; RC=$?
   if [ "$RC" -ne 0 ] || [ "$ERRNOTIFY_OK" -ne 1 ]; then
     add monitoring errpt_notify "Error notification" NOT_ASSESSED med "$ERRNOTIFY_WHY" \
-        "AIXray could not validate the errnotify ODM capture, so it cannot determine whether custom error-notification methods can page a human." \
-        "make 'odmget errnotify' return complete ODM evidence, then re-run AIXray."
+        "PTxray could not validate the errnotify ODM capture, so it cannot determine whether custom error-notification methods can page a human." \
+        "make 'odmget errnotify' return complete ODM evidence, then re-run PTxray."
   else
     EN=$(printf '%s\n' "$ERRNOTIFY_ODM" | awk '/^[ \t]*en_name[ \t]*=/{n++} END{print n+0}')
     ENCUST2=$(printf '%s' "$ERRNOTIFY_DEC" | awk -F'\t' '{print $1+0}')
@@ -41586,7 +41183,7 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$SYS_OK" -ne 1 ]; then
     add monitoring remote_syslog "Remote syslog" NOT_ASSESSED low "$SYSWHY" \
         "Remote syslog forwarding could not be assessed because the syslog grep capture failed, returned no evidence, or returned output that does not match the requested '@' lines." \
-        "run \"grep '@' /etc/syslog.conf\" manually, then re-run AIXray before treating remote logging as configured." "ffiec:II.C.22"
+        "run \"grep '@' /etc/syslog.conf\" manually, then re-run PTxray before treating remote logging as configured." "ffiec:II.C.22"
   else
   if [ "$SYSRC" -eq 1 ]; then
     SYS=0
@@ -41635,8 +41232,8 @@ _AIXRAY_SESSION_KEYS=""
 
   if [ "$PSE_OK" -ne 1 ]; then
     add monitoring perf_history "Performance history" NOT_ASSESSED low "$PSEWHY" \
-        "AIXray could not validate the process list, so it cannot determine whether a performance-history collector is running." \
-        "make 'ps -e -o comm' return a complete process list, then re-run AIXray."
+        "PTxray could not validate the process list, so it cannot determine whether a performance-history collector is running." \
+        "make 'ps -e -o comm' return a complete process list, then re-run PTxray."
   else
     PH=$(printf '%s\n' "$PSE" | grep -E "$PERF_COLLECTOR_ALLOWLIST_RE" | awk 'NR==1{print $1}')
     if [ -n "$PH" ]; then
@@ -41799,7 +41396,7 @@ function checks_vios {
     elif { [ -n "$SEAS" ] && [ "$BADHA" -eq 0 ] && [ "$NOCTL" -eq 0 ]; } || [ "$CLPRESENT" -eq 1 ]; then
       add resilience vios_topology "VIOS redundancy topology" PASS low "HA config present (SEA failover / CAA cluster) — partner VIOS implied" \
           "This VIOS carries HA configuration (a failover-ready SEA and/or a CAA cluster), which implies a partner VIOS exists to take over. A single-box scan cannot PROVE the partner is healthy and actually serving — that lives on the other LPAR." \
-          "confirm the second VIOS exists, is on a different physical path, and is genuinely serving clients (its own aixray/entstat/lsmap) — do not assume 'configured for failover' means the partner is up."
+          "confirm the second VIOS exists, is on a different physical path, and is genuinely serving clients (its own ptxray/entstat/lsmap) — do not assume 'configured for failover' means the partner is up."
     else
       add resilience vios_topology "VIOS redundancy topology" WARN high "no SEA HA config and no CAA cluster visible from this box" \
           "Nothing on this box indicates a partner VIOS — no failover-ready SEA, no CAA cluster. This may be a genuinely single VIOS, in which case every client LPAR's disk AND network depends on this one server: a single point of failure whose loss takes down all its clients." \
@@ -41981,21 +41578,64 @@ function checks_vios {
 # Filenames follow FLRT.report: <epoch>_<host>_<oslevel>_<date>.{lslpp,emgr}.txt
 if [ -n "$FLRT_EXPORT" ]; then
   if ! mkdir -p "$FLRT_EXPORT" 2>/dev/null; then
-    echo "aixray: --flrt-export: cannot create directory '$FLRT_EXPORT'" >&2; exit 2
+    echo "ptxray: --flrt-export: cannot create directory '$FLRT_EXPORT'" >&2; exit 2
   fi
-  FLRT_EPOCH=$(date +%s 2>/dev/null); [ -n "$FLRT_EPOCH" ] || FLRT_EPOCH=0
+  FLRT_EXPORT=$(CDPATH= cd -- "$FLRT_EXPORT" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) \
+    || { echo "ptxray: --flrt-export: cannot resolve the output directory" >&2; exit 2; }
+  FLRT_EXPORT_PROBLEM=$(path_untrusted "$FLRT_EXPORT")
+  [ -z "$FLRT_EXPORT_PROBLEM" ] \
+    || { echo "ptxray: --flrt-export: untrusted output directory ancestry: $FLRT_EXPORT_PROBLEM" >&2; exit 2; }
+  if [ -n "$AIXRAY_FIXTURES" ] && [ -n "${AIXRAY_TEST_FLRT_EPOCH:-}" ]; then
+    FLRT_EPOCH=$AIXRAY_TEST_FLRT_EPOCH
+  else
+    FLRT_EPOCH=$(date +%s 2>/dev/null)
+  fi
+  case "$FLRT_EPOCH" in ''|*[!0-9]*) FLRT_EPOCH=0;; esac
   FLRT_DATE=$(echo "$TODAY" | tr -d ' ')
   FLRT_HOST=$(printf '%s' "${HOST%%.*}" | tr -cd 'A-Za-z0-9_.-'); [ -n "$FLRT_HOST" ] || FLRT_HOST=unknown
-  FLRT_OS=${OSLEVEL:-unknown}
+  FLRT_OS=$(printf '%s' "${OSLEVEL:-unknown}" | tr -cd 'A-Za-z0-9_.-'); [ -n "$FLRT_OS" ] || FLRT_OS=unknown
   FLRT_BASE="${FLRT_EPOCH}_${FLRT_HOST}_${FLRT_OS}_${FLRT_DATE}"
   FLRT_LSLPP="$FLRT_EXPORT/$FLRT_BASE.lslpp.txt"
   FLRT_EMGR="$FLRT_EXPORT/$FLRT_BASE.emgr.txt"
+  FLRT_TMP_LSLPP="$FLRT_EXPORT/.$FLRT_BASE.lslpp.txt.tmp.$$"
+  FLRT_TMP_EMGR="$FLRT_EXPORT/.$FLRT_BASE.emgr.txt.tmp.$$"
+  if [ -e "$FLRT_LSLPP" ] || [ -L "$FLRT_LSLPP" ] \
+      || [ -e "$FLRT_EMGR" ] || [ -L "$FLRT_EMGR" ]; then
+    echo "ptxray: --flrt-export: refusing existing destination for '$FLRT_BASE'" >&2
+    exit 2
+  fi
   umask 077
-  aix lslpp_qcL lslpp -qcL > "$FLRT_LSLPP" 2>/dev/null
-  aix emgr_lv3 emgr -lv3   > "$FLRT_EMGR"  2>/dev/null
+  trap 'rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"; ptxray_defs_cleanup_snapshot' EXIT
+  trap 'rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"; ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+  if ! (set -C; aix lslpp_qcL lslpp -qcL > "$FLRT_TMP_LSLPP") 2>/dev/null; then
+    echo "ptxray: --flrt-export: fileset inventory capture failed" >&2
+    exit 1
+  fi
+  if ! (set -C; aix emgr_lv3 emgr -lv3 > "$FLRT_TMP_EMGR") 2>/dev/null; then
+    echo "ptxray: --flrt-export: interim-fix inventory capture failed" >&2
+    exit 1
+  fi
+  [ -f "$FLRT_TMP_LSLPP" ] && [ ! -L "$FLRT_TMP_LSLPP" ] \
+    && [ -f "$FLRT_TMP_EMGR" ] && [ ! -L "$FLRT_TMP_EMGR" ] \
+    || { echo "ptxray: --flrt-export: capture temporary-file safety check failed" >&2; exit 1; }
+  if ! ln "$FLRT_TMP_LSLPP" "$FLRT_LSLPP" 2>/dev/null; then
+    echo "ptxray: --flrt-export: cannot publish fileset inventory without clobbering" >&2
+    exit 1
+  fi
+  if ! ln "$FLRT_TMP_EMGR" "$FLRT_EMGR" 2>/dev/null; then
+    rm -f "$FLRT_LSLPP"
+    echo "ptxray: --flrt-export: cannot publish interim-fix inventory without clobbering" >&2
+    exit 1
+  fi
+  rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"
+  FLRT_TMP_LSLPP=""; FLRT_TMP_EMGR=""
+  [ -f "$FLRT_LSLPP" ] && [ ! -L "$FLRT_LSLPP" ] \
+    && [ -f "$FLRT_EMGR" ] && [ ! -L "$FLRT_EMGR" ] \
+    || { echo "ptxray: --flrt-export: published-file safety check failed" >&2; exit 1; }
   FLRT_NL=$(awk 'END{print NR+0}' "$FLRT_LSLPP" 2>/dev/null)
   FLRT_NE=$(awk 'END{print NR+0}' "$FLRT_EMGR" 2>/dev/null)
-  echo "aixray: FLRT export written to $FLRT_EXPORT/"
+  echo "ptxray: FLRT export written to $FLRT_EXPORT/"
   echo "  $FLRT_BASE.lslpp.txt   ($FLRT_NL lines)  <- upload to IBM FLRT Vulnerability Checker"
   echo "  $FLRT_BASE.emgr.txt    ($FLRT_NE lines)  <- upload to IBM FLRT Vulnerability Checker"
   echo "  then: h""ttps://esupport.ibm.com/customercare/flrt/vc"
@@ -42409,11 +42049,11 @@ function check_software_inventory {
   if [ "$SI_CHECK_CONFIRMED" -ne 1 ]; then
     SI_CHECK_OBS="not assessed — lslpp -qcL capture return code was not confirmed"
     SI_CHECK_MEAN="Without a confirmed inventory-source result, installed software cannot be assessed for completeness, support, active use, or business criticality."
-    SI_CHECK_FIX="capture 'lslpp -qcL' with its return code and rerun AIXray."
+    SI_CHECK_FIX="capture 'lslpp -qcL' with its return code and rerun PTxray."
   elif [ "$SI_CHECK_RC" -ne 0 ]; then
     SI_CHECK_OBS="not assessed — lslpp -qcL capture failed (rc=$SI_CHECK_RC)"
     SI_CHECK_MEAN="The installed-fileset inventory source failed, so software currency and workload coverage could not be assessed."
-    SI_CHECK_FIX="restore access to 'lslpp -qcL' and rerun AIXray."
+    SI_CHECK_FIX="restore access to 'lslpp -qcL' and rerun PTxray."
   else
     SI_CHECK_PROFILE=$(printf '%s\n' "${LSLPPQ:-}" | awk -F: '
       function usable(value) {
@@ -42441,11 +42081,11 @@ function check_software_inventory {
         SI_CHECK_OBS="not assessed — lslpp -qcL capture had no structurally valid rows"
       fi
       SI_CHECK_MEAN="No trustworthy installed-fileset inventory was available, so software currency and workload coverage could not be assessed."
-      SI_CHECK_FIX="capture the complete colon-delimited output of 'lslpp -qcL' and rerun AIXray."
+      SI_CHECK_FIX="capture the complete colon-delimited output of 'lslpp -qcL' and rerun PTxray."
     elif [ "$SI_CHECK_VALID" -lt 50 ] || [ "$SI_CHECK_BOS" -lt 3 ]; then
       SI_CHECK_OBS="not assessed — lslpp -qcL capture was implausibly small ($SI_CHECK_VALID structurally valid rows; minimum 50, $SI_CHECK_BOS distinct bos.rte filesets)"
       SI_CHECK_MEAN="The capture is too small to represent a normal AIX installed-fileset inventory, so absence of software or workload components cannot be trusted."
-      SI_CHECK_FIX="supply a complete 'lslpp -qcL' capture and rerun AIXray."
+      SI_CHECK_FIX="supply a complete 'lslpp -qcL' capture and rerun PTxray."
     else
       SI_CHECK_OBS="not assessed — $SI_CHECK_VALID installed filesets were inventoried, but unmanaged software, active use, support entitlement, and business criticality were not established"
       SI_CHECK_MEAN="A package inventory does not identify software installed outside lslpp, prove which workloads are active, or establish their support and business requirements."
@@ -42920,15 +42560,15 @@ function check_adapter_microcode {
   if [ "$AM_RC" -ne 0 ]; then
     AM_OBS="not assessed — lsdev -Cc adapter inventory failed (rc=$AM_RC)"
     AM_MEAN="Adapter inventory was unavailable, so this LPAR's physical-adapter microcode ownership and currency could not be assessed."
-    AM_FIX="restore access to 'lsdev -Cc adapter', then rerun AIXray; review any physical adapter levels against the current hardware-specific reference."
+    AM_FIX="restore access to 'lsdev -Cc adapter', then rerun PTxray; review any physical adapter levels against the current hardware-specific reference."
   elif [ -z "$AM_OUT" ]; then
     AM_OBS="not assessed — lsdev -Cc adapter reported no adapters (rc=0)"
     AM_MEAN="An empty adapter inventory cannot establish whether this LPAR owns physical adapter microcode."
-    AM_FIX="verify the complete output of 'lsdev -Cc adapter' and rerun AIXray."
+    AM_FIX="verify the complete output of 'lsdev -Cc adapter' and rerun PTxray."
   elif ! printf '%s\n' "$AM_OUT" | adapter_microcode_lsdev_shape; then
     AM_OBS="not assessed — lsdev -Cc adapter inventory was unparseable (rc=0)"
     AM_MEAN="The adapter inventory did not match the expected AIX lsdev structure, so physical-adapter ownership and microcode currency could not be assessed."
-    AM_FIX="capture the complete output of 'lsdev -Cc adapter', correct the replay source if needed, and rerun AIXray."
+    AM_FIX="capture the complete output of 'lsdev -Cc adapter', correct the replay source if needed, and rerun PTxray."
   else
     AM_PHYSICAL=$(printf '%s\n' "$AM_OUT" |
       awk 'NF && /PCI/{n++} END{print n+0}')
@@ -43382,11 +43022,11 @@ function check_storage_layout {
   if [ "$SL_CHECK_RC" -ne 0 ]; then
     SL_CHECK_OBS="not assessed — lspv storage inventory failed (rc=$SL_CHECK_RC)"
     SL_CHECK_MEAN="The physical-volume inventory source was unavailable, so storage topology, ownership, and redundancy could not be assessed."
-    SL_CHECK_FIX="restore access to 'lspv', provide the approved storage topology baseline, and rerun AIXray."
+    SL_CHECK_FIX="restore access to 'lspv', provide the approved storage topology baseline, and rerun PTxray."
   elif ! storage_layout_has_nonblank "$SL_CHECK_OUT"; then
     SL_CHECK_OBS="not assessed — lspv reported no storage inventory (rc=0)"
     SL_CHECK_MEAN="An empty physical-volume inventory cannot establish disk ownership, topology, or redundancy."
-    SL_CHECK_FIX="verify the complete output of 'lspv', provide the approved storage topology baseline, and rerun AIXray."
+    SL_CHECK_FIX="verify the complete output of 'lspv', provide the approved storage topology baseline, and rerun PTxray."
   else
     SL_CHECK_ROWS=$(printf '%s\n' "$SL_CHECK_OUT" | awk '
       function hdisk(value) { return value ~ /^hdisk[0-9][0-9]*$/ }
@@ -43412,7 +43052,7 @@ function check_storage_layout {
     if [ "$SL_CHECK_SHAPE_RC" -ne 0 ] || [ -z "$SL_CHECK_ROWS" ]; then
       SL_CHECK_OBS="not assessed — lspv storage inventory was unparseable (rc=0)"
       SL_CHECK_MEAN="The physical-volume capture did not match the expected AIX lspv structure, so topology, ownership, and redundancy could not be assessed."
-      SL_CHECK_FIX="capture the complete output of 'lspv', correct the replay source if needed, provide the approved storage topology baseline, and rerun AIXray."
+      SL_CHECK_FIX="capture the complete output of 'lspv', correct the replay source if needed, provide the approved storage topology baseline, and rerun PTxray."
     else
       SL_CHECK_COUNT=$SL_CHECK_ROWS
       SL_CHECK_NOUN=disks
@@ -43423,7 +43063,7 @@ function check_storage_layout {
       fi
       SL_CHECK_OBS="not assessed — $SL_CHECK_COUNT $SL_CHECK_NOUN $SL_CHECK_VERB inventoried from lspv, but no site-approved expected storage topology, ownership, and redundancy baseline was available"
       SL_CHECK_MEAN="Observed disks and volume groups alone cannot establish whether placement, ownership, pathing, and redundancy match the intended architecture."
-      SL_CHECK_FIX="provide the site-approved expected storage topology, ownership, pathing, and redundancy baseline, compare it with this inventory, and rerun AIXray."
+      SL_CHECK_FIX="provide the site-approved expected storage topology, ownership, pathing, and redundancy baseline, compare it with this inventory, and rerun PTxray."
     fi
   fi
 
@@ -44295,16 +43935,16 @@ function check_network_inventory {
   if [ "$NI_CHECK_RC" -ne 0 ]; then
     NI_CHECK_OBS="not assessed — ifconfig -a interface inventory failed (rc=$NI_CHECK_RC)"
     NI_CHECK_MEAN="The interface inventory source was unavailable, so expected interfaces, addresses, routes, and resolvers could not be assessed."
-    NI_CHECK_FIX="restore access to 'ifconfig -a', provide the site-approved network baseline, and rerun AIXray."
+    NI_CHECK_FIX="restore access to 'ifconfig -a', provide the site-approved network baseline, and rerun PTxray."
   elif [ -z "$NI_CHECK_OUT" ]; then
     NI_CHECK_OBS="not assessed — ifconfig -a reported no interface inventory (rc=0)"
     NI_CHECK_MEAN="An empty interface capture cannot establish the system's network configuration or compare it with expected state."
-    NI_CHECK_FIX="verify the complete output of 'ifconfig -a', provide the site-approved network baseline, and rerun AIXray."
+    NI_CHECK_FIX="verify the complete output of 'ifconfig -a', provide the site-approved network baseline, and rerun PTxray."
   elif ! printf '%s\n' "$NI_CHECK_OUT" |
       network_inventory_ifconfig_shape; then
     NI_CHECK_OBS="not assessed — ifconfig -a interface inventory was unparseable (rc=0)"
     NI_CHECK_MEAN="The interface capture did not match the expected AIX ifconfig structure, so network configuration could not be assessed."
-    NI_CHECK_FIX="capture the complete output of 'ifconfig -a', correct the replay source if needed, provide the site-approved network baseline, and rerun AIXray."
+    NI_CHECK_FIX="capture the complete output of 'ifconfig -a', correct the replay source if needed, provide the site-approved network baseline, and rerun PTxray."
   else
     NI_CHECK_COUNT=$(printf '%s\n' "$NI_CHECK_OUT" |
       network_inventory_parse_ifconfig |
@@ -44317,7 +43957,7 @@ function check_network_inventory {
     fi
     NI_CHECK_OBS="not assessed — $NI_CHECK_COUNT $NI_CHECK_NOUN $NI_CHECK_VERB inventoried from ifconfig -a, but no site-approved expected interface, address, route, and DNS baseline was available"
     NI_CHECK_MEAN="Observed network inventory alone cannot distinguish an intended configuration from a missing, unexpected, or misaddressed interface, route, or resolver."
-    NI_CHECK_FIX="provide a site-approved expected interface, address, route, and DNS baseline, compare it with this inventory, and rerun AIXray."
+    NI_CHECK_FIX="provide a site-approved expected interface, address, route, and DNS baseline, compare it with this inventory, and rerun PTxray."
   fi
 
   add config network_inventory "Network inventory baseline" \
@@ -44734,13 +44374,13 @@ function render_compliance {
   # --compliance case in the argument loop.
   case "$COMPLIANCE" in
     stig)   STDLABEL="DISA STIG (IBM AIX 7.x)"; STDFULL="DISA STIG for IBM AIX 7.x"; ATTRIB_COPY_ID="compliance:attribution-stig-v1"
-            ATTRIB="Control mappings reference the DISA STIG for IBM AIX 7.x (public domain). This report indicates AIXray's read-only observations and is not a certified audit.";;
+            ATTRIB="Control mappings reference the DISA STIG for IBM AIX 7.x (public domain). This report indicates PTxray's read-only observations and is not a certified audit.";;
     cis-l1) STDLABEL="PowerTrue CIS L1 cross-check"; STDFULL="PowerTrue-authored CIS L1 numeric cross-check"; ATTRIB_COPY_ID="compliance:attribution-cis-l1-v1"
             ATTRIB="PowerTrue's cross-check uses control-number references and PowerTrue verdicts only; it is not a certified assessment.";;
     cis-l2) STDLABEL="PowerTrue CIS L2 cross-check"; STDFULL="PowerTrue-authored CIS L2 numeric cross-check"; ATTRIB_COPY_ID="compliance:attribution-cis-l2-v1"
             ATTRIB="PowerTrue's cross-check uses control-number references and PowerTrue verdicts only; it is not a certified assessment.";;
     ffiec)  STDLABEL="FFIEC IT Handbook"; STDFULL="FFIEC IT Handbook alignment"; ATTRIB_COPY_ID="compliance:attribution-ffiec-v1"
-            ATTRIB="FFIEC alignment tags reference the public FFIEC IT Examination Handbook (public domain); they indicate coverage territory, not a certified examination. This report indicates AIXray's read-only observations and is not a certified audit.";;
+            ATTRIB="FFIEC alignment tags reference the public FFIEC IT Examination Handbook (public domain); they indicate coverage territory, not a certified examination. This report indicates PTxray's read-only observations and is not a certified audit.";;
   esac
 
   COMPLIANCE_VINTAGE_H=$(currency_standard_reference_h "$COMPLIANCE")
@@ -45092,9 +44732,9 @@ L2MAPEOF
 $cis_l2_inventory
 EOF
     AUDITROWS="$AUDITROWS$CIS_L2_REFUSED_HTML$CIS_L2_NA_HTML$CIS_L2_UNMAPPED_HTML"
-    COV_HTML="<div class=\"cov\" data-aixray-field=\"observed\" data-aixray-location=\"report:automation-coverage\"><b>Automation coverage.</b> AIXray automates ${NMAP} finding(s) mapped to this standard. ${CIS_L2_COVERED} of ${CIS_L2_DENOMINATOR} CIS L2 inventory controls are assessed in this scan; ${CIS_L2_REFUSED} refused, ${CIS_L2_NA} not applicable, ${CIS_L2_UNMAPPED} unmapped. A compliance program also requires manual/organizational review — see the manual-review section below.</div>"
+    COV_HTML="<div class=\"cov\" data-aixray-field=\"observed\" data-aixray-location=\"report:automation-coverage\"><b>Automation coverage.</b> PTxray automates ${NMAP} finding(s) mapped to this standard. ${CIS_L2_COVERED} of ${CIS_L2_DENOMINATOR} CIS L2 inventory controls are assessed in this scan; ${CIS_L2_REFUSED} refused, ${CIS_L2_NA} not applicable, ${CIS_L2_UNMAPPED} unmapped. A compliance program also requires manual/organizational review — see the manual-review section below.</div>"
   else
-    COV_HTML="<div class=\"cov\" data-aixray-field=\"observed\" data-aixray-location=\"report:automation-coverage\"><b>Automation coverage.</b> AIXray automates ${NMAP} finding(s) mapped to this standard. A compliance program also requires manual/organizational review — see the manual-review section below. N is the count of findings carrying a ${STDLABEL} control tag in this scan; no full control-set total is claimed.</div>"
+    COV_HTML="<div class=\"cov\" data-aixray-field=\"observed\" data-aixray-location=\"report:automation-coverage\"><b>Automation coverage.</b> PTxray automates ${NMAP} finding(s) mapped to this standard. A compliance program also requires manual/organizational review — see the manual-review section below. N is the count of findings carrying a ${STDLABEL} control tag in this scan; no full control-set total is claimed.</div>"
   fi
 
   # (d) critical-first queue — Critical then High across every category
@@ -45418,7 +45058,7 @@ EXEC_COMPLIANCE_BLOCK="<section class=\"exec-summary\" aria-labelledby=\"exec-ti
 <meta name="aixray-privacy-schema" content="1">
 <meta name="aixray-report-date" content="${REPORT_DATE}">
 <meta name="aixray-report-host" content="${HOST_ATTR}">
-<title>AIXray compliance — ${STDLABEL} — ${HOST_H}</title>
+<title>PTxray compliance — ${STDLABEL} — ${HOST_H}</title>
 <style>
 @font-face{font-family:'Plex Sans';src:url(data:font/woff2;base64,${report_font_plex_sans_variable_b64}) format('woff2');font-weight:300 700;font-display:swap}
 @font-face{font-family:'Plex Serif';src:url(data:font/woff2;base64,${report_font_plex_serif_semibold_b64}) format('woff2');font-weight:600;font-display:swap}
@@ -45556,7 +45196,7 @@ footer b,footer a{color:var(--copper-d)}
 @media print{
   @page{
     margin:18mm 12mm 18mm;
-    @top-left{content:"AIXray · ${PRINT_HOST}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
+    @top-left{content:"PTxray · ${PRINT_HOST}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @top-right{content:"${REPORT_DATE}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @bottom-left{content:"PowerTrue Systems";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @bottom-right{content:"Page " counter(page) " of " counter(pages);font-family:var(--mono);font-size:8pt;color:#5C5F63}
@@ -45603,9 +45243,9 @@ footer b,footer a{color:var(--copper-d)}
   .exec-summary{margin-inline:22px}
 }
 </style></head><body>
-<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">AIXray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-compliance-v1">by PowerTrue Systems · AIX · IBM Power · VIOS</div></div><div class="ey" data-aixray-field="authored" data-aixray-copy-id="product:compliance-report-v1">Compliance report</div><h1>Compliance report — <span data-aixray-field="technical" data-aixray-location="report:compliance-label">${STDLABEL}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
-<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${COMPLIANCE_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <b>Standard:</b> <span data-aixray-field="technical" data-aixray-location="report:compliance-standard">${STDFULL}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">READ-ONLY — nothing was changed</span></div>
-<div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./aixray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
+<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-compliance-v1">by PowerTrue Systems · AIX · IBM Power</div></div><div class="ey" data-aixray-field="authored" data-aixray-copy-id="product:compliance-report-v1">Compliance report</div><h1>Compliance report — <span data-aixray-field="technical" data-aixray-location="report:compliance-label">${STDLABEL}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
+<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${COMPLIANCE_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <b>Standard:</b> <span data-aixray-field="technical" data-aixray-location="report:compliance-standard">${STDFULL}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">ASSESSMENT PROBES — no system configuration changed</span></div>
+<div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
 ${CURRENCY_HTML_BLOCK}
 ${COV_HTML}
 ${EXEC_COMPLIANCE_BLOCK}
@@ -45631,10 +45271,10 @@ ${WL}
 </ul>
 <div class="attrib" data-aixray-field="authored" data-aixray-copy-id="${ATTRIB_COPY_ID}">${ATTRIB}</div>
 ${STANDARD_CURRENCY_DISCLOSURE}
-<footer><span data-aixray-field="authored" data-aixray-copy-id="product:footer-report-v1">AIXray · by PowerTrue Systems · read-only · this report is yours to keep</span><a href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></footer>
+<footer><span data-aixray-field="authored" data-aixray-copy-id="product:footer-report-v1">PTxray · by PowerTrue Systems · read-only · this report is yours to keep</span><a href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></footer>
 <div class="cta" style="padding:14px 32px;background:var(--cream);font-family:var(--sans);font-size:12px;color:var(--ink)">
   <p style="margin:0 0 6px" data-aixray-field="authored" data-aixray-copy-id="product:book-cta-v1">${BOOK_CTA}</p>
-  <p data-aixray-field="authored" data-aixray-copy-id="product:privacy-reminder-v1">Your raw report contains your hostname, addresses, and configuration. Create a separate pseudonymized review candidate with <code>./aixray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the candidate and local removals manifest before sharing; never send the local decode key or local manifest.</p>
+  <p data-aixray-field="authored" data-aixray-copy-id="product:privacy-reminder-v1">Your raw report contains your hostname, addresses, and configuration. Create a separate pseudonymized review candidate with <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the candidate and local removals manifest before sharing; never send the local decode key or local manifest.</p>
   <p data-aixray-field="authored" data-aixray-copy-id="product:review-email-v1"><a href="mailto:review@powertruesystems.com">review@powertruesystems.com</a></p>
 </div>
 </body></html>
@@ -45654,7 +45294,7 @@ if [ "$FORMAT" = "compliance" ]; then
   # pre-refactor CLI path).
   if [ "$NSTD" -gt 1 ] || [ -n "$OUT_DIR" ]; then
     if ! mkdir -p "$OUT_DIR" 2>/dev/null; then
-      echo "aixray: --out: cannot create directory '$OUT_DIR'" >&2
+      echo "ptxray: --out: cannot create directory '$OUT_DIR'" >&2
       exit 2
     fi
     REPORT_RC=0
@@ -45663,10 +45303,10 @@ if [ "$FORMAT" = "compliance" ]; then
       echo "[$n of $NSTD] Rendering $std ..." >&2
       # write through the same guards the --html --out path applies: umask 077 + set -C on
       # a per-run tmp file, refuse a directory/symlink destination, atomic mv, verify a real
-      # regular file landed. A failure is a per-standard aixray diagnostic and the loop
+      # regular file landed. A failure is a per-standard ptxray diagnostic and the loop
       # continues to the next standard.
-      REPORT_FILE="$OUT_DIR/aixray-$REPORT_HOST-$REPORT_DATE-$std.html"
-      REPORT_TMP="$OUT_DIR/.aixray-$REPORT_HOST-$REPORT_DATE-$std.html.tmp.$$"
+      REPORT_FILE="$OUT_DIR/ptxray-$REPORT_HOST-$REPORT_DATE-$std.html"
+      REPORT_TMP="$OUT_DIR/.ptxray-$REPORT_HOST-$REPORT_DATE-$std.html.tmp.$$"
       # A pre-planted symlink at the predictable report name is refused up front (before
       # any mv could replace it) so a hostile link is never silently swapped for a real
       # report — the victim target stays untouched and the standard reports a failure.
@@ -45679,7 +45319,7 @@ if [ "$FORMAT" = "compliance" ]; then
         printf 'Report ready: %s\n' "$REPORT_FILE" >&2
       else
         rm -f "$REPORT_TMP"
-        echo "aixray: --out: cannot write report '$REPORT_FILE'" >&2
+        echo "ptxray: --out: cannot write report '$REPORT_FILE'" >&2
         REPORT_RC=1
       fi
       n=$((n+1))
@@ -45961,7 +45601,7 @@ if [ "$FORMAT" = "json" ]; then
           return out "]"
         }
         BEGIN{printf "["}
-        NF>=14{ printf "%s{ \"cve\": \"%s\", \"hiper\": %s, \"fileset\": \"%s\", \"installed\": \"%s\", \"vulnerable_range\": \"%s\", \"fixed_at_or_above\": %s, \"apars\": %s, \"ifix\": \"%s\", \"bulletin\": \"%s\", \"cvss\": %s, \"reboot\": \"%s\", \"abstract\": %s }", (n++?", ":""), jescape($1), ($2=="1"?"true":"false"), jescape($3), jescape($4), jescape($5), ($6==""?"null":"\"" jescape($6) "\""), apars_json($7), jescape($8), jescape($9), ($10==""?"null":$10), jescape($11), ($14==""?"null":"\"" jescape($14) "\"") }
+        NF>=14{ printf "%s{ \"cve\": \"%s\", \"known_exploited\": %s, \"hiper\": %s, \"fileset\": \"%s\", \"installed\": \"%s\", \"vulnerable_range\": \"%s\", \"fixed_at_or_above\": %s, \"apars\": %s, \"ifix\": \"%s\", \"bulletin\": \"%s\", \"cvss\": %s, \"reboot\": \"%s\", \"abstract\": %s }", (n++?", ":""), jescape($1), (NF>=15?($15=="1"?"true":"false"):"null"), ($2=="1"?"true":"false"), jescape($3), jescape($4), jescape($5), ($6==""?"null":"\"" jescape($6) "\""), apars_json($7), jescape($8), jescape($9), ($10==""?"null":$10), jescape($11), ($14==""?"null":"\"" jescape($14) "\"") }
         END{printf "]"}')
       EXPSUF=", \"exposures\": $EJ"
     fi
@@ -46075,9 +45715,9 @@ else
   SNAP_EY="System Health Check"; SNAP_H1="Posture snapshot"
 fi
 
-# C2: surface the full CVSS ladder ahead of category detail. This native v1
-# path has no KEV-feed input, so Known-Exploited is explicitly NOT ASSESSED;
-# the Contract-v2 report fills that tier when an-flrtvc receives --kev-json.
+# C2: surface the full CVSS ladder ahead of category detail. When signed
+# definitions were selected, the adjacent verifier's derived KEV CVE list
+# classifies the adverse FLRT exposure rows; without it the tier stays NA.
 CVSS_APAR_INDEX=-1
 i=0
 while [ "$i" -lt "$NFIND" ]; do
@@ -46128,12 +45768,18 @@ else
   if [ "$CVSS_INCOMPLETE_ROWS" -gt 0 ]; then
     CVSS_NOTE="$CVSS_NOTE<div class=\"cov\" data-aixray-container=\"fields\"><b data-aixray-field=\"authored\" data-aixray-copy-id=\"native:cvss-incomplete-label-v1\">Incomplete CVSS evidence.</b> <span data-aixray-field=\"technical\" data-aixray-location=\"report:cvss-incomplete-count\">$CVSS_INCOMPLETE_ROWS</span><span data-aixray-field=\"authored\" data-aixray-copy-id=\"native:cvss-incomplete-detail-v1\"> exposure record(s) came from a row whose CVSS field was incomplete or malformed. Recovered scores remain listed; unscored CVEs are NOT ASSESSED and are not guessed into the None tier.</span></div>"
   fi
-  CVSSBLOCK="<section id=\"cvss-ladder\" class=\"cvss\"><div class=\"cathead\"><span class=\"cl\">CVE exposure ladder</span><span class=\"cr\"><span class=\"cnt\">worst first · every exposure listed</span></span></div>$CVSS_NOTE<table><thead><tr><th>Tier</th><th>Count</th><th>Actual CVE / exposure list</th></tr></thead><tbody><tr data-tier=\"Known-Exploited\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">NOT ASSESSED</td><td class=\"obs\" data-aixray-field=\"authored\" data-aixray-copy-id=\"native:kev-not-supplied-v1\">No dated KEV feed was supplied to this native report path; zero is not assumed.</td></tr>$CVSS_NUMERIC_ROWS</tbody></table></section>"
+  if [ "$PTXRAY_KEV_MATCH_STATE" = assessed ]; then
+    PTXRAY_KEV_HTML_NAMES=$(printf '%s' "${PTXRAY_KEV_MATCH_NAMES:-none}" | hesc)
+    PTXRAY_KEV_HTML_ROW="<tr data-tier=\"Known-Exploited\" data-count=\"$PTXRAY_KEV_MATCH_COUNT\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">$PTXRAY_KEV_MATCH_COUNT</td><td class=\"obs\" data-aixray-field=\"observed\" data-aixray-location=\"finding:apar_scan:exposures\">$PTXRAY_KEV_HTML_NAMES</td></tr>"
+  else
+    PTXRAY_KEV_HTML_ROW="<tr data-tier=\"Known-Exploited\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">NOT ASSESSED</td><td class=\"obs\" data-aixray-field=\"authored\" data-aixray-copy-id=\"native:kev-not-supplied-v1\">No valid selected signed KEV feed was available; zero is not assumed.</td></tr>"
+  fi
+  CVSSBLOCK="<section id=\"cvss-ladder\" class=\"cvss\"><div class=\"cathead\"><span class=\"cl\">CVE exposure ladder</span><span class=\"cr\"><span class=\"cnt\">worst first · every exposure listed</span></span></div>$CVSS_NOTE<table><thead><tr><th>Tier</th><th>Count</th><th>Actual CVE / exposure list</th></tr></thead><tbody>$PTXRAY_KEV_HTML_ROW$CVSS_NUMERIC_ROWS</tbody></table></section>"
 fi
 
 # Complete, uncapped action inventory. CVE tier is read only from recovered
 # FLRT exposure rows; an absent score/row stays absent rather than being
-# guessed. The native report has no KEV input, disclosed in the ladder below.
+# guessed. KEV membership comes only from selected signed definitions.
 function action_cve_tier { # <finding-index> -> tier or empty
   typeset ACTION_INDEX
   ACTION_INDEX=$1
@@ -46141,6 +45787,7 @@ function action_cve_tier { # <finding-index> -> tier or empty
   printf '%s\n' "${F_EXPOSURES[$ACTION_INDEX]}" | awk -F'\t' '
     NF>=13 {
       rows++
+      if(NF>=15&&$15==1)known_exploited=1
       if($2=="1") hiper=1
       if($12!="1") unscored++
       else if($10!="") {
@@ -46150,6 +45797,7 @@ function action_cve_tier { # <finding-index> -> tier or empty
     }
     END {
       if(!rows) exit
+      if(known_exploited){printf "Known-Exploited";exit}
       if(hiper){printf "Critical / HIPER";exit}
       if(max>=9){printf "Critical";exit}
       if(unscored)exit
@@ -46165,7 +45813,7 @@ function action_priority { # <finding-index> <cve-tier> -> numeric sort bucket
   typeset ACTION_INDEX ACTION_TIER ACTION_STATUS ACTION_SEVERITY
   ACTION_INDEX=$1; ACTION_TIER=$2
   ACTION_STATUS=${F_ST[$ACTION_INDEX]}; ACTION_SEVERITY=${F_SEV[$ACTION_INDEX]}
-  case "$ACTION_TIER" in Critical*) echo 1; return;; esac
+  case "$ACTION_TIER" in Known-Exploited) echo 1; return;; Critical*) echo 2; return;; esac
   case "$ACTION_STATUS:$ACTION_SEVERITY" in
     FAIL:critical|FAIL:high) echo 2;;
     FAIL:med|FAIL:medium) echo 3;;
@@ -46181,12 +45829,13 @@ function cve_tier_rank { # <cve-tier> -> numeric sort rank, lower ranks first (0
   typeset CTR_TIER
   CTR_TIER=$1
   case "$CTR_TIER" in
-    "Critical / HIPER") echo 0;;
-    "Critical") echo 1;;
-    "High") echo 2;;
-    "Medium") echo 3;;
-    "Low") echo 4;;
-    *) echo 5;;
+    "Known-Exploited") echo 0;;
+    "Critical / HIPER") echo 1;;
+    "Critical") echo 2;;
+    "High") echo 3;;
+    "Medium") echo 4;;
+    "Low") echo 5;;
+    *) echo 6;;
   esac
 }
 
@@ -46417,7 +46066,7 @@ cat <<HTML
 <meta name="aixray-privacy-schema" content="1">
 <meta name="aixray-report-date" content="${REPORT_DATE}">
 <meta name="aixray-report-host" content="${HOST_ATTR}">
-<title>AIXray — ${HOST_H}</title>
+<title>PTxray — ${HOST_H}</title>
 <style>
 @font-face{font-family:'Plex Sans';src:url(data:font/woff2;base64,${report_font_plex_sans_variable_b64}) format('woff2');font-weight:300 700;font-display:swap}
 @font-face{font-family:'Plex Serif';src:url(data:font/woff2;base64,${report_font_plex_serif_semibold_b64}) format('woff2');font-weight:600;font-display:swap}
@@ -46582,7 +46231,7 @@ footer b,footer a{color:var(--copper-d)}
 @media print{
   @page{
     margin:18mm 12mm 18mm;
-    @top-left{content:"AIXray · ${PRINT_HOST}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
+    @top-left{content:"PTxray · ${PRINT_HOST}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @top-right{content:"${REPORT_DATE}";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @bottom-left{content:"PowerTrue Systems";font-family:var(--mono);font-size:8pt;color:#5C5F63}
     @bottom-right{content:"Page " counter(page) " of " counter(pages);font-family:var(--mono);font-size:8pt;color:#5C5F63}
@@ -46631,9 +46280,9 @@ footer b,footer a{color:var(--copper-d)}
   .exec-summary{margin-inline:22px}
 }
 </style></head><body>
-<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">AIXray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-native-v1">by PowerTrue Systems · AIX · IBM Power · VIOS</div></div><div class="ey" data-aixray-field="technical" data-aixray-location="report:report-kind">${SNAP_EY}</div><h1><span data-aixray-field="technical" data-aixray-location="report:title-kind">${SNAP_H1}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
-<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${DATA_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">READ-ONLY — nothing was changed</span></div>
-<div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./aixray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
+<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-native-v1">by PowerTrue Systems · AIX · IBM Power</div></div><div class="ey" data-aixray-field="technical" data-aixray-location="report:report-kind">${SNAP_EY}</div><h1><span data-aixray-field="technical" data-aixray-location="report:title-kind">${SNAP_H1}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
+<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${DATA_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">ASSESSMENT PROBES — no system configuration changed</span></div>
+<div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
 ${CURRENCY_HTML_BLOCK}
 <div class="score">
   <div class="scorebox"><div class="n" data-aixray-field="technical" data-aixray-location="report:pass-rate">${SCORE}%</div><div class="l">Pass rate</div></div>
@@ -46661,10 +46310,10 @@ $(plan_card_html "$TOP_RISK_COUNT")
 ${ACTIONBLOCK}
 ${CVSSBLOCK}
 ${CATBLOCKS}
-<footer><span data-aixray-field="authored" data-aixray-copy-id="product:footer-snapshot-v1">AIXray · by PowerTrue Systems · read-only · this snapshot is yours to keep</span><a href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></footer>
+<footer><span data-aixray-field="authored" data-aixray-copy-id="product:footer-snapshot-v1">PTxray · by PowerTrue Systems · read-only · this snapshot is yours to keep</span><a href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></footer>
 <div class="cta" style="padding:14px 32px;background:var(--cream);font-family:var(--sans);font-size:12px;color:var(--ink)">
   <p style="margin:0 0 6px" data-aixray-field="authored" data-aixray-copy-id="product:book-cta-v1">${BOOK_CTA}</p>
-  <p data-aixray-field="authored" data-aixray-copy-id="product:privacy-reminder-v1">Your raw report contains your hostname, addresses, and configuration. Create a separate pseudonymized review candidate with <code>./aixray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the candidate and local removals manifest before sharing; never send the local decode key or local manifest.</p>
+  <p data-aixray-field="authored" data-aixray-copy-id="product:privacy-reminder-v1">Your raw report contains your hostname, addresses, and configuration. Create a separate pseudonymized review candidate with <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the candidate and local removals manifest before sharing; never send the local decode key or local manifest.</p>
   <p data-aixray-field="authored" data-aixray-copy-id="product:review-email-v1"><a href="mailto:review@powertruesystems.com">review@powertruesystems.com</a></p>
 </div>
 </body></html>
@@ -46674,14 +46323,14 @@ HTML
 if [ -n "$OUT_DIR" ]; then
   if ! mkdir -p "$OUT_DIR" 2>/dev/null; then
     if [ "$OUT_EXPLICIT" -eq 1 ]; then
-      echo "aixray: --out: cannot create directory '$OUT_DIR'" >&2
+      echo "ptxray: --out: cannot create directory '$OUT_DIR'" >&2
     else
-      echo "aixray: cannot write the report in the current directory — cd to a writable directory, or use --out DIR" >&2
+      echo "ptxray: cannot write the report in the current directory — cd to a writable directory, or use --out DIR" >&2
     fi
     exit 2
   fi
-  REPORT_FILE="$OUT_DIR/aixray-$REPORT_HOST-$REPORT_DATE.html"
-  REPORT_TMP="$OUT_DIR/.aixray-$REPORT_HOST-$REPORT_DATE.html.tmp.$$"
+  REPORT_FILE="$OUT_DIR/ptxray-$REPORT_HOST-$REPORT_DATE.html"
+  REPORT_TMP="$OUT_DIR/.ptxray-$REPORT_HOST-$REPORT_DATE.html.tmp.$$"
   if (umask 077; set -C; emit_html_report > "$REPORT_TMP") &&
      [ ! -d "$REPORT_FILE" ] &&
      mv -f "$REPORT_TMP" "$REPORT_FILE" &&
@@ -46693,9 +46342,9 @@ if [ -n "$OUT_DIR" ]; then
   else
     rm -f "$REPORT_TMP"
     if [ "$OUT_EXPLICIT" -eq 1 ]; then
-      echo "aixray: --out: cannot write report '$REPORT_FILE'" >&2
+      echo "ptxray: --out: cannot write report '$REPORT_FILE'" >&2
     else
-      echo "aixray: cannot write the report in the current directory — cd to a writable directory, or use --out DIR" >&2
+      echo "ptxray: cannot write the report in the current directory — cd to a writable directory, or use --out DIR" >&2
     fi
     exit 2
   fi

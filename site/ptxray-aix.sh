@@ -1,8 +1,11 @@
 #!/bin/sh
 #
-# PTxray (AIX/VIOS edition) — READ-ONLY posture snapshot of an IBM AIX or VIOS LPAR.
-# Inspects only. Changes nothing, installs nothing, restarts nothing. Makes no network
-# calls: lifecycle/security reference data and its source registry are embedded below.
+# PTxray AIX edition — READ-ONLY posture snapshot of an IBM AIX LPAR.
+# Assessment probes inspect only: they change no system configuration, install
+# and restart nothing, and upload no assessment data. The runner writes the
+# requested report and, before assessment, can invoke the separate adjacent
+# signed-data downloader to write its protected cache; use --offline for a
+# cache-only, air-gapped run.
 #
 # Audit map (repository paths):
 #   checks/ — standalone check scripts and adjacent command manifests
@@ -13,39 +16,57 @@
 #
 # Easy run: ./ptxray-aix.sh
 # Stdout:   ./ptxray-aix.sh [--html|--json] > report.html
-#   Best run as root — a few reads (emgr -l, sysdumpdev -l, bootlist) need it.
-#   Unprivileged runs degrade those checks to WARN or NOT_ASSESSED and say so.
+#   PTxray requires effective UID 0 and refuses assessment otherwise.
 # network-lint: allow-next=6 -- customer transfer documentation; never executed
-# Transfer in (workstation to AIX/VIOS):
-# scp ptxray-aix.sh ptxray-review-pack.sh ptxray-review-validate.awk root@<aix-host>:/tmp/
-# Copy all three files from the same release; the helper enforces its validator contract.
-# Pseudonymize and inspect on AIX/VIOS before transfer out.
-# Transfer out only after inspection (AIX/VIOS to workstation):
-# scp root@<aix-host>:/tmp/aixray-review-<token>-<YYYY-MM-DD>.html .
+# Transfer in (workstation to AIX):
+# scp ptxray-aix.sh ptxray-defs.sh ptxray-review-pack.sh ptxray-review-validate.awk root@<aix-host>:/tmp/
+# Copy all four files from the same release; the runner binds the downloader digest and the helper enforces its validator contract.
+# Pseudonymize and inspect on AIX before transfer out.
+# Transfer out only after inspection (AIX to workstation):
+# scp root@<aix-host>:/tmp/ptxray-review-<token>-<YYYY-MM-DD>.html .
 #
-# Test hooks (used by tests/ on a dev box; harmless in production):
+# Private-build test hooks (never honored by a normal assembled artifact):
 #   AIXRAY_FIXTURES=<dir>   read command output from <dir>/<key>.out instead of executing
 #   AIXRAY_TODAY=YYYY-MM-DD freeze "today" for deterministic date math
 set -u
 
-# Predictable command resolution for root AND unprivileged runs: the AIX
-# default non-root PATH lacks /usr/sbin, where emgr, lsdev, sysdumpdev and
-# friends live — without this an unprivileged run silently skips checks.
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli:${PATH:-}
+# The interpreter is already running, but no privileged child tool has run.
+# Do not let inherited OpenSSL configuration/provider paths or dynamic-loader
+# paths reach the fixed-path verifier used to authenticate the adjacent
+# definitions downloader.
+unset SSL_CERT_DIR SSL_CERT_FILE SSLKEYLOGFILE
+unset OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+unset OPENSSL_TRACE OPENSSL_MALLOC_FD OPENSSL_MALLOC_FAILURES
+unset OPENSSL_MALLOC_SEED CTLOG_FILE RANDFILE
+unset LIBPATH LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT SHLIB_PATH
+unset LDR_PRELOAD LDR_PRELOAD64
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
+
+# This literal is stamped by the assembler. Runtime environment cannot change
+# whether private fixture/capture hooks are active.
+PTXRAY_PRIVATE_TEST_BUILD=0
+if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+fi
+
+# Predictable command resolution for the required root run. Keep command lookup
+# independent of the invoking account's inherited environment.
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:/usr/ios/cli
 export PATH
 # AIX lparstat prints comma decimals under a non-C LC_NUMERIC; all parsing here
 # is C-locale by contract, so pin the locale.
 LC_ALL=C; export LC_ALL
 
-VERSION="1.4.0"
+VERSION="1.5.0"
 DATA_VINTAGE="unknown"
 DATA_VINTAGE_H="unknown"
 
 # Fixed Plan destinations, pending labels, safe-send copy, and audited inline
 # QR vector are imported from pipeline/report_plan.py only while assembling.
 plan_copy_status='Next step'
-plan_link_url='https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided'
-plan_qr_url='https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided'
+plan_link_url='https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided'
+plan_qr_url='https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided'
 plan_fallback_label='powertruesystems.com/assessment/'
 plan_link_label='Send your results to PowerTrue and receive a Blueprint for mitigating the issues found.'
 plan_qr_title='QR code — send your results for a mitigation Blueprint'
@@ -60,53 +81,53 @@ plan_qr_svg='<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 57 57" width="
   <desc id="plan-qr-description">Alternate path to powertruesystems.com/assessment/</desc>
   <rect x="0" y="0" width="57" height="57" fill="#fff"/>
   <path fill="#000" d="M4 4h7v1h-7z M16 4h2v1h-2z M23 4h1v1h-1z M27 4h1v1h-1z M34 4h2v1h-2z M37 4h1v1h-1z M39 4h3v1h-3z M44 4h1v1h-1z M46 4h7v1h-7z"/>
-  <path fill="#000" d="M4 5h1v1h-1z M10 5h1v1h-1z M15 5h4v1h-4z M20 5h2v1h-2z M24 5h3v1h-3z M28 5h2v1h-2z M31 5h1v1h-1z M33 5h2v1h-2z M40 5h5v1h-5z M46 5h1v1h-1z M52 5h1v1h-1z"/>
-  <path fill="#000" d="M4 6h1v1h-1z M6 6h3v1h-3z M10 6h1v1h-1z M12 6h3v1h-3z M16 6h1v1h-1z M18 6h1v1h-1z M21 6h3v1h-3z M26 6h5v1h-5z M32 6h3v1h-3z M36 6h1v1h-1z M43 6h2v1h-2z M46 6h1v1h-1z M48 6h3v1h-3z M52 6h1v1h-1z"/>
-  <path fill="#000" d="M4 7h1v1h-1z M6 7h3v1h-3z M10 7h1v1h-1z M12 7h2v1h-2z M16 7h1v1h-1z M18 7h1v1h-1z M21 7h3v1h-3z M28 7h2v1h-2z M33 7h3v1h-3z M39 7h3v1h-3z M43 7h1v1h-1z M46 7h1v1h-1z M48 7h3v1h-3z M52 7h1v1h-1z"/>
-  <path fill="#000" d="M4 8h1v1h-1z M6 8h3v1h-3z M10 8h1v1h-1z M12 8h2v1h-2z M15 8h4v1h-4z M25 8h11v1h-11z M40 8h2v1h-2z M46 8h1v1h-1z M48 8h3v1h-3z M52 8h1v1h-1z"/>
+  <path fill="#000" d="M4 5h1v1h-1z M10 5h1v1h-1z M13 5h1v1h-1z M15 5h3v1h-3z M20 5h1v1h-1z M24 5h3v1h-3z M28 5h2v1h-2z M31 5h1v1h-1z M33 5h2v1h-2z M40 5h5v1h-5z M46 5h1v1h-1z M52 5h1v1h-1z"/>
+  <path fill="#000" d="M4 6h1v1h-1z M6 6h3v1h-3z M10 6h1v1h-1z M12 6h2v1h-2z M16 6h1v1h-1z M18 6h1v1h-1z M21 6h1v1h-1z M23 6h1v1h-1z M26 6h5v1h-5z M32 6h3v1h-3z M36 6h1v1h-1z M43 6h2v1h-2z M46 6h1v1h-1z M48 6h3v1h-3z M52 6h1v1h-1z"/>
+  <path fill="#000" d="M4 7h1v1h-1z M6 7h3v1h-3z M10 7h1v1h-1z M12 7h3v1h-3z M16 7h1v1h-1z M18 7h1v1h-1z M22 7h2v1h-2z M28 7h2v1h-2z M33 7h3v1h-3z M39 7h3v1h-3z M43 7h1v1h-1z M46 7h1v1h-1z M48 7h3v1h-3z M52 7h1v1h-1z"/>
+  <path fill="#000" d="M4 8h1v1h-1z M6 8h3v1h-3z M10 8h1v1h-1z M12 8h2v1h-2z M15 8h4v1h-4z M21 8h1v1h-1z M25 8h11v1h-11z M40 8h2v1h-2z M46 8h1v1h-1z M48 8h3v1h-3z M52 8h1v1h-1z"/>
   <path fill="#000" d="M4 9h1v1h-1z M10 9h1v1h-1z M12 9h1v1h-1z M14 9h1v1h-1z M16 9h1v1h-1z M18 9h1v1h-1z M20 9h1v1h-1z M23 9h1v1h-1z M26 9h1v1h-1z M30 9h1v1h-1z M35 9h1v1h-1z M37 9h2v1h-2z M40 9h3v1h-3z M46 9h1v1h-1z M52 9h1v1h-1z"/>
   <path fill="#000" d="M4 10h7v1h-7z M12 10h1v1h-1z M14 10h1v1h-1z M16 10h1v1h-1z M18 10h1v1h-1z M20 10h1v1h-1z M22 10h1v1h-1z M24 10h1v1h-1z M26 10h1v1h-1z M28 10h1v1h-1z M30 10h1v1h-1z M32 10h1v1h-1z M34 10h1v1h-1z M36 10h1v1h-1z M38 10h1v1h-1z M40 10h1v1h-1z M42 10h1v1h-1z M44 10h1v1h-1z M46 10h7v1h-7z"/>
-  <path fill="#000" d="M12 11h2v1h-2z M17 11h1v1h-1z M19 11h1v1h-1z M21 11h1v1h-1z M26 11h1v1h-1z M30 11h9v1h-9z M41 11h1v1h-1z M44 11h1v1h-1z"/>
-  <path fill="#000" d="M4 12h1v1h-1z M6 12h5v1h-5z M15 12h2v1h-2z M18 12h3v1h-3z M23 12h2v1h-2z M26 12h5v1h-5z M33 12h3v1h-3z M39 12h3v1h-3z M43 12h1v1h-1z M46 12h5v1h-5z"/>
-  <path fill="#000" d="M4 13h3v1h-3z M8 13h1v1h-1z M11 13h1v1h-1z M13 13h1v1h-1z M15 13h1v1h-1z M17 13h2v1h-2z M20 13h4v1h-4z M25 13h1v1h-1z M27 13h2v1h-2z M33 13h2v1h-2z M36 13h1v1h-1z M39 13h3v1h-3z M43 13h1v1h-1z M45 13h3v1h-3z"/>
-  <path fill="#000" d="M4 14h1v1h-1z M7 14h2v1h-2z M10 14h1v1h-1z M14 14h1v1h-1z M18 14h1v1h-1z M22 14h1v1h-1z M24 14h1v1h-1z M26 14h1v1h-1z M28 14h1v1h-1z M30 14h1v1h-1z M33 14h1v1h-1z M35 14h1v1h-1z M38 14h1v1h-1z M40 14h4v1h-4z M47 14h1v1h-1z M49 14h2v1h-2z M52 14h1v1h-1z"/>
-  <path fill="#000" d="M9 15h1v1h-1z M11 15h1v1h-1z M15 15h1v1h-1z M17 15h1v1h-1z M19 15h2v1h-2z M23 15h2v1h-2z M29 15h1v1h-1z M31 15h4v1h-4z M36 15h1v1h-1z M38 15h2v1h-2z M48 15h1v1h-1z M52 15h1v1h-1z"/>
-  <path fill="#000" d="M8 16h1v1h-1z M10 16h2v1h-2z M14 16h1v1h-1z M16 16h1v1h-1z M19 16h4v1h-4z M25 16h4v1h-4z M33 16h3v1h-3z M37 16h1v1h-1z M39 16h3v1h-3z M43 16h2v1h-2z M47 16h1v1h-1z M50 16h3v1h-3z"/>
-  <path fill="#000" d="M9 17h1v1h-1z M12 17h3v1h-3z M16 17h1v1h-1z M18 17h7v1h-7z M26 17h2v1h-2z M29 17h1v1h-1z M32 17h3v1h-3z M41 17h1v1h-1z M46 17h4v1h-4z M51 17h1v1h-1z"/>
-  <path fill="#000" d="M5 18h2v1h-2z M8 18h1v1h-1z M10 18h3v1h-3z M14 18h1v1h-1z M18 18h3v1h-3z M22 18h1v1h-1z M24 18h4v1h-4z M30 18h1v1h-1z M32 18h1v1h-1z M35 18h1v1h-1z M37 18h2v1h-2z M40 18h1v1h-1z M42 18h2v1h-2z M47 18h2v1h-2z M51 18h2v1h-2z"/>
-  <path fill="#000" d="M8 19h2v1h-2z M13 19h4v1h-4z M20 19h5v1h-5z M26 19h2v1h-2z M29 19h1v1h-1z M31 19h1v1h-1z M33 19h1v1h-1z M38 19h1v1h-1z M40 19h4v1h-4z M45 19h1v1h-1z M48 19h1v1h-1z M52 19h1v1h-1z"/>
-  <path fill="#000" d="M4 20h2v1h-2z M9 20h2v1h-2z M14 20h2v1h-2z M18 20h2v1h-2z M21 20h2v1h-2z M24 20h2v1h-2z M28 20h2v1h-2z M32 20h1v1h-1z M35 20h5v1h-5z M42 20h1v1h-1z M44 20h4v1h-4z M50 20h1v1h-1z"/>
-  <path fill="#000" d="M4 21h2v1h-2z M7 21h3v1h-3z M13 21h1v1h-1z M20 21h4v1h-4z M27 21h3v1h-3z M31 21h3v1h-3z M36 21h1v1h-1z M38 21h1v1h-1z M41 21h2v1h-2z M45 21h2v1h-2z M51 21h1v1h-1z"/>
-  <path fill="#000" d="M6 22h12v1h-12z M21 22h3v1h-3z M27 22h1v1h-1z M29 22h2v1h-2z M32 22h1v1h-1z M34 22h4v1h-4z M39 22h1v1h-1z M44 22h4v1h-4z M49 22h1v1h-1z M51 22h2v1h-2z"/>
-  <path fill="#000" d="M5 23h2v1h-2z M8 23h1v1h-1z M11 23h1v1h-1z M13 23h2v1h-2z M17 23h2v1h-2z M20 23h2v1h-2z M23 23h1v1h-1z M27 23h1v1h-1z M29 23h5v1h-5z M36 23h1v1h-1z M39 23h1v1h-1z M41 23h1v1h-1z M44 23h1v1h-1z M46 23h3v1h-3z M51 23h2v1h-2z"/>
-  <path fill="#000" d="M7 24h2v1h-2z M10 24h1v1h-1z M12 24h3v1h-3z M16 24h2v1h-2z M19 24h2v1h-2z M23 24h2v1h-2z M26 24h3v1h-3z M30 24h2v1h-2z M33 24h3v1h-3z M39 24h7v1h-7z M50 24h2v1h-2z"/>
-  <path fill="#000" d="M4 25h2v1h-2z M8 25h2v1h-2z M11 25h1v1h-1z M13 25h2v1h-2z M16 25h1v1h-1z M19 25h2v1h-2z M22 25h2v1h-2z M25 25h1v1h-1z M27 25h1v1h-1z M29 25h2v1h-2z M33 25h2v1h-2z M36 25h1v1h-1z M39 25h3v1h-3z M45 25h4v1h-4z M50 25h1v1h-1z"/>
+  <path fill="#000" d="M12 11h2v1h-2z M17 11h1v1h-1z M19 11h1v1h-1z M21 11h1v1h-1z M26 11h1v1h-1z M30 11h7v1h-7z M39 11h1v1h-1z M41 11h1v1h-1z M44 11h1v1h-1z"/>
+  <path fill="#000" d="M4 12h1v1h-1z M6 12h5v1h-5z M15 12h2v1h-2z M18 12h3v1h-3z M23 12h2v1h-2z M26 12h5v1h-5z M33 12h3v1h-3z M37 12h1v1h-1z M39 12h3v1h-3z M43 12h1v1h-1z M46 12h5v1h-5z"/>
+  <path fill="#000" d="M4 13h3v1h-3z M8 13h1v1h-1z M11 13h1v1h-1z M13 13h1v1h-1z M15 13h1v1h-1z M17 13h2v1h-2z M20 13h4v1h-4z M25 13h1v1h-1z M27 13h2v1h-2z M33 13h2v1h-2z M36 13h1v1h-1z M40 13h2v1h-2z M43 13h1v1h-1z M45 13h3v1h-3z"/>
+  <path fill="#000" d="M5 14h1v1h-1z M7 14h2v1h-2z M10 14h1v1h-1z M14 14h1v1h-1z M18 14h1v1h-1z M22 14h1v1h-1z M24 14h1v1h-1z M26 14h1v1h-1z M28 14h1v1h-1z M30 14h1v1h-1z M33 14h1v1h-1z M35 14h1v1h-1z M38 14h1v1h-1z M40 14h4v1h-4z M47 14h1v1h-1z M49 14h2v1h-2z M52 14h1v1h-1z"/>
+  <path fill="#000" d="M4 15h1v1h-1z M9 15h1v1h-1z M11 15h1v1h-1z M15 15h1v1h-1z M17 15h1v1h-1z M19 15h2v1h-2z M23 15h2v1h-2z M29 15h1v1h-1z M31 15h4v1h-4z M36 15h1v1h-1z M38 15h2v1h-2z M48 15h1v1h-1z M52 15h1v1h-1z"/>
+  <path fill="#000" d="M4 16h1v1h-1z M8 16h1v1h-1z M10 16h2v1h-2z M14 16h1v1h-1z M21 16h2v1h-2z M25 16h4v1h-4z M33 16h3v1h-3z M37 16h1v1h-1z M39 16h3v1h-3z M43 16h2v1h-2z M47 16h1v1h-1z M50 16h3v1h-3z"/>
+  <path fill="#000" d="M5 17h1v1h-1z M9 17h1v1h-1z M12 17h3v1h-3z M16 17h1v1h-1z M18 17h1v1h-1z M21 17h4v1h-4z M26 17h2v1h-2z M29 17h1v1h-1z M32 17h3v1h-3z M41 17h1v1h-1z M46 17h4v1h-4z M51 17h1v1h-1z"/>
+  <path fill="#000" d="M5 18h2v1h-2z M8 18h1v1h-1z M10 18h3v1h-3z M14 18h1v1h-1z M16 18h1v1h-1z M18 18h1v1h-1z M22 18h1v1h-1z M24 18h4v1h-4z M30 18h1v1h-1z M32 18h1v1h-1z M35 18h1v1h-1z M37 18h2v1h-2z M40 18h1v1h-1z M42 18h2v1h-2z M47 18h2v1h-2z M51 18h2v1h-2z"/>
+  <path fill="#000" d="M11 19h1v1h-1z M13 19h3v1h-3z M20 19h5v1h-5z M26 19h2v1h-2z M29 19h1v1h-1z M31 19h1v1h-1z M33 19h1v1h-1z M38 19h1v1h-1z M40 19h4v1h-4z M45 19h1v1h-1z M48 19h1v1h-1z M52 19h1v1h-1z"/>
+  <path fill="#000" d="M4 20h2v1h-2z M9 20h2v1h-2z M12 20h1v1h-1z M14 20h2v1h-2z M18 20h2v1h-2z M21 20h2v1h-2z M24 20h2v1h-2z M28 20h2v1h-2z M32 20h1v1h-1z M35 20h5v1h-5z M42 20h1v1h-1z M44 20h4v1h-4z M50 20h1v1h-1z"/>
+  <path fill="#000" d="M4 21h2v1h-2z M7 21h2v1h-2z M12 21h2v1h-2z M20 21h4v1h-4z M27 21h3v1h-3z M31 21h3v1h-3z M36 21h1v1h-1z M38 21h1v1h-1z M41 21h2v1h-2z M45 21h2v1h-2z M51 21h1v1h-1z"/>
+  <path fill="#000" d="M6 22h5v1h-5z M14 22h3v1h-3z M18 22h1v1h-1z M22 22h2v1h-2z M27 22h1v1h-1z M29 22h2v1h-2z M32 22h1v1h-1z M34 22h4v1h-4z M39 22h1v1h-1z M44 22h4v1h-4z M49 22h1v1h-1z M51 22h2v1h-2z"/>
+  <path fill="#000" d="M5 23h2v1h-2z M8 23h1v1h-1z M11 23h1v1h-1z M14 23h1v1h-1z M17 23h1v1h-1z M20 23h2v1h-2z M23 23h1v1h-1z M27 23h1v1h-1z M29 23h5v1h-5z M36 23h1v1h-1z M39 23h1v1h-1z M41 23h1v1h-1z M44 23h1v1h-1z M46 23h3v1h-3z M51 23h2v1h-2z"/>
+  <path fill="#000" d="M7 24h2v1h-2z M10 24h1v1h-1z M12 24h3v1h-3z M16 24h6v1h-6z M23 24h2v1h-2z M26 24h3v1h-3z M30 24h2v1h-2z M33 24h3v1h-3z M39 24h7v1h-7z M50 24h2v1h-2z"/>
+  <path fill="#000" d="M4 25h2v1h-2z M7 25h3v1h-3z M11 25h1v1h-1z M13 25h2v1h-2z M16 25h2v1h-2z M19 25h3v1h-3z M23 25h1v1h-1z M25 25h1v1h-1z M27 25h1v1h-1z M29 25h2v1h-2z M33 25h2v1h-2z M36 25h1v1h-1z M39 25h3v1h-3z M45 25h4v1h-4z M50 25h1v1h-1z"/>
   <path fill="#000" d="M5 26h8v1h-8z M15 26h1v1h-1z M17 26h4v1h-4z M22 26h3v1h-3z M26 26h8v1h-8z M38 26h2v1h-2z M42 26h7v1h-7z M50 26h1v1h-1z M52 26h1v1h-1z"/>
-  <path fill="#000" d="M5 27h1v1h-1z M7 27h2v1h-2z M12 27h2v1h-2z M17 27h1v1h-1z M19 27h8v1h-8z M30 27h5v1h-5z M36 27h3v1h-3z M43 27h2v1h-2z M48 27h2v1h-2z M52 27h1v1h-1z"/>
+  <path fill="#000" d="M5 27h4v1h-4z M12 27h2v1h-2z M17 27h1v1h-1z M19 27h8v1h-8z M30 27h5v1h-5z M36 27h4v1h-4z M43 27h2v1h-2z M48 27h2v1h-2z M52 27h1v1h-1z"/>
   <path fill="#000" d="M4 28h3v1h-3z M8 28h1v1h-1z M10 28h1v1h-1z M12 28h1v1h-1z M16 28h4v1h-4z M24 28h3v1h-3z M28 28h1v1h-1z M30 28h1v1h-1z M34 28h1v1h-1z M37 28h1v1h-1z M39 28h2v1h-2z M42 28h3v1h-3z M46 28h1v1h-1z M48 28h1v1h-1z M50 28h3v1h-3z"/>
   <path fill="#000" d="M4 29h1v1h-1z M6 29h1v1h-1z M8 29h1v1h-1z M12 29h3v1h-3z M21 29h1v1h-1z M23 29h1v1h-1z M26 29h1v1h-1z M30 29h1v1h-1z M33 29h3v1h-3z M39 29h3v1h-3z M43 29h2v1h-2z M48 29h1v1h-1z M51 29h1v1h-1z"/>
-  <path fill="#000" d="M4 30h1v1h-1z M7 30h6v1h-6z M14 30h1v1h-1z M16 30h2v1h-2z M20 30h1v1h-1z M23 30h1v1h-1z M26 30h5v1h-5z M32 30h1v1h-1z M36 30h1v1h-1z M38 30h2v1h-2z M42 30h7v1h-7z M51 30h2v1h-2z"/>
-  <path fill="#000" d="M5 31h1v1h-1z M8 31h1v1h-1z M14 31h1v1h-1z M16 31h1v1h-1z M19 31h1v1h-1z M22 31h3v1h-3z M28 31h1v1h-1z M31 31h3v1h-3z M35 31h3v1h-3z M39 31h1v1h-1z M42 31h1v1h-1z M44 31h1v1h-1z"/>
-  <path fill="#000" d="M5 32h2v1h-2z M9 32h3v1h-3z M17 32h1v1h-1z M19 32h1v1h-1z M21 32h1v1h-1z M23 32h1v1h-1z M26 32h1v1h-1z M28 32h3v1h-3z M35 32h1v1h-1z M39 32h3v1h-3z M43 32h2v1h-2z M47 32h2v1h-2z M50 32h2v1h-2z"/>
-  <path fill="#000" d="M4 33h1v1h-1z M6 33h1v1h-1z M12 33h1v1h-1z M14 33h1v1h-1z M19 33h2v1h-2z M25 33h3v1h-3z M29 33h2v1h-2z M32 33h5v1h-5z M40 33h2v1h-2z M43 33h5v1h-5z M49 33h1v1h-1z"/>
-  <path fill="#000" d="M5 34h4v1h-4z M10 34h1v1h-1z M18 34h1v1h-1z M20 34h1v1h-1z M23 34h1v1h-1z M26 34h1v1h-1z M29 34h1v1h-1z M31 34h1v1h-1z M33 34h1v1h-1z M37 34h4v1h-4z M42 34h11v1h-11z"/>
-  <path fill="#000" d="M4 35h2v1h-2z M8 35h1v1h-1z M11 35h1v1h-1z M13 35h1v1h-1z M19 35h1v1h-1z M21 35h1v1h-1z M25 35h1v1h-1z M27 35h1v1h-1z M30 35h1v1h-1z M34 35h2v1h-2z M37 35h1v1h-1z M39 35h2v1h-2z M44 35h1v1h-1z M47 35h1v1h-1z M49 35h1v1h-1z M52 35h1v1h-1z"/>
+  <path fill="#000" d="M7 30h6v1h-6z M14 30h1v1h-1z M16 30h2v1h-2z M20 30h1v1h-1z M23 30h1v1h-1z M26 30h5v1h-5z M32 30h1v1h-1z M36 30h1v1h-1z M38 30h2v1h-2z M42 30h7v1h-7z M51 30h2v1h-2z"/>
+  <path fill="#000" d="M4 31h1v1h-1z M8 31h1v1h-1z M14 31h1v1h-1z M16 31h1v1h-1z M19 31h1v1h-1z M22 31h3v1h-3z M28 31h1v1h-1z M31 31h3v1h-3z M35 31h3v1h-3z M39 31h1v1h-1z M42 31h1v1h-1z M44 31h1v1h-1z"/>
+  <path fill="#000" d="M4 32h1v1h-1z M6 32h1v1h-1z M9 32h3v1h-3z M15 32h3v1h-3z M19 32h3v1h-3z M23 32h1v1h-1z M26 32h1v1h-1z M28 32h3v1h-3z M35 32h1v1h-1z M39 32h3v1h-3z M43 32h2v1h-2z M47 32h2v1h-2z M50 32h2v1h-2z"/>
+  <path fill="#000" d="M4 33h1v1h-1z M6 33h1v1h-1z M12 33h1v1h-1z M14 33h1v1h-1z M16 33h1v1h-1z M19 33h2v1h-2z M25 33h3v1h-3z M29 33h2v1h-2z M32 33h5v1h-5z M40 33h2v1h-2z M43 33h5v1h-5z M49 33h1v1h-1z"/>
+  <path fill="#000" d="M5 34h4v1h-4z M10 34h1v1h-1z M18 34h2v1h-2z M23 34h1v1h-1z M26 34h1v1h-1z M29 34h1v1h-1z M31 34h1v1h-1z M33 34h1v1h-1z M37 34h4v1h-4z M42 34h11v1h-11z"/>
+  <path fill="#000" d="M4 35h2v1h-2z M8 35h1v1h-1z M11 35h1v1h-1z M13 35h1v1h-1z M16 35h1v1h-1z M19 35h3v1h-3z M25 35h1v1h-1z M27 35h1v1h-1z M30 35h1v1h-1z M34 35h2v1h-2z M37 35h1v1h-1z M39 35h2v1h-2z M44 35h1v1h-1z M47 35h1v1h-1z M49 35h1v1h-1z M52 35h1v1h-1z"/>
   <path fill="#000" d="M6 36h1v1h-1z M8 36h3v1h-3z M15 36h2v1h-2z M19 36h1v1h-1z M22 36h1v1h-1z M24 36h2v1h-2z M27 36h2v1h-2z M30 36h2v1h-2z M33 36h2v1h-2z M40 36h2v1h-2z M43 36h3v1h-3z M47 36h1v1h-1z M49 36h3v1h-3z"/>
   <path fill="#000" d="M4 37h2v1h-2z M7 37h3v1h-3z M11 37h1v1h-1z M14 37h1v1h-1z M16 37h3v1h-3z M20 37h1v1h-1z M22 37h2v1h-2z M25 37h5v1h-5z M34 37h2v1h-2z M37 37h1v1h-1z M39 37h2v1h-2z M43 37h3v1h-3z M47 37h1v1h-1z M51 37h1v1h-1z"/>
-  <path fill="#000" d="M7 38h2v1h-2z M10 38h2v1h-2z M13 38h1v1h-1z M19 38h2v1h-2z M25 38h1v1h-1z M27 38h3v1h-3z M31 38h1v1h-1z M33 38h2v1h-2z M40 38h2v1h-2z M46 38h2v1h-2z M49 38h1v1h-1z M52 38h1v1h-1z"/>
-  <path fill="#000" d="M5 39h1v1h-1z M7 39h1v1h-1z M11 39h9v1h-9z M21 39h3v1h-3z M25 39h3v1h-3z M29 39h2v1h-2z M32 39h1v1h-1z M34 39h4v1h-4z M39 39h1v1h-1z M41 39h1v1h-1z M44 39h1v1h-1z M47 39h2v1h-2z M52 39h1v1h-1z"/>
-  <path fill="#000" d="M4 40h1v1h-1z M6 40h1v1h-1z M10 40h2v1h-2z M16 40h1v1h-1z M20 40h2v1h-2z M24 40h1v1h-1z M29 40h1v1h-1z M33 40h1v1h-1z M35 40h1v1h-1z M38 40h1v1h-1z M40 40h2v1h-2z M43 40h3v1h-3z M47 40h2v1h-2z M50 40h3v1h-3z"/>
-  <path fill="#000" d="M4 41h1v1h-1z M6 41h1v1h-1z M15 41h1v1h-1z M21 41h3v1h-3z M25 41h4v1h-4z M31 41h2v1h-2z M34 41h3v1h-3z M41 41h1v1h-1z M45 41h1v1h-1z M47 41h1v1h-1z M50 41h2v1h-2z"/>
-  <path fill="#000" d="M5 42h1v1h-1z M9 42h4v1h-4z M15 42h1v1h-1z M17 42h1v1h-1z M20 42h3v1h-3z M26 42h4v1h-4z M31 42h1v1h-1z M35 42h2v1h-2z M38 42h2v1h-2z M41 42h7v1h-7z M50 42h3v1h-3z"/>
+  <path fill="#000" d="M7 38h2v1h-2z M10 38h2v1h-2z M13 38h1v1h-1z M17 38h6v1h-6z M25 38h1v1h-1z M27 38h3v1h-3z M31 38h1v1h-1z M33 38h2v1h-2z M40 38h2v1h-2z M46 38h2v1h-2z M49 38h1v1h-1z M52 38h1v1h-1z"/>
+  <path fill="#000" d="M5 39h1v1h-1z M7 39h1v1h-1z M11 39h2v1h-2z M14 39h3v1h-3z M19 39h1v1h-1z M21 39h3v1h-3z M25 39h3v1h-3z M29 39h2v1h-2z M32 39h1v1h-1z M34 39h4v1h-4z M39 39h1v1h-1z M41 39h1v1h-1z M44 39h1v1h-1z M47 39h2v1h-2z M52 39h1v1h-1z"/>
+  <path fill="#000" d="M4 40h1v1h-1z M8 40h3v1h-3z M12 40h1v1h-1z M14 40h1v1h-1z M16 40h1v1h-1z M18 40h1v1h-1z M20 40h1v1h-1z M22 40h1v1h-1z M24 40h1v1h-1z M29 40h1v1h-1z M33 40h1v1h-1z M35 40h1v1h-1z M38 40h1v1h-1z M40 40h2v1h-2z M43 40h3v1h-3z M47 40h2v1h-2z M50 40h3v1h-3z"/>
+  <path fill="#000" d="M4 41h1v1h-1z M6 41h4v1h-4z M11 41h5v1h-5z M18 41h1v1h-1z M21 41h3v1h-3z M25 41h4v1h-4z M31 41h2v1h-2z M34 41h3v1h-3z M41 41h1v1h-1z M45 41h1v1h-1z M47 41h1v1h-1z M50 41h2v1h-2z"/>
+  <path fill="#000" d="M5 42h1v1h-1z M9 42h2v1h-2z M15 42h1v1h-1z M17 42h1v1h-1z M20 42h3v1h-3z M26 42h4v1h-4z M31 42h1v1h-1z M35 42h2v1h-2z M38 42h2v1h-2z M41 42h7v1h-7z M50 42h3v1h-3z"/>
   <path fill="#000" d="M5 43h3v1h-3z M13 43h2v1h-2z M16 43h2v1h-2z M19 43h1v1h-1z M21 43h2v1h-2z M25 43h4v1h-4z M30 43h4v1h-4z M35 43h3v1h-3z M39 43h1v1h-1z M44 43h2v1h-2z M47 43h1v1h-1z"/>
   <path fill="#000" d="M4 44h3v1h-3z M10 44h5v1h-5z M20 44h3v1h-3z M24 44h1v1h-1z M26 44h5v1h-5z M33 44h3v1h-3z M37 44h2v1h-2z M40 44h9v1h-9z M50 44h1v1h-1z M52 44h1v1h-1z"/>
   <path fill="#000" d="M12 45h1v1h-1z M15 45h2v1h-2z M19 45h1v1h-1z M22 45h2v1h-2z M25 45h2v1h-2z M30 45h1v1h-1z M32 45h4v1h-4z M39 45h3v1h-3z M44 45h1v1h-1z M48 45h1v1h-1z"/>
   <path fill="#000" d="M4 46h7v1h-7z M15 46h3v1h-3z M19 46h6v1h-6z M26 46h1v1h-1z M28 46h1v1h-1z M30 46h1v1h-1z M32 46h3v1h-3z M37 46h4v1h-4z M42 46h1v1h-1z M44 46h1v1h-1z M46 46h1v1h-1z M48 46h2v1h-2z M51 46h2v1h-2z"/>
   <path fill="#000" d="M4 47h1v1h-1z M10 47h1v1h-1z M12 47h1v1h-1z M16 47h1v1h-1z M19 47h2v1h-2z M25 47h2v1h-2z M30 47h7v1h-7z M38 47h2v1h-2z M41 47h1v1h-1z M44 47h1v1h-1z M48 47h1v1h-1z M51 47h2v1h-2z"/>
-  <path fill="#000" d="M4 48h1v1h-1z M6 48h3v1h-3z M10 48h1v1h-1z M12 48h1v1h-1z M14 48h1v1h-1z M17 48h2v1h-2z M21 48h1v1h-1z M26 48h5v1h-5z M34 48h2v1h-2z M37 48h6v1h-6z M44 48h9v1h-9z"/>
-  <path fill="#000" d="M4 49h1v1h-1z M6 49h3v1h-3z M10 49h1v1h-1z M12 49h2v1h-2z M15 49h1v1h-1z M17 49h1v1h-1z M19 49h1v1h-1z M21 49h1v1h-1z M23 49h2v1h-2z M26 49h2v1h-2z M31 49h5v1h-5z M41 49h1v1h-1z M43 49h2v1h-2z M46 49h4v1h-4z M51 49h1v1h-1z"/>
-  <path fill="#000" d="M4 50h1v1h-1z M6 50h3v1h-3z M10 50h1v1h-1z M12 50h2v1h-2z M17 50h1v1h-1z M22 50h1v1h-1z M24 50h1v1h-1z M26 50h4v1h-4z M32 50h2v1h-2z M36 50h1v1h-1z M40 50h1v1h-1z M42 50h1v1h-1z M45 50h3v1h-3z M50 50h3v1h-3z"/>
-  <path fill="#000" d="M4 51h1v1h-1z M10 51h1v1h-1z M14 51h1v1h-1z M16 51h1v1h-1z M18 51h1v1h-1z M20 51h1v1h-1z M23 51h6v1h-6z M31 51h1v1h-1z M33 51h1v1h-1z M38 51h1v1h-1z M40 51h4v1h-4z M45 51h2v1h-2z M52 51h1v1h-1z"/>
+  <path fill="#000" d="M4 48h1v1h-1z M6 48h3v1h-3z M10 48h1v1h-1z M12 48h1v1h-1z M14 48h1v1h-1z M16 48h4v1h-4z M21 48h1v1h-1z M26 48h5v1h-5z M34 48h2v1h-2z M37 48h6v1h-6z M44 48h9v1h-9z"/>
+  <path fill="#000" d="M4 49h1v1h-1z M6 49h3v1h-3z M10 49h1v1h-1z M12 49h2v1h-2z M17 49h1v1h-1z M19 49h3v1h-3z M23 49h2v1h-2z M26 49h2v1h-2z M31 49h5v1h-5z M41 49h1v1h-1z M43 49h2v1h-2z M46 49h4v1h-4z M51 49h1v1h-1z"/>
+  <path fill="#000" d="M4 50h1v1h-1z M6 50h3v1h-3z M10 50h1v1h-1z M12 50h2v1h-2z M16 50h2v1h-2z M19 50h1v1h-1z M22 50h1v1h-1z M24 50h1v1h-1z M26 50h4v1h-4z M32 50h2v1h-2z M36 50h1v1h-1z M40 50h1v1h-1z M42 50h1v1h-1z M45 50h3v1h-3z M50 50h3v1h-3z"/>
+  <path fill="#000" d="M4 51h1v1h-1z M10 51h1v1h-1z M14 51h2v1h-2z M18 51h2v1h-2z M23 51h6v1h-6z M31 51h1v1h-1z M33 51h1v1h-1z M38 51h1v1h-1z M40 51h4v1h-4z M45 51h2v1h-2z M52 51h1v1h-1z"/>
   <path fill="#000" d="M4 52h7v1h-7z M12 52h1v1h-1z M14 52h5v1h-5z M20 52h5v1h-5z M28 52h2v1h-2z M32 52h1v1h-1z M35 52h5v1h-5z M42 52h1v1h-1z M49 52h4v1h-4z"/>
 </svg>'
 
@@ -431,19 +452,19 @@ cis_l2_inventory='2.2
 
 # One checksum-bound source registry drives native and admin-side currency.
 # Assembly fails if any bound static table/file differs from this metadata.
-CURRENCY_REGISTRY_SCHEMA='aixray-source-registry/1'
+CURRENCY_REGISTRY_SCHEMA='ptxray-source-registry/1'
 CURRENCY_SOURCE_COUNT=8
 set -A CR_ID 'ibm-aix-lifecycle' 'ibm-security-advisories' 'cisa-kev' 'ibm-apar-csv' 'ibm-flrtvc' 'ibm-flrt-firmware' 'cis-ibm-aix' 'disa-stig-ibm-aix-7'
 set -A CR_LABEL 'IBM AIX lifecycle reference data' 'IBM security advisory seed' 'CISA Known Exploited Vulnerabilities catalog' 'IBM FLRT apar.csv' 'IBM FLRTVC engine' 'IBM FLRT firmware lifecycle response' 'CIS IBM AIX benchmark' 'DISA STIG for IBM AIX 7.x'
 set -A CR_CLASS 'advisory' 'advisory' 'cve' 'apar' 'flrt' 'flrt' 'benchmark' 'benchmark'
 set -A CR_REQUIRED '1' '1' '1' '1' '1' '1' '1' '1'
 set -A CR_LOADED '1' '1' '0' '0' '0' '0' '1' '1'
-set -A CR_VERSION 'sha256:ac3ee68c3f9369632bcd9c01241a9fa993ece950c133af7e3e5ada2a25a48d93' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
+set -A CR_VERSION 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
 set -A CR_VERSION_BASIS 'content-sha256' 'content-sha256' 'unknown' 'unknown' 'unknown' 'unknown' 'publisher-version' 'publisher-version'
-set -A CR_AS_OF '2026-08-18' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
+set -A CR_AS_OF '2026-08-15' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
 set -A CR_AS_OF_BASIS 'curator-verified' 'curator-review' 'unknown' 'unknown' 'unknown' 'unknown' 'curator-verified' 'publisher-benchmark-date'
-set -A CR_SHA256 'sha256:ac3ee68c3f9369632bcd9c01241a9fa993ece950c133af7e3e5ada2a25a48d93' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
-set -A CR_LOCATOR 'embedded lifecycle tables' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'operator-supplied local IBM FLRT fetch envelope' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
+set -A CR_SHA256 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
+set -A CR_LOCATOR 'https://www.ibm.com/support/pages/aix-standard-edition720 (no announced AIX 7.2 EOS shown; supported state is a curator inference from that absence); https://www.ibm.com/support/pages/aix-support-lifecycle-information (AIX 7.2 TL5 EoFS: To be determined)' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'operator-supplied local IBM FLRT fetch envelope' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
 set -A CR_THRESHOLD '30' '30' '30' '30' '30' '30' '180' '180'
 set -A CR_INTEGRITY 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
 set -A CR_PROVENANCE 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
@@ -616,6 +637,636 @@ KtIVrykLMk7BGVjEQnRmSEk2tnxS/W9YaBmNdXZUSw3/OR8rVY/liX9FtV9GzydN8er/IYeJIgLLMKMb
 # later dirname-$0 self-location done inside a function is silently wrong on one
 # of the two target shells. AIXRAY_SELF is the only self-path source used below.
 AIXRAY_SELF=$0
+PTXRAY_SELF=$AIXRAY_SELF
+PTXRAY_DEFS_INTEGRATION=1
+PTXRAY_DEFS_DOWNLOADER_SHA256='8720efb8c04366da97c4b8f187ef6dcfb924d17fc38d1898900da813694822af'
+# Shared post-identity-gate selector for the adjacent signed-data downloader.
+# This module contains no transport implementation and no endpoint. Assemblers
+# bind the exact same-release downloader digest above it.
+PTXRAY_DEFS_SELECTED=0
+PTXRAY_DEFS_SELECTED_MODE=none
+PTXRAY_DEFS_SEQUENCE=unknown
+PTXRAY_DEFS_CREATED_AT=unknown
+PTXRAY_DEFS_AGE_DAYS=unknown
+PTXRAY_DEFS_FRESHNESS=unavailable
+PTXRAY_DEFS_KEV_VERSION=unknown
+PTXRAY_DEFS_KEV_ASOF=unknown
+PTXRAY_DEFS_KEV_SHA256=unknown
+PTXRAY_DEFS_APAR_VERSION=unknown
+PTXRAY_DEFS_APAR_ASOF=unknown
+PTXRAY_DEFS_APAR_SHA256=unknown
+PTXRAY_DEFS_GENERATION=none
+PTXRAY_DEFS_UPDATE_ERROR=none
+PTXRAY_DEFS_OUTCOME=not-requested
+PTXRAY_DEFS_PATH=
+PTXRAY_DEFS_SNAPSHOT_DIR=
+PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+PTXRAY_DEFS_SNAPSHOT_KEV=
+PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES=
+PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+PTXRAY_DEFS_SNAPSHOT_APAR=
+PTXRAY_DEFS_SNAPSHOT_APAR_ID=
+
+function ptxray_defs_self_dir {
+  typeset resolved
+  case "$PTXRAY_SELF" in
+    */*) (CDPATH= cd -- "$(dirname "$PTXRAY_SELF")" 2>/dev/null \
+            && (pwd -P 2>/dev/null || pwd));;
+    *)
+      resolved=$(whence -p "$PTXRAY_SELF" 2>/dev/null) || return 1
+      case "$resolved" in
+        */*) (CDPATH= cd -- "$(dirname "$resolved")" 2>/dev/null \
+                && (pwd -P 2>/dev/null || pwd));;
+        *) return 1;;
+      esac
+      ;;
+  esac
+}
+
+function ptxray_defs_directory_safe {
+  typeset directory listing mode owner me group_write other_write sticky
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ld "$directory" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = d ] || return 1
+  [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+    || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ] || return 1
+  group_write=$(printf '%s' "$mode" | cut -c6)
+  other_write=$(printf '%s' "$mode" | cut -c9)
+  sticky=$(printf '%s' "$mode" | cut -c10)
+  if [ "$group_write" = w ] || [ "$other_write" = w ]; then
+    case "$sticky" in t|T) ;; *) return 1;; esac
+  fi
+  return 0
+}
+
+function ptxray_defs_ancestry_safe {
+  typeset directory parent
+  directory=$1
+  case "$directory" in /*) ;; *) return 1;; esac
+  while :; do
+    ptxray_defs_directory_safe "$directory" || return 1
+    [ "$directory" = / ] && return 0
+    parent=${directory%/*}; [ -n "$parent" ] || parent=/
+    [ "$parent" != "$directory" ] || return 1
+    directory=$parent
+  done
+}
+
+function ptxray_defs_select_openssl {
+  typeset candidate listing mode owner links me directory
+  for candidate in \
+      /usr/bin/openssl \
+      /opt/freeware/bin/openssl \
+      /QOpenSys/pkgs/bin/openssl
+  do
+    [ -x "$candidate" ] && [ -f "$candidate" ] && [ ! -L "$candidate" ] \
+      || continue
+    listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || continue
+    mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+    links=$(printf '%s\n' "$listing" | awk '{print $2}')
+    owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+    me=$(id -un 2>/dev/null) || return 1
+    [ "$(printf '%s' "$mode" | cut -c1)" = - ] && [ "$links" = 1 ] \
+      && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = QSYS ] \
+           || [ "$owner" = QSECOFR ] || [ "$owner" = "$me" ]; } \
+      && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+      && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || continue
+    directory=$(CDPATH= cd -- "$(dirname "$candidate")" 2>/dev/null \
+      && (pwd -P 2>/dev/null || pwd)) || continue
+    ptxray_defs_ancestry_safe "$directory" || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+function ptxray_defs_sha256_file {
+  typeset verifier digest
+  verifier=$(ptxray_defs_select_openssl) || return 1
+  digest=$("$verifier" dgst -sha256 -r "$1" 2>/dev/null | awk '{print $1}') \
+    || return 1
+  printf '%s\n' "$digest" | awk '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    hex64($0){print;ok=1}END{exit ok?0:1}'
+}
+
+function ptxray_defs_private_dir_identity {
+  typeset directory listing inode mode owner me
+  directory=$1
+  [ -d "$directory" ] && [ ! -L "$directory" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$directory" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode" in ''|*[!0-9]*) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = 'drwx------' ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s\n' "$inode" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_private_file_identity {
+  typeset path listing inode mode links owner size me
+  path=$1
+  [ -f "$path" ] && [ ! -L "$path" ] && [ -r "$path" ] || return 1
+  listing=$(LC_ALL=C ls -ldi "$path" 2>/dev/null) || return 1
+  inode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  mode=$(printf '%s\n' "$listing" | awk '{print $2}')
+  links=$(printf '%s\n' "$listing" | awk '{print $3}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $4}')
+  size=$(printf '%s\n' "$listing" | awk '{print $6}')
+  me=$(id -un 2>/dev/null) || return 1
+  case "$inode:$links:$size" in *[!0-9:]*|::*|*:|:) return 1;; esac
+  [ "$(printf '%s' "$mode" | cut -c1-10)" = '-rw-------' ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = QSECOFR ] \
+         || [ "$owner" = "$me" ]; } || return 1
+  printf '%s|%s|%s|%s\n' "$inode" "$size" "$owner" \
+    "$(printf '%s' "$mode" | cut -c1-10)"
+}
+
+function ptxray_defs_cleanup_snapshot {
+  typeset directory directory_id
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  directory=$PTXRAY_DEFS_SNAPSHOT_DIR
+  directory_id=$PTXRAY_DEFS_SNAPSHOT_DIR_ID
+  PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
+  PTXRAY_DEFS_SNAPSHOT_DIR=
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=
+  [ -n "$directory" ] \
+    && [ "$directory_id" = "$(ptxray_defs_private_dir_identity \
+      "$directory" 2>/dev/null)" ] || return 1
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_KEV" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_KEV" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_KEV" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_CVES" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_CVES" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_CVES" 2>/dev/null || :
+  fi
+  if [ -n "$PTXRAY_DEFS_SNAPSHOT_APAR" ] \
+      && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = \
+        "$(ptxray_defs_private_file_identity "$PTXRAY_DEFS_SNAPSHOT_APAR" \
+          2>/dev/null)" ]; then
+    rm -f "$PTXRAY_DEFS_SNAPSHOT_APAR" 2>/dev/null || :
+  fi
+  PTXRAY_DEFS_SNAPSHOT_KEV=
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES=
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=
+  PTXRAY_DEFS_SNAPSHOT_APAR=
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=
+  rmdir "$directory" 2>/dev/null || return 1
+  return 0
+}
+
+function ptxray_defs_arm_snapshot_cleanup {
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 0
+  trap 'ptxray_defs_cleanup_snapshot' EXIT
+  trap 'ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+}
+
+function ptxray_defs_snapshot_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' \
+    -v generation="$PTXRAY_DEFS_GENERATION" \
+    -v kev="$PTXRAY_DEFS_KEV_SHA256" \
+    -v apar="$PTXRAY_DEFS_APAR_SHA256" '
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=7||$1!="PTXRAY-DEFS"||$2!="1"||$3!="snapshot")bad=1
+      if($4!="generation=" generation)bad=1
+      if($5!="kev_sha256=" kev)bad=1
+      if($6!~/^cves_sha256=/||!hex64(substr($6,13)))bad=1
+      if($7!="apar_sha256=" apar)bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_prepare_snapshot {
+  typeset base physical try candidate output rc p1 p2 p3 generation kev cves apar
+  typeset actual
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  [ -n "$PTXRAY_DEFS_PATH" ] || return 1
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  try=0
+  while [ "$try" -lt 20 ]; do
+    candidate=$physical/.ptxray-definitions.$$.$try
+    if mkdir -m 700 "$candidate" 2>/dev/null; then
+      PTXRAY_DEFS_SNAPSHOT_DIR=$candidate
+      PTXRAY_DEFS_SNAPSHOT_ACTIVE=1
+      break
+    fi
+    try=$((try+1))
+  done
+  [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ] || return 1
+  PTXRAY_DEFS_SNAPSHOT_DIR_ID=$(ptxray_defs_private_dir_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_DIR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  ptxray_defs_arm_snapshot_cleanup
+  output=$("$PTXRAY_DEFS_PATH" --snapshot "$PTXRAY_DEFS_GENERATION" \
+    "$candidate"); rc=$?
+  [ "$rc" -eq 0 ] && ptxray_defs_snapshot_protocol_valid "$output" \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  IFS='|' read p1 p2 p3 generation kev cves apar <<PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+$output
+PTXRAY_DEFS_SNAPSHOT_PROTOCOL
+  PTXRAY_DEFS_SNAPSHOT_CVES_SHA256=${cves#cves_sha256=}
+  PTXRAY_DEFS_SNAPSHOT_KEV=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev.json
+  PTXRAY_DEFS_SNAPSHOT_CVES=$PTXRAY_DEFS_SNAPSHOT_DIR/cisa-kev-cves.txt
+  PTXRAY_DEFS_SNAPSHOT_APAR=$PTXRAY_DEFS_SNAPSHOT_DIR/ibm-apar.csv
+  PTXRAY_DEFS_SNAPSHOT_KEV_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_KEV") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_KEV") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_KEV_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_KEV_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_KEV")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_CVES_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_CVES") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_CVES") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_CVES_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_CVES")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  PTXRAY_DEFS_SNAPSHOT_APAR_ID=$(ptxray_defs_private_file_identity \
+    "$PTXRAY_DEFS_SNAPSHOT_APAR") || { ptxray_defs_cleanup_snapshot; return 1; }
+  actual=$(ptxray_defs_sha256_file "$PTXRAY_DEFS_SNAPSHOT_APAR") \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  [ "$actual" = "$PTXRAY_DEFS_APAR_SHA256" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_APAR_ID" = "$(ptxray_defs_private_file_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_APAR")" ] \
+    && [ "$PTXRAY_DEFS_SNAPSHOT_DIR_ID" = "$(ptxray_defs_private_dir_identity \
+      "$PTXRAY_DEFS_SNAPSHOT_DIR")" ] \
+    || { ptxray_defs_cleanup_snapshot; return 1; }
+  return 0
+}
+
+function ptxray_defs_resolve {
+  typeset selfdir candidate listing mode owner links me actual
+  PTXRAY_DEFS_PATH=
+  selfdir=$(ptxray_defs_self_dir) || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unavailable
+    echo 'ptxray: cannot resolve the adjacent definitions downloader directory' >&2
+    return 1
+  }
+  ptxray_defs_ancestry_safe "$selfdir" || {
+    PTXRAY_DEFS_OUTCOME=downloader-path-unsafe
+    echo 'ptxray: adjacent definitions downloader directory ancestry is unsafe' >&2
+    return 1
+  }
+  candidate=$selfdir/ptxray-defs.sh
+  [ -f "$candidate" ] && [ ! -L "$candidate" ] && [ -x "$candidate" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-missing
+    echo 'ptxray: same-release adjacent ptxray-defs.sh is missing or unsafe' >&2
+    return 1
+  }
+  listing=$(LC_ALL=C ls -ld "$candidate" 2>/dev/null) || return 1
+  mode=$(printf '%s\n' "$listing" | awk '{print $1}')
+  links=$(printf '%s\n' "$listing" | awk '{print $2}')
+  owner=$(printf '%s\n' "$listing" | awk '{print $3}')
+  me=$(id -un 2>/dev/null) || return 1
+  [ "$(printf '%s' "$mode" | cut -c1)" = - ] \
+    && [ "$links" = 1 ] \
+    && { [ "$owner" = root ] || [ "$owner" = bin ] || [ "$owner" = "$me" ]; } \
+    && [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
+    && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || {
+      PTXRAY_DEFS_OUTCOME=downloader-file-unsafe
+      echo 'ptxray: same-release adjacent ptxray-defs.sh ownership or mode is unsafe' >&2
+      return 1
+    }
+  actual=$(ptxray_defs_sha256_file "$candidate") || {
+    PTXRAY_DEFS_OUTCOME=downloader-verifier-unavailable
+    echo 'ptxray: cannot verify the adjacent definitions downloader digest' >&2
+    return 1
+  }
+  [ "$actual" = "$PTXRAY_DEFS_DOWNLOADER_SHA256" ] || {
+    PTXRAY_DEFS_OUTCOME=downloader-integrity-mismatch
+    echo 'ptxray: adjacent ptxray-defs.sh does not match this runner release; it was not executed' >&2
+    return 1
+  }
+  PTXRAY_DEFS_PATH=$candidate
+  return 0
+}
+
+function ptxray_defs_protocol_valid {
+  printf '%s\n' "$1" | awk -F'|' '
+    function digits(s){return s~/^(0|[1-9][0-9]*)$/}
+    function positive(s){return s~/^[1-9][0-9]*$/&&length(s)<=18}
+    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function ymd(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/}
+    function dotted(s){return s~/^[0-9][0-9][0-9][0-9][.][0-9][0-9][.][0-9][0-9]$/}
+    function version(s){return length(s)>=1&&length(s)<=64&&s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/}
+    function created(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/}
+    function generation(s, a,n){n=split(s,a,"-");return n==3&&a[1]=="g"&&positive(a[2])&&hex64(a[3])}
+    NR!=1{bad=1}
+    NR==1{
+      if(NF!=15&&NF!=16)bad=1
+      if($1!="PTXRAY-DEFS"||$2!="1"||$3!="ok")bad=1
+      if($4!="update"&&$4!="cache"&&$4!="local"&&$4!="cache-fallback")bad=1
+      if($5!~/^sequence=/||!positive(substr($5,10)))bad=1
+      if($6!~/^created_at=/||!created(substr($6,12)))bad=1
+      if($7!~/^age_days=/||!digits(substr($7,10)))bad=1
+      if($8!="freshness=current"&&$8!="freshness=stale")bad=1
+      if($9!~/^kev_version=/||!dotted(substr($9,13)))bad=1
+      if($10!~/^kev_as_of=/||!ymd(substr($10,11)))bad=1
+      if($11!~/^kev_sha256=/||!hex64(substr($11,12)))bad=1
+      if($12!~/^apar_version=/||!version(substr($12,14)))bad=1
+      if($13!~/^apar_as_of=/||!ymd(substr($13,12)))bad=1
+      if($14!~/^apar_sha256=/||!hex64(substr($14,13)))bad=1
+      if($15!~/^generation=/||!generation(substr($15,12)))bad=1
+      if(NF==16){
+        if($4!="cache-fallback"||$16!~/^error=(transport|size-limit|signature|rollback|malformed|unsafe-cache|lock-contention)$/)bad=1
+      } else if($4=="cache-fallback")bad=1
+    }
+    END{exit bad||NR!=1?1:0}'
+}
+
+function ptxray_defs_accept_protocol {
+  typeset line p1 p2 p3 mode sequence created age freshness kev_version kev_asof
+  typeset kev_sha apar_version apar_asof apar_sha generation error
+  line=$1
+  ptxray_defs_protocol_valid "$line" || return 1
+  IFS='|' read p1 p2 p3 mode sequence created age freshness kev_version kev_asof \
+    kev_sha apar_version apar_asof apar_sha generation error <<PTXRAY_DEFS_PROTOCOL
+$line
+PTXRAY_DEFS_PROTOCOL
+  PTXRAY_DEFS_SELECTED=1
+  PTXRAY_DEFS_SELECTED_MODE=$mode
+  PTXRAY_DEFS_SEQUENCE=${sequence#sequence=}
+  PTXRAY_DEFS_CREATED_AT=${created#created_at=}
+  PTXRAY_DEFS_AGE_DAYS=${age#age_days=}
+  PTXRAY_DEFS_FRESHNESS=${freshness#freshness=}
+  PTXRAY_DEFS_KEV_VERSION=${kev_version#kev_version=}
+  PTXRAY_DEFS_KEV_ASOF=${kev_asof#kev_as_of=}
+  PTXRAY_DEFS_KEV_SHA256=${kev_sha#kev_sha256=}
+  PTXRAY_DEFS_APAR_VERSION=${apar_version#apar_version=}
+  PTXRAY_DEFS_APAR_ASOF=${apar_asof#apar_as_of=}
+  PTXRAY_DEFS_APAR_SHA256=${apar_sha#apar_sha256=}
+  PTXRAY_DEFS_GENERATION=${generation#generation=}
+  case "$error" in error=*) PTXRAY_DEFS_UPDATE_ERROR=${error#error=};; *) PTXRAY_DEFS_UPDATE_ERROR=none;; esac
+  PTXRAY_DEFS_OUTCOME=verified
+  return 0
+}
+
+function ptxray_defs_attempt {
+  typeset requested argument explicit output rc
+  requested=$1; argument=${2:-}; explicit=${3:-0}
+  if ! ptxray_defs_resolve; then
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if [ "$requested" = --local ]; then
+    output=$("$PTXRAY_DEFS_PATH" --local "$argument"); rc=$?
+  else
+    output=$("$PTXRAY_DEFS_PATH" "$requested"); rc=$?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    PTXRAY_DEFS_OUTCOME=downloader-refused
+    [ "$explicit" -eq 1 ] && return 2
+    return 0
+  fi
+  if ! ptxray_defs_accept_protocol "$output"; then
+    PTXRAY_DEFS_OUTCOME=downloader-protocol-invalid
+    echo 'ptxray: adjacent definitions downloader returned an invalid status protocol' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  if ! ptxray_defs_prepare_snapshot; then
+    PTXRAY_DEFS_SELECTED=0
+    PTXRAY_DEFS_OUTCOME=snapshot-refused
+    echo 'ptxray: verified definitions could not be exported to a private run snapshot' >&2
+    [ "$explicit" -eq 1 ] && return 2
+  fi
+  return 0
+}
+
+function ptxray_defs_read_payload {
+  typeset source path expected actual before
+  source=$1
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 1
+  case "$source" in
+    cisa-kev)
+      path=$PTXRAY_DEFS_SNAPSHOT_KEV
+      expected=$PTXRAY_DEFS_KEV_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_KEV_ID
+      ;;
+    cisa-kev-cves)
+      path=$PTXRAY_DEFS_SNAPSHOT_CVES
+      expected=$PTXRAY_DEFS_SNAPSHOT_CVES_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_CVES_ID
+      ;;
+    ibm-apar-csv)
+      path=$PTXRAY_DEFS_SNAPSHOT_APAR
+      expected=$PTXRAY_DEFS_APAR_SHA256
+      before=$PTXRAY_DEFS_SNAPSHOT_APAR_ID
+      ;;
+    *) return 1;;
+  esac
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ] || return 1
+  actual=$(ptxray_defs_sha256_file "$path") || return 1
+  [ "$actual" = "$expected" ] || return 1
+  cat "$path" || return 1
+  [ "$before" = "$(ptxray_defs_private_file_identity "$path")" ]
+}
+
+function ptxray_defs_copy_payload {
+  typeset source destination expected actual
+  source=$1; destination=$2
+  case "$source" in
+    cisa-kev) expected=$PTXRAY_DEFS_KEV_SHA256;;
+    ibm-apar-csv) expected=$PTXRAY_DEFS_APAR_SHA256;;
+    *) return 1;;
+  esac
+  [ ! -e "$destination" ] && [ ! -L "$destination" ] || return 1
+  (set -C; umask 077; : >"$destination") 2>/dev/null || return 1
+  if ! ptxray_defs_read_payload "$source" >"$destination"; then
+    rm -f "$destination"
+    return 1
+  fi
+  chmod 600 "$destination" 2>/dev/null || { rm -f "$destination"; return 1; }
+  actual=$(ptxray_defs_sha256_file "$destination") || {
+    rm -f "$destination"; return 1
+  }
+  [ "$actual" = "$expected" ] || { rm -f "$destination"; return 1; }
+  return 0
+}
+
+function ptxray_defs_show_verified_age {
+  [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] || return 0
+  printf 'PTxray signed definitions verified: %s days old (%s), mode %s.\n' \
+    "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+    "$PTXRAY_DEFS_SELECTED_MODE" >&2
+}
+
+# ksh88 has no portable `read -t`, and some implementations restart a read
+# after a trapped signal.  A background reader writes into a mode-700 directory
+# created atomically under a trusted temporary parent; the foreground polls for
+# at most 30 seconds. EOF and timeout share the fail-closed cancellation path.
+function ptxray_defs_tty_read {
+  typeset base physical try prompt_dir reader elapsed limit read_rc
+  PTXRAY_DEFS_TTY_VALUE=
+  base=${TMPDIR:-/tmp}
+  physical=$(CDPATH= cd -- "$base" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) || return 1
+  ptxray_defs_ancestry_safe "$physical" || return 1
+  prompt_dir=
+  try=0
+  while [ "$try" -lt 20 ]; do
+    if mkdir -m 700 "$physical/.ptxray-prompt.$$.$try" 2>/dev/null; then
+      prompt_dir=$physical/.ptxray-prompt.$$.$try
+      break
+    fi
+    try=$((try+1))
+  done
+  [ -n "$prompt_dir" ] || return 1
+  umask 077
+  awk 'NR==1{print;exit}' <&3 >"$prompt_dir/value" &
+  reader=$!
+  limit=30
+  if [ "${PTXRAY_PRIVATE_TEST_BUILD:-0}" -eq 1 ] \
+      && [ "${PTXRAY_TEST_DEFS_FAST_TIMEOUT:-0}" = 1 ]; then
+    limit=1
+  fi
+  elapsed=0
+  while [ "$elapsed" -lt "$limit" ] \
+      && kill -0 "$reader" >/dev/null 2>&1; do
+    sleep 1
+    elapsed=$((elapsed+1))
+  done
+  if kill -0 "$reader" >/dev/null 2>&1; then
+    kill -9 "$reader" >/dev/null 2>&1 || :
+    wait "$reader" 2>/dev/null || :
+    rm -f "$prompt_dir/value" 2>/dev/null || :
+    rmdir "$prompt_dir" 2>/dev/null || :
+    return 1
+  fi
+  wait "$reader" 2>/dev/null
+  read_rc=$?
+  [ "$read_rc" -eq 0 ] \
+    && [ "$(wc -c <"$prompt_dir/value" 2>/dev/null | tr -d ' ')" -gt 0 ] \
+    || read_rc=1
+  PTXRAY_DEFS_TTY_VALUE=$(awk 'NR==1{print;exit}' "$prompt_dir/value" 2>/dev/null) \
+    || read_rc=1
+  rm -f "$prompt_dir/value" 2>/dev/null || read_rc=1
+  rmdir "$prompt_dir" 2>/dev/null || read_rc=1
+  [ "$read_rc" -eq 0 ]
+}
+
+function ptxray_defs_select_for_run {
+  typeset offline local_bundle answer local_path rc
+  offline=$1; local_bundle=$2
+  [ "$PTXRAY_DEFS_INTEGRATION" -eq 1 ] || return 0
+  if [ -n "$local_bundle" ]; then
+    ptxray_defs_attempt --local "$local_bundle" 1; rc=$?
+    [ "$rc" -eq 0 ] || return "$rc"
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ "$offline" -eq 1 ]; then
+    ptxray_defs_attempt --cache '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if (: <> /dev/tty) 2>/dev/null; then
+    exec 3<> /dev/tty
+  else
+    ptxray_defs_attempt --update '' 0
+    ptxray_defs_show_verified_age
+    return 0
+  fi
+  if [ -t 3 ]; then
+    while :; do
+      printf '%s\n' \
+        'PTxray signed definitions' \
+        '  Cache age: verified after selection' \
+        '  1. Update signed definitions now (default)' \
+        '  2. Use the last valid signed cache' \
+        '  3. Use a local signed definitions bundle' \
+        '  4. Continue without definitions' >&3
+      printf '%s' 'Selection [1] (30 seconds): ' >&3
+      if ! ptxray_defs_tty_read; then
+        exec 3>&-
+        PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+        echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+        return 130
+      fi
+      answer=$PTXRAY_DEFS_TTY_VALUE
+      [ -n "$answer" ] || answer=1
+      case "$answer" in
+        1)
+          exec 3>&-
+          ptxray_defs_attempt --update '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        2)
+          exec 3>&-
+          ptxray_defs_attempt --cache '' 0
+          ptxray_defs_show_verified_age
+          return 0
+          ;;
+        3)
+          printf '%s' 'Local signed bundle path (30 seconds): ' >&3
+          if ! ptxray_defs_tty_read; then
+            exec 3>&-
+            PTXRAY_DEFS_OUTCOME=operator-prompt-cancelled
+            echo 'ptxray: definitions selection cancelled; no scan was run' >&2
+            return 130
+          fi
+          local_path=$PTXRAY_DEFS_TTY_VALUE
+          [ -n "$local_path" ] \
+            || { echo 'ptxray: a local signed bundle path is required' >&3; continue; }
+          exec 3>&-
+          ptxray_defs_attempt --local "$local_path" 1
+          rc=$?
+          ptxray_defs_show_verified_age
+          return "$rc"
+          ;;
+        4)
+          exec 3>&-
+          PTXRAY_DEFS_OUTCOME=operator-continued-without-definitions
+          return 0
+          ;;
+        *) echo 'ptxray: choose 1, 2, 3, or 4' >&3;;
+      esac
+    done
+  fi
+  exec 3>&-
+  ptxray_defs_attempt --update '' 0
+  ptxray_defs_show_verified_age
+  return 0
+}
+
+function ptxray_defs_summary {
+  if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ]; then
+    printf 'mode=%s; sequence=%s; signed=%s; age=%s days; freshness=%s; CISA KEV=%s (%s); IBM APAR=%s (%s); fallback_error=%s' \
+      "$PTXRAY_DEFS_SELECTED_MODE" "$PTXRAY_DEFS_SEQUENCE" "$PTXRAY_DEFS_CREATED_AT" \
+      "$PTXRAY_DEFS_AGE_DAYS" "$PTXRAY_DEFS_FRESHNESS" \
+      "$PTXRAY_DEFS_KEV_VERSION" "$PTXRAY_DEFS_KEV_ASOF" \
+      "$PTXRAY_DEFS_APAR_VERSION" "$PTXRAY_DEFS_APAR_ASOF" \
+      "$PTXRAY_DEFS_UPDATE_ERROR"
+  else
+    printf 'mode=none; outcome=%s' "$PTXRAY_DEFS_OUTCOME"
+  fi
+}
 
 FORMAT=html
 CURRENCY_STATUS_MODE=0
@@ -633,41 +1284,16 @@ FLRTVC_DATA_VERSION=""
 FLRTVC_DATA_VINTAGE=""
 FLRTVC_DATA_AGE=""
 FV_PROVENANCE_REAL=0
-# Operator-supplied definition bundle (--definitions-bundle <file>): a single
-# air-gap-carried .aixray-defs envelope framing ibm-apar-csv + ibm-flrtvc (+
-# optional cisa-kev). parse_definitions_bundle() validates the envelope and
-# payload digests and decodes the verified payloads into a private scratch dir;
-# the apar_scan invoke path then runs the engine exactly like the embedded
-# delivery path. Any framing/integrity failure refuses the WHOLE bundle with a
-# one-line diagnostic on stderr and leaves every currency row at the no-bundle
-# baseline (never partial ingestion).
+PTXRAY_DEFS_APAR_FOR_FLRTVC=0
+PTXRAY_KEV_MATCH_STATE=not-assessed
+PTXRAY_KEV_MATCH_COUNT=0
+PTXRAY_KEV_MATCH_NAMES=""
+# Operator-supplied definition bundles are signed data-only PTxray 1.5
+# envelopes. Only the adjacent digest-bound downloader verifies/imports them.
 DEFINITIONS_BUNDLE=""
 DEFINITIONS_BUNDLE_SEEN=0
-DEFINITIONS_BUNDLE_VALID=0
-DEFINITIONS_BUNDLE_SCRATCH=""
-DEFINITIONS_BUNDLE_ENGINE=""
-DEFINITIONS_BUNDLE_APAR=""
-DEFINITIONS_BUNDLE_ENGINE_SHA=""
-DEFINITIONS_BUNDLE_APAR_SHA=""
-DEFINITIONS_BUNDLE_ENGINE_VERSION=""
-DEFINITIONS_BUNDLE_ENGINE_ASOF=""
-DEFINITIONS_BUNDLE_APAR_ASOF=""
-DEFINITIONS_BUNDLE_ENGINE_VBASIS=""
-DEFINITIONS_BUNDLE_ENGINE_ABASIS=""
-DEFINITIONS_BUNDLE_APAR_VERSION=""
-DEFINITIONS_BUNDLE_APAR_VBASIS=""
-DEFINITIONS_BUNDLE_APAR_ABASIS=""
-DEFINITIONS_BUNDLE_HAS_KEV=0
-DEFINITIONS_BUNDLE_KEV_VERSION=""
-DEFINITIONS_BUNDLE_KEV_VBASIS=""
-DEFINITIONS_BUNDLE_KEV_ASOF=""
-DEFINITIONS_BUNDLE_KEV_ABASIS=""
-DEFINITIONS_BUNDLE_KEV_SHA=""
-DEFINITIONS_CACHE=""
-DEFINITIONS_CACHE_SEEN=0
-NO_DEFINITION_FETCH=0
-KEV_JSON=""
-KEV_JSON_SEEN=0
+DEFINITIONS_OFFLINE=0
+DEFINITIONS_OFFLINE_SEEN=0
 COMPLIANCE=""
 # COMPLIANCE_LIST — space-separated standard selection in argv order. A single
 # --compliance X puts X here; repeated --compliance appends (order preserved), and a
@@ -693,7 +1319,7 @@ for _arg in "$@"; do
   [ "$_arg" = "--no-menu" ] || MENU_ONLY_FLAGS=0
 done
 [ "$MENU_ONLY_FLAGS" -eq 1 ] && [ "$#" -gt 0 ] && OUT_DIR=.
-USAGE="usage: $0 [--html|--json|--compliance stig|cis-l1|cis-l2|ffiec] [--out <dir>] [--no-menu] [--flrtvc-ksh <script> --flrtvc-apar-csv <file> | --flrtvc-report <file> | --definitions-bundle <file>] [--currency-max-age SOURCE_ID=DAYS ...] [--currency-status [--json]] [--flrt-export <dir>]"
+USAGE="usage: $0 [--html|--json|--compliance stig|cis-l1|cis-l2|ffiec] [--out <dir>] [--no-menu] [--offline | --definitions-bundle <signed-file>] [--flrtvc-ksh <script> [--flrtvc-apar-csv <file>] | --flrtvc-report <file>] [--currency-max-age SOURCE_ID=DAYS ...] [--currency-status [--json]] [--flrt-export <dir>]"
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --json) FORMAT=json; CURRENCY_JSON=1; EXPLICIT_OUTPUT=1;;
@@ -771,6 +1397,15 @@ while [ "$#" -gt 0 ]; do
       DEFINITIONS_BUNDLE=${1:-}
       case "$DEFINITIONS_BUNDLE" in ""|--*) echo "$USAGE" >&2; exit 2;; esac
       ;;
+    --offline)
+      if [ "$DEFINITIONS_OFFLINE_SEEN" -eq 1 ]; then
+        echo "$USAGE" >&2
+        echo "ptxray: duplicate --offline" >&2
+        exit 2
+      fi
+      DEFINITIONS_OFFLINE_SEEN=1
+      DEFINITIONS_OFFLINE=1
+      ;;
     --flrt-export)
       shift
       FLRT_EXPORT=${1:-}
@@ -817,12 +1452,9 @@ if [ -n "$FLRTVC_REPORT" ] \
   exit 2
 fi
 
-# A definition bundle is an alternative carrier for the same two IBM inputs; it
-# cannot be combined with any individual-input flag (exit 2, usage error).
-if [ -n "$DEFINITIONS_BUNDLE" ] \
-    && { [ -n "$FLRTVC_KSH" ] || [ -n "$FLRTVC_APARCSV" ] || [ -n "$FLRTVC_REPORT" ]; }; then
+if [ "$DEFINITIONS_OFFLINE" -eq 1 ] && [ -n "$DEFINITIONS_BUNDLE" ]; then
   echo "$USAGE" >&2
-  echo "ptxray: --definitions-bundle conflicts with --flrtvc-ksh/--flrtvc-apar-csv/--flrtvc-report" >&2
+  echo "ptxray: --offline conflicts with --definitions-bundle" >&2
   exit 2
 fi
 
@@ -866,14 +1498,94 @@ if [ -n "$OUT_DIR" ]; then
   fi
 fi
 
+# Platform and privilege are startup preconditions, not assessment findings.
+# Private fixture artifacts can provide startup_platform.out and id_u.out; the
+# established AIX fixtures predate startup_platform.out, so their compiled-only
+# fixture boundary supplies the AIX platform value when that one row is absent.
+function aixray_startup_probe {
+  typeset key rc
+  key=$1
+  shift
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ] \
+      && [ -n "${AIXRAY_PROBE_LOG:-}" ]; then
+    printf '%s\n' "$key" >> "$AIXRAY_PROBE_LOG" || return 126
+  fi
+  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
+    if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
+      cat "$AIXRAY_FIXTURES/$key.out"
+      rc=0
+      [ -r "$AIXRAY_FIXTURES/$key.rc" ] \
+        && read rc < "$AIXRAY_FIXTURES/$key.rc"
+      return "$rc"
+    fi
+    [ "$key" = startup_platform ] && { printf '%s\n' AIX; return 0; }
+    return 127
+  fi
+  "$@" 2>/dev/null
+}
+
+AIXRAY_PLATFORM=$(aixray_startup_probe startup_platform /usr/bin/uname -s)
+AIXRAY_PLATFORM_RC=$?
+if [ "$AIXRAY_PLATFORM_RC" -ne 0 ] || [ "$AIXRAY_PLATFORM" != AIX ]; then
+  echo "ptxray-aix.sh: this is the AIX edition and this host is not AIX; no scan was run." >&2
+  exit 2
+fi
+MYUID=$(aixray_startup_probe id_u /usr/bin/id -u)
+MYUID_RC=$?
+if [ "$MYUID_RC" -ne 0 ] || [ "$MYUID" != 0 ]; then
+  echo "ptxray-aix.sh: root is required; re-run this assessment as root. No scan was run." >&2
+  exit 2
+fi
+
+# VIOS is AIX underneath, so uname cannot distinguish it. This one local,
+# startup-safe marker probe is part of the platform gate and is deliberately
+# completed before definitions consent or acquisition. Reuse the same result
+# for later role classification so the privileged runner does not race itself.
+AIXRAY_STARTUP_VIOS_MARKER=$(aixray_startup_probe ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
+AIXRAY_STARTUP_VIOS_RC=$?
+AIXRAY_STARTUP_VIOS_ROWS=$(printf '%s\n' "$AIXRAY_STARTUP_VIOS_MARKER" | awk '
+  $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+AIXRAY_STARTUP_VIOS_MATCH=${AIXRAY_STARTUP_VIOS_ROWS%%:*}
+AIXRAY_STARTUP_VIOS_NONEMPTY=${AIXRAY_STARTUP_VIOS_ROWS#*:}
+if [ "$AIXRAY_STARTUP_VIOS_RC" -eq 0 ] \
+    && [ "$AIXRAY_STARTUP_VIOS_MATCH" -eq 1 ] \
+    && [ "$AIXRAY_STARTUP_VIOS_NONEMPTY" -eq 1 ] \
+    && [ "${AIXRAY_VIOS_DEV:-0}" != "1" ]; then
+  if [ "$PTXRAY_PRIVATE_TEST_BUILD" -eq 1 ]; then
+    echo "ptxray-aix.sh: VIOS assessment is temporarily disabled in this release — below the quality bar; AIX is the supported target of this edition; no scan was run. Set AIXRAY_VIOS_DEV=1 only for development." >&2
+  else
+    echo "ptxray-aix.sh: VIOS assessment is temporarily disabled in this release — below the quality bar; AIX is the supported target of this edition; no scan was run." >&2
+  fi
+  exit 2
+fi
+
+# Definitions are selected only after platform/root/VIOS-gate acceptance and
+# before any non-gating assessment probe. The adjacent digest-bound downloader
+# is the sole egress component; this runner contains no transport implementation.
+PTXRAY_SIGNED_DEFINITIONS_BUNDLE=$DEFINITIONS_BUNDLE
+ptxray_defs_select_for_run "$DEFINITIONS_OFFLINE" "$PTXRAY_SIGNED_DEFINITIONS_BUNDLE"
+PTXRAY_DEFS_SELECT_RC=$?
+[ "$PTXRAY_DEFS_SELECT_RC" -eq 0 ] || exit "$PTXRAY_DEFS_SELECT_RC"
+if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] && [ -n "$FLRTVC_KSH" ] \
+    && [ -z "$FLRTVC_APARCSV" ] && [ -z "$FLRTVC_REPORT" ]; then
+  PTXRAY_DEFS_APAR_FOR_FLRTVC=1
+fi
+# The legacy unsigned envelope parser must never see the signed 1.5 bundle.
+DEFINITIONS_BUNDLE=""
+
 # ======================= embedded reference data (refresh: spec 03) ===================
-# Every row below is bound to its own registry metadata and digest. The tool
-# never phones home; stale or unknown data is visible in the attestation.
+# Every embedded row below is bound to its own registry metadata and digest.
+# Stale or unknown data is visible in the attestation.
 
 # AIX release | end of support (or SUPPORTED = none announced)
+# IBM's AIX 7.2 release-lifecycle entry showed no announced release EOS when
+# verified 2026-08-15; SUPPORTED is our inference from that absence, not a
+# positive IBM support-status statement. IBM's separate TL lifecycle table
+# listed AIX 7.2 TL5 End of Fix Support as "To be determined". SUPPORTED is
+# never a guessed EOS date.
 EOS_OS="
 7100|2023-04-30
-7200|2026-04-30
+7200|SUPPORTED
 7300|SUPPORTED
 "
 # AIX release | latest Technology Level for that release
@@ -888,7 +1600,7 @@ TL_SUPPORT="
 7300-02|2026-11-30
 7300-01|2025-12-31
 7300-00|2024-12-31
-7200-05|2026-04-30
+7200-05|SUPPORTED
 "
 # VIOS version prefix | end of support (or SUPPORTED)
 EOS_VIOS="
@@ -1978,1073 +2690,10 @@ function currency_apply_report_provenance {
     verified verified
 }
 
-# parse_definitions_bundle — validate and ingest an operator-supplied
-# --definitions-bundle <file> envelope (the .aixray-defs format produced by
-# tools/refresh-data.py fetch-bundle). Fully offline; ksh88 + openssl only. Fail
-# closed: ANY framing, footer-digest, source-manifest, base64, or per-source
-# payload-digest failure prints a one-line diagnostic on stderr, decodes
-# NOTHING, leaves every CU_* row at the no-bundle baseline, and lets the scan
-# proceed exactly as if no bundle was supplied — never partial ingestion. On
-# success the verified payloads are decoded into a private mode-700 scratch
-# directory, the cisa-kev/ibm-apar-csv/ibm-flrtvc CU rows are bound to the
-# envelope metadata (integrity=verified, provenance=verified), and the invoke
-# path is pointed at the decoded engine + apar.csv.
-function parse_definitions_bundle {
-  typeset bundle_file bundle_size bad_bytes magic line2 line3 footer_line
-  typeset declared_footer computed_footer source_data seq
-  typeset scratch scratch_try scratch_cand bundle_copy
-  typeset apar_version apar_vbasis apar_asof apar_abasis apar_sha
-  typeset eng_version eng_vbasis eng_asof eng_abasis eng_sha
-  typeset kev_version kev_vbasis kev_asof kev_abasis kev_sha
-  typeset decoded_sha payload_size expected_count rc _tag
-  bundle_file=$DEFINITIONS_BUNDLE
-  [ -n "$bundle_file" ] || return 0
-
-  if [ ! -r "$bundle_file" ]; then
-    echo "ptxray: operator-supplied definitions bundle could not be read: $bundle_file" >&2
-    return 0
-  fi
-
-  # Private scratch for the decoded payloads. NOTE: an EXIT trap registered here
-  # would fire the moment this function RETURNS (ksh93 fires a function-set EXIT
-  # trap on function return), so cleanup is registered at top level after the
-  # metadata load, and the invoke path's own traps additionally cover it.
-  FV_TMPBASE_RAW=${TMPDIR:-/tmp}
-  FV_TMPBASE=$(CDPATH= cd -- "$FV_TMPBASE_RAW" 2>/dev/null && (pwd -P 2>/dev/null || pwd))
-  if [ -z "$FV_TMPBASE" ]; then
-    echo "ptxray: definitions bundle could not be decoded — TMPDIR does not resolve to a physical path" >&2
-    return 0
-  fi
-  FV_TMPPROBLEM=$(path_untrusted "$FV_TMPBASE")
-  if [ -n "$FV_TMPPROBLEM" ]; then
-    echo "ptxray: definitions bundle could not be decoded — untrusted scratch parent ($FV_TMPPROBLEM)" >&2
-    return 0
-  fi
-  DEFINITIONS_BUNDLE_SCRATCH=""
-  scratch_try=0
-  while [ "$scratch_try" -lt 20 ] && [ -z "$DEFINITIONS_BUNDLE_SCRATCH" ]; do
-    scratch_cand="$FV_TMPBASE/aixray-defs.$$.$(date +%s 2>/dev/null)${scratch_try}"
-    if mkdir -m 700 "$scratch_cand" 2>/dev/null; then
-      DEFINITIONS_BUNDLE_SCRATCH="$scratch_cand"
-    fi
-    scratch_try=$((scratch_try+1))
-  done
-  if [ -z "$DEFINITIONS_BUNDLE_SCRATCH" ]; then
-    echo "ptxray: definitions bundle could not be decoded — could not create a secure temp directory" >&2
-    return 0
-  fi
-  scratch=$DEFINITIONS_BUNDLE_SCRATCH
-
-  # TOCTOU-safe copy: the operator-named file is copied into the private scratch
-  # ONCE and EVERY validation pass below reads the copy, never the operator path
-  # again. The copy is size-capped at the read itself (51 MiB read; anything over
-  # 50 MiB refuses) so an oversized or concurrently-growing file cannot exhaust
-  # scratch with decoded/re-wrapped bytes.
-  bundle_copy="$scratch/bundle.aixray-defs"
-  dd if="$bundle_file" of="$bundle_copy" bs=1048576 count=51 2>/dev/null
-  bundle_size=$(wc -c < "$bundle_copy" 2>/dev/null | tr -d ' ')
-  if [ -z "$bundle_size" ]; then
-    echo "ptxray: operator-supplied definitions bundle could not be read: $bundle_file" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    return 0
-  fi
-  if [ "$bundle_size" -gt 52428800 ]; then
-    echo "ptxray: definitions bundle exceeds the 50 MiB envelope cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    return 0
-  fi
-  bundle_file="$bundle_copy"
-
-  # ASCII only — every byte is LF or printable ASCII (0x20..0x7e). A CR, NUL,
-  # or any non-ASCII byte refuses the whole bundle.
-  bad_bytes=$(LC_ALL=C tr -d '\n\040-\176' < "$bundle_file" 2>/dev/null | wc -c | tr -d ' ')
-  if [ -n "$bad_bytes" ] && [ "$bad_bytes" -ne 0 ]; then
-    echo "ptxray: definitions bundle framing is invalid — not pure ASCII (a control or non-ASCII byte is present)" >&2
-    return 0
-  fi
-  magic=$(awk 'NR==1{print; exit}' "$bundle_file")
-  if [ "$magic" != "AIXRAY-DEFINITION-BUNDLE|1" ]; then
-    echo "ptxray: definitions bundle framing is invalid — wrong magic or version" >&2
-    return 0
-  fi
-  line2=$(awk 'NR==2{print; exit}' "$bundle_file")
-  line3=$(awk 'NR==3{print; exit}' "$bundle_file")
-  case "$line2" in
-    "CREATED-AT|"*) ;;
-    *) echo "ptxray: definitions bundle is malformed — missing CREATED-AT record" >&2; return 0;;
-  esac
-  case "$line3" in
-    "PRODUCER|aixray-definitions|"*) ;;
-    *) echo "ptxray: definitions bundle is malformed — missing or wrong PRODUCER record" >&2; return 0;;
-  esac
-
-  # Footer framing: the END-BUNDLE line must be the last line and declare a
-  # 64-hex digest covering every preceding byte, including the LF that ends the
-  # last END-PAYLOAD line. sed '$d' drops only the END-BUNDLE line and keeps
-  # that LF, so the digest of the remainder is exactly the covered region.
-  footer_line=$(LC_ALL=C tail -n 1 "$bundle_file")
-  declared_footer=$(printf '%s\n' "$footer_line" | awk -F'|' \
-    'NF==3 && $1=="END-BUNDLE" && $2==1 && $3 ~ /^[0-9a-f]{64}$/ {print $3}')
-  if [ -z "$declared_footer" ]; then
-    echo "ptxray: definitions bundle framing is invalid — missing or malformed END-BUNDLE footer" >&2
-    return 0
-  fi
-  computed_footer=$(LC_ALL=C sed '$d' "$bundle_file" 2>/dev/null \
-    | openssl dgst -sha256 -r 2>/dev/null | awk '{print $1}')
-  if [ "$computed_footer" != "$declared_footer" ]; then
-    echo "ptxray: definitions bundle integrity check failed — footer digest does not match; file may be corrupted or truncated in transit" >&2
-    return 0
-  fi
-
-  # SOURCE manifest: 2 or 3 records, exactly 17 fields each, GET/200, known ids,
-  # 64-hex digests, non-negative sizes, no empty metadata fields. Emits compact
-  # SRC lines for the caller; a malformed manifest refuses the whole bundle.
-  source_data=$(awk -F'|' '
-    BEGIN { count=0 }
-    NR<=3 {next}
-    $1=="SOURCE" {
-      if(NF!=17){print "ERR field-count"; exit 1}
-      if($5!="GET" || $6!="200"){print "ERR method"; exit 1}
-      if($2!="ibm-apar-csv" && $2!="ibm-flrtvc" && $2!="cisa-kev"){print "ERR unknown-id"; exit 1}
-      if($12 !~ /^[0-9a-f]{64}$/ || $14 !~ /^[0-9a-f]{64}$/){print "ERR digest"; exit 1}
-      if($13+0<0 || $15+0<0){print "ERR size"; exit 1}
-      if($8=="" || $9=="" || $10=="" || $11=="" || $16=="" || $17==""){print "ERR empty-field"; exit 1}
-      print "SRC|" $2 "|" $8 "|" $9 "|" $10 "|" $11 "|" $14 "|" $15
-      count++
-      next
-    }
-    $1=="BEGIN-PAYLOAD" {exit}
-    {print "ERR unexpected"; exit 1}
-    END {
-      if(count<2 || count>3){print "ERR count"; exit 1}
-    }
-  ' "$bundle_file")
-  case "$source_data" in
-    ERR*|"") echo "ptxray: definitions bundle source manifest is malformed" >&2; return 0;;
-  esac
-
-  apar_version=""; apar_vbasis=""; apar_asof=""; apar_abasis=""; apar_sha=""
-  eng_version=""; eng_vbasis=""; eng_asof=""; eng_abasis=""; eng_sha=""
-  kev_version=""; kev_vbasis=""; kev_asof=""; kev_abasis=""; kev_sha=""
-  seq=""
-  while IFS='|' read -r _tag sid sver svbasis sasof sabasis ssha ssize; do
-    case "$sid" in
-      ibm-apar-csv)
-        apar_version=$sver; apar_vbasis=$svbasis; apar_asof=$sasof
-        apar_abasis=$sabasis; apar_sha=$ssha
-        seq="$seq apar"
-        ;;
-      ibm-flrtvc)
-        eng_version=$sver; eng_vbasis=$svbasis; eng_asof=$sasof
-        eng_abasis=$sabasis; eng_sha=$ssha
-        seq="$seq engine"
-        ;;
-      cisa-kev)
-        kev_version=$sver; kev_vbasis=$svbasis; kev_asof=$sasof
-        kev_abasis=$sabasis; kev_sha=$ssha
-        seq="$seq kev"
-        ;;
-    esac
-  done <<EOF
-$source_data
-EOF
-  case "$seq" in
-    " apar engine") ;;
-    " apar engine kev") ;;
-    *) echo "ptxray: definitions bundle source manifest is malformed (wrong source order or duplicates)" >&2; return 0;;
-  esac
-
-  # Payload blocks: one per SOURCE, in manifest order, each framed by
-  # BEGIN-PAYLOAD|<id>|<count> ... END-PAYLOAD|<id>. One sequential awk pass
-  # enforces order and extracts each block to a private file, verifying the
-  # base64 alphabet and the declared character count.
-  expected_count=2
-  [ "$seq" = " apar engine kev" ] && expected_count=3
-  if ! awk -F'|' -v outdir="$scratch" -v nsrc="$expected_count" \
-      -v s1="ibm-apar-csv" -v s2="ibm-flrtvc" -v s3="cisa-kev" '
-    BEGIN { eidx=1; why=0 }
-    $1=="BEGIN-PAYLOAD" {
-      if(eidx>nsrc){why=1; exit 99}
-      want=""
-      if(eidx==1){want=s1}
-      else if(eidx==2){want=s2}
-      else {want=s3}
-      if($2!=want || NF!=3){why=2; exit 99}
-      declared=$3+0
-      if(declared<=0){why=5; exit 99}
-      cur=$2
-      nlines[cur]=0
-      next
-    }
-    cur!="" && $1=="END-PAYLOAD" {
-      if($2!=cur || NF!=2){why=2; exit 99}
-      if(nlines[cur]<=0 || len[cur]!=declared){why=4; exit 99}
-      cur=""
-      eidx++
-      next
-    }
-    cur!="" {
-      if($0 ~ /[^A-Za-z0-9+\/=]/){why=3; exit 99}
-      len[cur]=len[cur]+length($0)
-      nlines[cur]=nlines[cur]+1
-      print > (outdir "/payload-" eidx ".b64")
-      next
-    }
-    END {
-      if(why!=0){exit why}
-      if(eidx-1 != nsrc){exit 2}
-    }
-  ' "$bundle_file"; then
-    rc=$?
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""
-    echo "ptxray: definitions bundle payload blocks are malformed (base64 or block framing)" >&2
-    return 0
-  fi
-
-  # Decode each verified payload and re-check its SHA-256 against the envelope.
-  # A decode failure or digest mismatch refuses the WHOLE bundle (never a
-  # partial ingestion), matching the fail-closed acceptance contract. The
-  # [ -f ] guard keeps a missing block to a single diagnostic line with no
-  # internal scratch path leaked by a failed redirection.
-  if [ ! -f "$scratch/payload-1.b64" ] \
-      || ! openssl base64 -d -out "$scratch/apar.csv" < "$scratch/payload-1.b64" 2>/dev/null; then
-    echo "ptxray: definitions bundle payload base64 decode failed for ibm-apar-csv" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  chmod 0600 "$scratch/apar.csv" 2>/dev/null
-  decoded_sha=$(sha256_of "$scratch/apar.csv")
-  payload_size=$(wc -c < "$scratch/apar.csv" 2>/dev/null | tr -d ' ')
-  if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$apar_sha" ]; then
-    echo "ptxray: ibm-apar-csv payload failed integrity validation" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-    echo "ptxray: ibm-apar-csv payload exceeds the 32 MiB per-source cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-
-  if [ ! -f "$scratch/payload-2.b64" ] \
-      || ! openssl base64 -d -out "$scratch/flrtvc.ksh" < "$scratch/payload-2.b64" 2>/dev/null; then
-    echo "ptxray: definitions bundle payload base64 decode failed for ibm-flrtvc" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  chmod 0600 "$scratch/flrtvc.ksh" 2>/dev/null
-  decoded_sha=$(sha256_of "$scratch/flrtvc.ksh")
-  payload_size=$(wc -c < "$scratch/flrtvc.ksh" 2>/dev/null | tr -d ' ')
-  if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$eng_sha" ]; then
-    echo "ptxray: ibm-flrtvc payload failed integrity validation" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-  if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-    echo "ptxray: ibm-flrtvc payload exceeds the 32 MiB per-source cap" >&2
-    rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-  fi
-
-  if [ "$seq" = " apar engine kev" ]; then
-    if [ ! -f "$scratch/payload-3.b64" ] \
-        || ! openssl base64 -d -out "$scratch/kev.json" < "$scratch/payload-3.b64" 2>/dev/null; then
-      echo "ptxray: definitions bundle payload base64 decode failed for cisa-kev" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    chmod 0600 "$scratch/kev.json" 2>/dev/null
-    decoded_sha=$(sha256_of "$scratch/kev.json")
-    payload_size=$(wc -c < "$scratch/kev.json" 2>/dev/null | tr -d ' ')
-    if [ -z "$decoded_sha" ] || [ "$decoded_sha" != "$kev_sha" ]; then
-      echo "ptxray: cisa-kev payload failed integrity validation" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    if [ -n "$payload_size" ] && [ "$payload_size" -gt 33554432 ]; then
-      echo "ptxray: cisa-kev payload exceeds the 32 MiB per-source cap" >&2
-      rm -rf "$scratch"; DEFINITIONS_BUNDLE_SCRATCH=""; return 0
-    fi
-    DEFINITIONS_BUNDLE_HAS_KEV=1
-  fi
-
-  # Hand the verified decoded files + envelope metadata to the invoke path and
-  # bind the CU rows (a validated bundle is verified AND provenance-bound by the
-  # envelope footer + per-source payload digests).
-  DEFINITIONS_BUNDLE_VALID=1
-  DEFINITIONS_BUNDLE_ENGINE="$scratch/flrtvc.ksh"
-  DEFINITIONS_BUNDLE_APAR="$scratch/apar.csv"
-  DEFINITIONS_BUNDLE_ENGINE_SHA=$eng_sha
-  DEFINITIONS_BUNDLE_APAR_SHA=$apar_sha
-  DEFINITIONS_BUNDLE_ENGINE_VERSION=$eng_version
-  DEFINITIONS_BUNDLE_ENGINE_VBASIS=$eng_vbasis
-  DEFINITIONS_BUNDLE_ENGINE_ASOF=$eng_asof
-  DEFINITIONS_BUNDLE_ENGINE_ABASIS=$eng_abasis
-  DEFINITIONS_BUNDLE_APAR_VERSION=$apar_version
-  DEFINITIONS_BUNDLE_APAR_VBASIS=$apar_vbasis
-  DEFINITIONS_BUNDLE_APAR_ASOF=$apar_asof
-  DEFINITIONS_BUNDLE_APAR_ABASIS=$apar_abasis
-  if [ "$seq" = " apar engine kev" ]; then
-    DEFINITIONS_BUNDLE_HAS_KEV=1
-    DEFINITIONS_BUNDLE_KEV_VERSION=$kev_version
-    DEFINITIONS_BUNDLE_KEV_VBASIS=$kev_vbasis
-    DEFINITIONS_BUNDLE_KEV_ASOF=$kev_asof
-    DEFINITIONS_BUNDLE_KEV_ABASIS=$kev_abasis
-    DEFINITIONS_BUNDLE_KEV_SHA=$kev_sha
-  fi
-  currency_bind_definitions_bundle_rows
-  return 0
-}
-function definition_cleanup {
-  typeset doomed
-  doomed=$DEFINITION_SCRATCH
-  DEFINITION_SCRATCH=""
-  [ -n "$doomed" ] && rm -rf "$doomed"
-}
-function definition_self_dir {
-  typeset resolved
-  case "$AIXRAY_SELF" in
-    */*) (cd "$(dirname "$AIXRAY_SELF")" 2>/dev/null && (pwd -P 2>/dev/null || pwd));;
-    *) resolved=$(whence -p "$AIXRAY_SELF" 2>/dev/null)
-       case "$resolved" in
-         */*) (cd "$(dirname "$resolved")" 2>/dev/null && (pwd -P 2>/dev/null || pwd));;
-         *) return 1;;
-       esac;;
-  esac
-}
-function definition_make_scratch {
-  typeset parent token candidate tries
-  parent=${TMPDIR:-/tmp}; tries=0
-  [ -d "$parent" ] || return 1
-  umask 077
-  while [ "$tries" -lt 20 ]; do
-    token=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
-    [ -n "$token" ] || token="$$.$tries"
-    candidate="$parent/aixray-definitions.$$.$token"
-    if (umask 077 && mkdir "$candidate") 2>/dev/null; then
-      DEFINITION_SCRATCH=$candidate
-      return 0
-    fi
-    tries=$((tries+1))
-  done
-  return 1
-}
-function definition_set_invalid {
-  typeset di=$1
-  DA_VERIFICATION[$di]=INVALID
-  DA_FRESHNESS[$di]=INVALID
-  DA_AGE[$di]=unknown
-}
-function definition_evaluate_source {
-  typeset di=$1 asof age
-  [ "${DA_VERIFICATION[$di]}" = VERIFIED ] || return
-  asof=${DA_ASOF[$di]}
-  if [ "$(valid_ymd "$asof")" != 1 ]; then
-    definition_set_invalid "$di"; return
-  fi
-  age=$((TODAY_J - $(d2j "$asof")))
-  if [ "$age" -lt 0 ]; then
-    definition_set_invalid "$di"; return
-  fi
-  DA_AGE[$di]=$age
-  if [ "$age" -le "${DA_THRESHOLD[$di]}" ]; then
-    DA_FRESHNESS[$di]=CURRENT
-  else
-    DA_FRESHNESS[$di]=STALE
-  fi
-}
-# Parse only the ASCII envelope here.  Source bytes are decoded into a mode-700
-# directory and then validated independently so one bad source cannot suppress valid
-# adverse evidence from another source.
-function definition_parse_envelope {
-  typeset bundle=$1 size last footer declared actual meta encoded decoded di
-  [ -r "$bundle" ] && [ -f "$bundle" ] && [ ! -L "$bundle" ] || return 1
-  size=$(wc -c < "$bundle" 2>/dev/null | tr -d ' ')
-  case "$size" in ''|*[!0-9]*) return 1;; esac
-  [ "$size" -gt 0 ] && [ "$size" -le 52428800 ] || return 1
-  last=$(tail -c 1 "$bundle" 2>/dev/null | od -An -tx1 | tr -dc '0-9a-f')
-  [ "$last" = 0a ] || return 1
-  od -An -tx1 "$bundle" 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="00"||$i=="0d")exit 1}' || return 1
-  footer=$(tail -n 1 "$bundle" 2>/dev/null)
-  case "$footer" in END-BUNDLE\|1\|[0-9a-f][0-9a-f]*) ;; *) return 1;; esac
-  declared=$(printf '%s\n' "$footer" | awk -F'[|]' '{print $3}')
-  [ "${#declared}" -eq 64 ] || return 1
-  awk 'NR>1{print previous} {previous=$0}' "$bundle" > "$DEFINITION_SCRATCH/envelope" || return 1
-  actual=$(sha256_of "$DEFINITION_SCRATCH/envelope")
-  [ "$actual" = "$declared" ] || return 1
-
-  meta="$DEFINITION_SCRATCH/metadata.tsv"
-  awk -v out="$DEFINITION_SCRATCH" '
-    function bad(){exit 1}
-    NR==1{if($0!="AIXRAY-DEFINITION-BUNDLE|1")bad();next}
-    NR==2{if($0!~/^CREATED-AT\|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)bad(); created=substr($0,12);next}
-    NR==3{if($0!~/^PRODUCER\|aixray-definitions\|[A-Za-z0-9][A-Za-z0-9._+-]*$/)bad();next}
-    NR>=4 && NR<=6{
-      n=split($0,f,"[|]"); if(n!=17||f[1]!="SOURCE")bad()
-      want[4]="ibm-apar-csv"; want[5]="ibm-flrtvc"; want[6]="cisa-kev"
-      pub[4]="IBM"; pub[5]="IBM"; pub[6]="CISA"
-      url[4]="h""ttps://esupport.ibm.com/customercare/flrt/doc?page=aparCSV"
-      url[5]="h""ttps://esupport.ibm.com/customercare/sas/f/flrt3/FLRTVC-0.8.14.zip"
-      url[6]="h""ttps://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
-      verify[4]="apar-schema-vintage-mincount"; verify[5]="aixray-flrtvc-sha256-pin"; verify[6]="cisa-kev-schema-count-vintage"
-      transform[4]="identity"; transform[5]="zip-member:flrtvc.ksh"; transform[6]="identity"
-      if(f[2]!=want[NR]||f[3]!=pub[NR]||f[4]!=url[NR]||f[5]!="GET"||f[6]!="200"||f[16]!=transform[NR]||f[17]!=verify[NR])bad()
-      if(f[7]!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)bad()
-      if(f[10]!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)bad()
-      if(f[12]!~/^[0-9a-f]{64}$/||f[14]!~/^[0-9a-f]{64}$/||f[13]!~/^[0-9]+$/||f[15]!~/^[0-9]+$/)bad()
-      if((NR!=5)&&(f[12]!=f[14]||f[13]!=f[15]))bad()
-      line[NR-3]=$0; next
-    }
-    /^BEGIN-PAYLOAD\|/{
-      if(block||++b>3)bad(); n=split($0,f,"[|]"); if(n!=3||f[2]!=want[b+3]||f[3]!~/^[0-9]+$/)bad()
-      declared=f[3]+0; count=0; lines=0; block=1; next
-    }
-    /^END-PAYLOAD\|/{
-      if(!block||$0!="END-PAYLOAD|" want[b+3]||count!=declared||lines==0)bad()
-      block=0; next
-    }
-    /^END-BUNDLE\|1\|/{
-      if(block||b!=3||seen_footer++)bad()
-      print created > (out "/created")
-      for(i=1;i<=3;i++)print line[i] >> (out "/metadata.tsv")
-      next
-    }
-    {
-      if(!block||$0!~/^[A-Za-z0-9+\/=]+$/||length($0)>76)bad()
-      if(lines>0&&lastlen!=76)bad()
-      print $0 >> (out "/payload-" b ".b64")
-      count+=length($0); lastlen=length($0); lines++; next
-    }
-    END{if(!seen_footer||block||b!=3)exit 1}
-  ' "$bundle" || return 1
-
-  DEFINITION_BUNDLE_CREATED=$(cat "$DEFINITION_SCRATCH/created" 2>/dev/null)
-  DEFINITION_BUNDLE_SHA="sha256:$(sha256_of "$bundle")"
-  di=0
-  while [ "$di" -lt 3 ]; do
-    encoded="$DEFINITION_SCRATCH/payload-$((di+1)).b64"
-    decoded="$DEFINITION_SCRATCH/${DA_ID[$di]}"
-    if openssl base64 -d -out "$decoded" < "$encoded" 2>/dev/null; then
-      chmod 600 "$decoded" 2>/dev/null
-      set -- $(awk -F'[|]' -v row=$((di+1)) 'NR==row{print $7,$8,$9,$10,$11,$12,$13,$14,$15}' "$meta")
-      DA_RETRIEVED[$di]=$1; DA_VERSION[$di]=$2; DA_VERSION_BASIS[$di]=$3
-      DA_ASOF[$di]=$4; DA_ASOF_BASIS[$di]=$5
-      DA_TRANSPORT[$di]="sha256:$6"; DA_CONTENT[$di]="sha256:$8"
-      if [ "$(wc -c < "$decoded" | tr -d ' ')" = "$9" ] \
-          && [ "$(sha256_of "$decoded")" = "$8" ]; then
-        DA_VERIFICATION[$di]=VERIFIED
-      else
-        definition_set_invalid "$di"
-      fi
-    else
-      definition_set_invalid "$di"
-    fi
-    di=$((di+1))
-  done
-  return 0
-}
-function definition_validate_apar {
-  typeset file=$1 vintage rows
-  vintage=$(apar_csv_metadata < "$file") || return 1
-  rows=$(awk -F, '$1=="sec"||$1=="hiper"{if(NF>=15)n++}END{print n+0}' "$file")
-  [ "$rows" -ge 100 ] || return 1
-  [ "$vintage" = "${DA_VERSION[0]}" ] && [ "$vintage" = "${DA_ASOF[0]}" ] \
-    && [ "${DA_VERSION_BASIS[0]}" = source-vintage ] \
-    && [ "${DA_ASOF_BASIS[0]}" = source-declared ]
-}
-function definition_validate_flrtvc {
-  typeset file=$1 selfdir pinfile pinsha pinversion pinasof version first
-  selfdir=$(definition_self_dir) || return 1
-  pinfile="$selfdir/tools/flrtvc-pin.txt"
-  [ -r "$pinfile" ] && [ -f "$pinfile" ] && [ ! -L "$pinfile" ] || return 1
-  pinsha=$(awk -F= '/^SHA256=/{print $2}' "$pinfile")
-  pinversion=$(awk -F= '/^VERSION=/{print $2}' "$pinfile")
-  pinasof=$(awk -F= '/^AS_OF=/{print $2}' "$pinfile")
-  first=$(sed -n '1p' "$file")
-  version=$(awk -F= '/^VERSION=/{v=$2;gsub(/^[ \t"\047]+|[ \t"\047]+$/,"",v);print v;exit}' "$file")
-  case "$first" in *ksh93*) ;; *) return 1;; esac
-  [ "$(sha256_of "$file")" = "$pinsha" ] && [ "$version" = "$pinversion" ] \
-    && [ "${DA_VERSION[1]}" = "$pinversion" ] && [ "${DA_ASOF[1]}" = "$pinasof" ] \
-    && [ "${DA_VERSION_BASIS[1]}" = publisher-version ] \
-    && [ "${DA_ASOF_BASIS[1]}" = curator-pin-date ]
-}
-# A small streaming JSON grammar for the KEV feed.  It is intentionally not a
-# grep-for-CVEs shortcut: duplicate keys, malformed strings/numbers, count drift,
-# missing required fields, bad dates, and duplicate CVEs all invalidate this source.
-function definition_validate_kev {
-  typeset file=$1 output=$2 compare_metadata=${3:-1} result version asof count
-  : > "$output" || return 1
-  awk -v out="$output" '
-    function fail(){bad=1; exit 1}
-    function realdate(v, a,y,m,d,dim,leap){
-      if(v!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)return 0
-      split(v,a,"-"); y=a[1]+0;m=a[2]+0;d=a[3]+0
-      if(m<1||m>12)return 0
-      dim=31;if(m==4||m==6||m==9||m==11)dim=30
-      if(m==2){leap=(y%400==0||(y%4==0&&y%100!=0));dim=leap?29:28}
-      return d>=1&&d<=dim
-    }
-    function mark(k){
-      if(seen[depth SUBSEP k]++)fail()
-      key[depth]=k
-    }
-    function scalar(kind,v, k){
-      if(depth<1)fail()
-      if(type[depth]=="O"){
-        if(state[depth]!=2)fail(); k=key[depth]
-        if(depth==1){
-          if(k=="title"){if(kind!="S")fail(); root_title=1}
-          else if(k=="catalogVersion"){if(kind!="S"||v!~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/)fail();version=v;root_version=1}
-          else if(k=="dateReleased"){if(kind!="S"||v!~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/)fail();asof=substr(v,1,10);if(!realdate(asof))fail();root_date=1}
-          else if(k=="count"){if(kind!="N"||v!~/^(0|[1-9][0-9]*)$/)fail();declared=v+0;root_count=1}
-          else if(k=="vulnerabilities")fail()
-        } else if(vuln[depth]){
-          if(kind!="S")fail()
-          required=" cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes "
-          if(index(required," " k " "))got[depth SUBSEP k]=1
-          if(k=="cveID"){
-            if(v!~/^CVE-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]+$/||cves[v]++)fail()
-            vcve[depth]=v
-          } else if((k=="dateAdded"||k=="dueDate")&&!realdate(v))fail()
-        }
-        state[depth]=3
-      } else {
-        if(state[depth]!=0)fail(); state[depth]=1
-      }
-    }
-    function begin(kind, parentkey,isv){
-      if(depth==0){if(root_seen++||kind!="O")fail()}
-      else if(type[depth]=="O"){
-        if(state[depth]!=2)fail();parentkey=key[depth]
-        if(depth==1&&parentkey=="vulnerabilities"){
-          if(kind!="A")fail();root_vulns=1;vuln_array_depth=depth+1
-        }
-        state[depth]=3
-      } else {
-        if(state[depth]!=0)fail()
-        isv=(depth==vuln_array_depth)
-        if(isv&&kind!="O")fail()
-        state[depth]=1
-      }
-      depth++;type[depth]=kind;state[depth]=0
-      if(isv)vuln[depth]=1
-    }
-    function end_container(kind, k,required,n,a){
-      if(depth<1||type[depth]!=kind)fail()
-      if(kind=="O"&&state[depth]!=0&&state[depth]!=3)fail()
-      if(kind=="A"&&state[depth]!=0&&state[depth]!=1)fail()
-      if(vuln[depth]){
-        required="cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes"
-        n=split(required,a," ");for(k=1;k<=n;k++)if(!got[depth SUBSEP a[k]])fail()
-        print vcve[depth] >> (out); actual++
-      }
-      for(k in seen)if(index(k,depth SUBSEP)==1)delete seen[k]
-      for(k in got)if(index(k,depth SUBSEP)==1)delete got[k]
-      delete type[depth];delete state[depth];delete key[depth];delete vuln[depth];delete vcve[depth]
-      depth--
-    }
-    function emit_token(kind,v,wantstate){
-      if(kind=="{")begin("O")
-      else if(kind=="[")begin("A")
-      else if(kind=="}")end_container("O")
-      else if(kind=="]")end_container("A")
-      else if(kind==","){
-        wantstate=1;if(type[depth]=="O")wantstate=3
-        if(depth<1||state[depth]!=wantstate)fail();state[depth]=0
-      } else if(kind==":"){
-        if(depth<1||type[depth]!="O"||state[depth]!=1)fail();state[depth]=2
-      } else if(kind=="S"){
-        if(depth>0&&type[depth]=="O"&&state[depth]==0){mark(v);state[depth]=1}
-        else scalar("S",v)
-      } else scalar(kind,v)
-    }
-    function hex4(v){return v~/^[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]$/}
-    {
-      data=$0 "\n";i=1
-      while(i<=length("" data)){
-        c=substr(data,i,1)
-        if(mode=="S"){
-          if(esc){
-            if(c=="u"){u=substr(data,i+1,4);if(length("" u)!=4||!hex4(u))fail();s=s "?";i+=5;esc=0;continue}
-            if(index("\"\\/bfnrt",c)==0)fail();s=s c;esc=0;i++;continue
-          }
-          if(c=="\\"){esc=1;i++;continue}
-          if(c=="\""){mode="";emit_token("S",s);s="";i++;continue}
-          if(c=="\n"||c=="\r"||c=="\t")fail()
-          s=s c;i++;continue
-        }
-        if(mode=="N"){
-          if(c~/[0-9eE+.-]/){num=num c;i++;continue}
-          if(num!~/^-?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?$/)fail()
-          mode="";emit_token("N",num);num="";continue
-        }
-        if(mode=="L"){
-          if(c~/[A-Za-z]/){lit=lit c;i++;continue}
-          if(lit!="true"&&lit!="false"&&lit!="null")fail()
-          emit_token("L",lit);mode="";lit="";continue
-        }
-        if(c~/[ \t\r\n]/){i++;continue}
-        if(c=="\""){mode="S";s="";i++;continue}
-        if(c~/[-0-9]/){mode="N";num=c;i++;continue}
-        if(c~/[tfn]/){mode="L";lit=c;i++;continue}
-        if(index("{}[],:",c)>0){emit_token(c);i++;continue}
-        fail()
-      }
-    }
-    END{
-      if(bad||mode!=""||depth!=0||!root_seen||!root_title||!root_version||!root_date||!root_count||!root_vulns||declared!=actual)exit 1
-      if(actual<100)exit 1
-      print "META|" version "|" asof "|" actual >> (out)
-    }
-  ' "$file" || return 1
-  result=$(tail -n 1 "$output")
-  case "$result" in META\|*\|*\|*) ;;
-    *) return 1;;
-  esac
-  version=$(printf '%s' "$result" | awk -F'|' '{print $2}')
-  asof=$(printf '%s' "$result" | awk -F'|' '{print $3}')
-  count=$(printf '%s' "$result" | awk -F'|' '{print $4}')
-  awk '!/^META\|/' "$output" > "$output.cves" || return 1
-  mv "$output.cves" "$output" || return 1
-  if [ "$compare_metadata" -eq 0 ]; then
-    DA_VERSION[2]=$version; DA_VERSION_BASIS[2]=source-revision
-    DA_ASOF[2]=$asof; DA_ASOF_BASIS[2]=source-declared
-    return 0
-  fi
-  [ "$version" = "${DA_VERSION[2]}" ] && [ "$asof" = "${DA_ASOF[2]}" ] \
-    && [ "${DA_VERSION_BASIS[2]}" = source-revision ] \
-    && [ "${DA_ASOF_BASIS[2]}" = source-declared ]
-}
-function definition_load_direct_kev {
-  typeset actual
-  [ -r "$KEV_JSON" ] && [ -f "$KEV_JSON" ] && [ ! -L "$KEV_JSON" ] || {
-    definition_set_invalid 2; return 1
-  }
-  if [ -z "$DEFINITION_SCRATCH" ]; then
-    definition_make_scratch || { definition_set_invalid 2; return 1; }
-  fi
-  cp "$KEV_JSON" "$DEFINITION_SCRATCH/cisa-kev" 2>/dev/null || {
-    definition_set_invalid 2; return 1
-  }
-  chmod 600 "$DEFINITION_SCRATCH/cisa-kev" 2>/dev/null
-  actual=$(sha256_of "$DEFINITION_SCRATCH/cisa-kev")
-  [ "${#actual}" -eq 64 ] || { definition_set_invalid 2; return 1; }
-  DA_CONTENT[2]="sha256:$actual"; DA_TRANSPORT[2]="sha256:$actual"
-  DA_RETRIEVED[2]=unknown
-  if definition_validate_kev "$DEFINITION_SCRATCH/cisa-kev" "$DEFINITION_SCRATCH/kev-cves" 0; then
-    DA_VERIFICATION[2]=VERIFIED
-    definition_evaluate_source 2
-    DEFINITION_KEV_CVES=$(cat "$DEFINITION_SCRATCH/kev-cves")
-    return 0
-  fi
-  definition_set_invalid 2
-  return 1
-}
-function definition_consume_bundle {
-  typeset bundle=$1 make_rc parse_rc
-  DEFINITION_ACQUISITION_MODE=operator-bundle
-  DEFINITION_ACQUISITION_CONSENT=downloader-fetch-command
-  if ! command -v openssl >/dev/null 2>&1; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 1
-  fi
-  definition_make_scratch; make_rc=$?
-  if [ "$make_rc" -ne 0 ]; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 1
-  fi
-  definition_parse_envelope "$bundle"; parse_rc=$?
-  if [ "$parse_rc" -ne 0 ]; then
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=structure
-    return 1
-  fi
-  if [ "${DA_VERIFICATION[0]}" = VERIFIED ] \
-      && ! definition_validate_apar "$DEFINITION_SCRATCH/ibm-apar-csv"; then
-    definition_set_invalid 0
-  fi
-  if [ "${DA_VERIFICATION[1]}" = VERIFIED ] \
-      && ! definition_validate_flrtvc "$DEFINITION_SCRATCH/ibm-flrtvc"; then
-    definition_set_invalid 1
-  fi
-  if [ "${DA_VERIFICATION[2]}" = VERIFIED ] \
-      && ! definition_validate_kev "$DEFINITION_SCRATCH/cisa-kev" "$DEFINITION_SCRATCH/kev-cves"; then
-    definition_set_invalid 2
-  fi
-  definition_evaluate_source 0; definition_evaluate_source 1; definition_evaluate_source 2
-  if [ "${DA_VERIFICATION[0]}" = VERIFIED ] && [ "${DA_VERIFICATION[1]}" = VERIFIED ]; then
-    FLRTVC_APARCSV="$DEFINITION_SCRATCH/ibm-apar-csv"
-    FLRTVC_KSH="$DEFINITION_SCRATCH/ibm-flrtvc"
-  fi
-  if [ "${DA_VERIFICATION[2]}" = VERIFIED ]; then
-    DEFINITION_KEV_CVES=$(cat "$DEFINITION_SCRATCH/kev-cves")
-  fi
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[1]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[2]}" = CURRENT ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=CURRENT
-    DEFINITION_ACQUISITION_OUTCOME=bundle-used
-    DEFINITION_ACQUISITION_REASON=none
-  elif [ "${DA_VERIFICATION[0]}" = VERIFIED ] || [ "${DA_VERIFICATION[1]}" = VERIFIED ] \
-      || [ "${DA_VERIFICATION[2]}" = VERIFIED ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=UNVERIFIED
-    DEFINITION_ACQUISITION_OUTCOME=stale-used
-    DEFINITION_ACQUISITION_REASON=stale
-  else
-    DEFINITION_ACQUISITION_OUTCOME=invalid-input
-    DEFINITION_ACQUISITION_REASON=structure
-  fi
-}
-function definition_cache_file_safe {
-  typeset target=$1 parent physical ls mode owner links me
-  case "$target" in /*) ;; *) return 1;; esac
-  parent=${target%/*}; [ -n "$parent" ] || parent=/
-  [ -d "$parent" ] && [ ! -L "$parent" ] || return 1
-  physical=$(cd "$parent" 2>/dev/null && (pwd -P 2>/dev/null || pwd)) || return 1
-  [ -z "$(path_untrusted "$physical")" ] || return 1
-  [ -e "$target" ] || return 0
-  [ -f "$target" ] && [ ! -L "$target" ] || return 1
-  ls=$(LC_ALL=C ls -ld "$target" 2>/dev/null) || return 1
-  mode=$(printf '%s\n' "$ls" | awk '{print $1}')
-  links=$(printf '%s\n' "$ls" | awk '{print $2}')
-  owner=$(printf '%s\n' "$ls" | awk '{print $3}')
-  me=$(id -un 2>/dev/null)
-  [ "$links" = 1 ] || return 1
-  [ "$owner" = root ] || [ "$owner" = "$me" ] || return 1
-  [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
-    && [ "$(printf '%s' "$mode" | cut -c9)" != w ]
-}
-function definition_default_cache {
-  typeset uid parent
-  uid=$(id -u 2>/dev/null)
-  case "$uid" in ''|*[!0-9]*) return 1;; esac
-  parent="/var/tmp/aixray-definitions-$uid"
-  if [ ! -e "$parent" ]; then
-    [ -d /var/tmp ] && [ ! -L /var/tmp ] || return 1
-    (umask 077 && mkdir "$parent") 2>/dev/null || return 1
-  fi
-  chmod 700 "$parent" 2>/dev/null || return 1
-  printf '%s/current.aixray-defs\n' "$parent"
-}
-function definition_sidecar_trusted {
-  typeset selfdir sidecar ls mode owner me digest
-  selfdir=$(definition_self_dir) || return 1
-  [ -z "$(path_untrusted "$selfdir")" ] || return 1
-  sidecar="$selfdir/aixray-definition-fetch.pl"
-  [ -f "$sidecar" ] && [ ! -L "$sidecar" ] || return 1
-  ls=$(LC_ALL=C ls -ld "$sidecar" 2>/dev/null) || return 1
-  mode=$(printf '%s\n' "$ls" | awk '{print $1}')
-  owner=$(printf '%s\n' "$ls" | awk '{print $3}')
-  me=$(id -un 2>/dev/null)
-  [ "$owner" = root ] || [ "$owner" = "$me" ] || return 1
-  [ "$(printf '%s' "$mode" | cut -c6)" != w ] \
-    && [ "$(printf '%s' "$mode" | cut -c9)" != w ] || return 1
-  digest=$(sha256_of "$sidecar")
-  [ "$digest" = "$DEFINITION_SIDECAR_SHA256" ] || return 1
-  printf '%s\n' "$sidecar"
-}
-function definition_prepare_cache_temp {
-  typeset cache=$1 parent base token attempt candidate
-  parent=${cache%/*}; base=${cache##*/}; attempt=0
-  while [ "$attempt" -lt 20 ]; do
-    token=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -dc '0-9a-f')
-    [ -n "$token" ] || token="$$.$attempt"
-    candidate="$parent/.$base.fetch.$token"
-    [ ! -e "$candidate" ] && { printf '%s\n' "$candidate"; return 0; }
-    attempt=$((attempt+1))
-  done
-  return 1
-}
-function definition_parse_fetch_message {
-  printf '%s\n' "$1" | awk '
-function allowed(reason) {
-  return reason == "dns" || reason == "route" || reason == "timeout" \
-    || reason == "tls" || reason == "http-status" || reason == "size-limit" \
-    || reason == "structure" || reason == "digest" || reason == "stale" \
-    || reason == "completion"
-}
-$1 == "aixray-definition-fetch:" && NF == 3 {
-  reason = $2
-  attempts = $3
-  sub(/^reason=/, "", reason)
-  sub(/^attempts=/, "", attempts)
-  if ($0 == "aixray-definition-fetch: reason=" reason " attempts=" attempts \
-      && allowed(reason) && attempts ~ /^[123]$/) {
-    parsed_reason = reason
-    parsed_attempts = attempts
-  }
-}
-END {
-  if (parsed_reason != "") {
-    print parsed_reason, parsed_attempts
-  }
-}'
-} # definition_parse_fetch_message
-function definition_select_cache_or_fetch {
-  typeset cache current_cache=0 stale_cache=0 sidecar temp fetch_rc consent_time
-  typeset fetch_message fetch_values fetch_reason fetch_attempts
-  [ -z "$DEFINITIONS_BUNDLE" ] && [ -z "$FLRTVC_REPORT" ] \
-    && [ -z "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
-    && [ -z "$KEV_JSON" ] || return 0
-  [ "$CURRENCY_STATUS_MODE" -eq 0 ] && [ -z "$FLRT_EXPORT" ] || return 0
-  [ -z "${AIXRAY_FIXTURES:-}" ] || return 0
-
-  if [ -n "$DEFINITIONS_CACHE" ]; then
-    cache=$DEFINITIONS_CACHE
-  else
-    cache=$(definition_default_cache) || {
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-      DEFINITION_ACQUISITION_REASON=runtime-missing
-      return 0
-    }
-  fi
-  definition_cache_file_safe "$cache" || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  if [ -s "$cache" ]; then
-    definition_consume_bundle "$cache" || :
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_CONSENT=prior-interactive-yes
-    DEFINITION_ACQUISITION_CONSENT_AT=$DEFINITION_BUNDLE_CREATED
-    if [ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ]; then
-      DEFINITION_ACQUISITION_OUTCOME=cache-used
-      DEFINITION_ACQUISITION_REASON=none
-      return 0
-    fi
-    [ "$DEFINITION_ACQUISITION_OUTCOME" != invalid-input ] && stale_cache=1
-  fi
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[2]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[1]}" = STALE ]; then
-    DEFINITION_ACQUISITION_OUTCOME=stale-used
-    DEFINITION_ACQUISITION_REASON=release-pin-stale
-    return 0
-  fi
-  if [ "$NO_DEFINITION_FETCH" -eq 1 ]; then
-    if [ "$stale_cache" -eq 1 ]; then
-      DEFINITION_ACQUISITION_OUTCOME=stale-used; DEFINITION_ACQUISITION_REASON=stale
-    fi
-    return 0
-  fi
-  if [ ! -t 0 ] || [ ! -t 2 ]; then
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=no-tty
-    DEFINITION_ACQUISITION_REASON=no-controlling-tty
-    return 0
-  fi
-  sidecar=$(definition_sidecar_trusted) || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=sidecar-integrity
-    return 0
-  }
-  [ -x /usr/bin/perl ] || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  temp=$(definition_prepare_cache_temp "$cache") || {
-    DEFINITION_ACQUISITION_MODE=consented-in-place
-    DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-    DEFINITION_ACQUISITION_REASON=runtime-missing
-    return 0
-  }
-  consent_time=$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null); [ -n "$consent_time" ] || consent_time=unknown
-  fetch_message=$(/usr/bin/perl -T "$sidecar" prompt-and-fetch "$temp" \
-    "$DEFINITION_REGISTRY_SHA256" "$VERSION" "$TODAY")
-  fetch_rc=$?
-  fetch_values=$(definition_parse_fetch_message "$fetch_message")
-  case "$fetch_values" in
-    *' '*)
-      fetch_reason=${fetch_values% *}
-      fetch_attempts=${fetch_values#* };;
-    *) fetch_reason=; fetch_attempts=;;
-  esac
-  case "$fetch_rc" in
-    0)
-      definition_cleanup
-      definition_consume_bundle "$temp" || {
-        rm -f "$temp"
-        if [ "$stale_cache" -eq 1 ]; then
-          definition_cleanup
-          definition_consume_bundle "$cache" || :
-          DEFINITION_ACQUISITION_MODE=consented-in-place
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used
-        else
-          DEFINITION_ACQUISITION_MODE=consented-in-place
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        fi
-        DEFINITION_ACQUISITION_CONSENT=interactive-yes
-        DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-        DEFINITION_ACQUISITION_NETWORK=true
-        DEFINITION_ACQUISITION_REQUESTS=3
-        DEFINITION_ACQUISITION_REASON=structure
-        return 0
-      }
-      if [ "$VULNERABILITY_DEFINITIONS_STATUS" != CURRENT ]; then
-        rm -f "$temp"
-        if [ "$stale_cache" -eq 1 ]; then
-          definition_cleanup
-          definition_consume_bundle "$cache" || :
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used
-        else
-          DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        fi
-        DEFINITION_ACQUISITION_MODE=consented-in-place
-        DEFINITION_ACQUISITION_CONSENT=interactive-yes
-        DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-        DEFINITION_ACQUISITION_NETWORK=true
-        DEFINITION_ACQUISITION_REQUESTS=3
-        DEFINITION_ACQUISITION_REASON=stale
-        return 0
-      fi
-      chmod 600 "$temp" 2>/dev/null
-      mv -f "$temp" "$cache" 2>/dev/null || {
-        rm -f "$temp"
-        DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-        DEFINITION_ACQUISITION_REASON=completion
-        return 0
-      }
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=fetched-and-used
-      DEFINITION_ACQUISITION_CONSENT=interactive-yes
-      DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-      DEFINITION_ACQUISITION_NETWORK=true
-      DEFINITION_ACQUISITION_REQUESTS=3
-      DEFINITION_ACQUISITION_REASON=none
-      ;;
-    10)
-      rm -f "$temp"
-      DEFINITION_ACQUISITION_MODE=consented-in-place
-      DEFINITION_ACQUISITION_OUTCOME=declined
-      DEFINITION_ACQUISITION_CONSENT=none
-      DEFINITION_ACQUISITION_REASON=operator-declined
-      ;;
-    11)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=no-tty
-      DEFINITION_ACQUISITION_REASON=no-controlling-tty;;
-    20)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=runtime-unavailable
-      DEFINITION_ACQUISITION_REASON=runtime-missing;;
-    31|32|33)
-      rm -f "$temp"; DEFINITION_ACQUISITION_NETWORK=true
-      case "$fetch_attempts" in 1|2|3) DEFINITION_ACQUISITION_REQUESTS=$fetch_attempts;;
-        *) DEFINITION_ACQUISITION_REQUESTS=$((fetch_rc-30));; esac
-      [ "$stale_cache" -eq 1 ] \
-        && DEFINITION_ACQUISITION_OUTCOME=fetch-failed-stale-used \
-        || DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-      DEFINITION_ACQUISITION_CONSENT=interactive-yes
-      DEFINITION_ACQUISITION_CONSENT_AT=$consent_time
-      case "$fetch_reason" in
-        dns|route|timeout|tls|http-status|size-limit|structure|digest|stale|completion)
-          DEFINITION_ACQUISITION_REASON=$fetch_reason;;
-        *) DEFINITION_ACQUISITION_REASON=completion;;
-      esac;;
-    *)
-      rm -f "$temp"; DEFINITION_ACQUISITION_OUTCOME=fetch-failed
-      DEFINITION_ACQUISITION_REASON=completion;;
-  esac
-}
-function definition_firmware_only_currency {
-  typeset ci offenders
-  [ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ] || return 1
-  [ "$CURRENCY_STATUS" = UNVERIFIED ] || return 1
-  offenders=""
-  ci=0
-  while [ "$ci" -lt "$CURRENCY_SOURCE_COUNT" ]; do
-    if [ "${CU_REQUIRED[$ci]}" -eq 1 ] && [ "${CU_STATUS[$ci]}" != CURRENT ]; then
-      offenders="$offenders ${CU_ID[$ci]}"
-    fi
-    ci=$((ci+1))
-  done
-  [ "$offenders" = " ibm-flrt-firmware" ] \
-    && [ "${CU_LOADED[5]}" -eq 0 ] \
-    && [ "${CU_STATUS[5]}" = UNKNOWN ] \
-    && [ "${CU_REASON[5]}" = "source was not loaded" ] || return 1
-  case "${CU_LOCATOR[5]}" in operator-supplied*) return 0;; *) return 1;; esac
-}
-function emit_definition_acquisition_html {
-  typeset headline detail
-  if definition_firmware_only_currency; then
-    headline="Vulnerability definitions: CURRENT — IBM APAR and CISA KEV are verified and current; IBM FLRTVC is current and matches PTxray's curated SHA-256 pin."
-    detail=" Firmware caveat — overall eight-source currency remains UNVERIFIED solely because no operator-supplied IBM firmware lifecycle response was provided. PTxray did not query IBM's firmware service because that request would send system-specific data. Firmware-dependent results remain NOT_ASSESSED."
-  elif [ "$DEFINITION_ACQUISITION_MODE" = operator-bundle ]; then
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — operator-supplied bundle created by the companion downloader (${DEFINITION_BUNDLE_CREATED}). No network was attempted by this scan. Source vintages and bundle SHA-256 follow."
-  elif [ "$DEFINITION_ACQUISITION_MODE" = consented-in-place ]; then
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — fetched on this AIX host with explicit consent at $DEFINITION_ACQUISITION_CONSENT_AT."
-  else
-    headline="Vulnerability definitions: $VULNERABILITY_DEFINITIONS_STATUS — definition acquisition was not requested. No network was attempted by this scan."
-  fi
-  if [ "$VULNERABILITY_DEFINITIONS_STATUS" != CURRENT ]; then
-    detail=" Findings below must not be treated as a current clean assessment. Definition-dependent clean results are NOT_ASSESSED. Observed adverse evidence, if any, is still shown."
-  else
-    detail=" IBM APAR vintage ${DA_ASOF[0]}; IBM FLRTVC ${DA_VERSION[1]} matched PTxray's curated SHA-256 pin; CISA KEV vintage ${DA_ASOF[2]}. Bundle SHA-256 ${DEFINITION_BUNDLE_SHA}."
-  fi
-  printf '<section class="definition-acquisition" aria-labelledby="definition-acquisition-heading"><h2 id="definition-acquisition-heading">Definition acquisition</h2><div class="%s" data-aixray-field="technical" data-aixray-location="report:definition-acquisition">%s%s</div></section>' \
-    "$([ "$VULNERABILITY_DEFINITIONS_STATUS" = CURRENT ] && echo currency-verified || echo currency-alert)" \
-    "$(printf '%s' "$headline" | hesc)" "$(printf '%s' "$detail" | hesc)"
-}
-function definition_sync_direct_attestation {
-  typeset di ci
-  [ "$DEFINITION_ACQUISITION_MODE" = direct-files ] || return
-  di=0
-  while [ "$di" -lt 2 ]; do
-    ci=$((di+3))
-    if { [ "$di" -eq 0 ] && [ -n "$FLRTVC_APARCSV" ]; } \
-        || { [ "$di" -eq 1 ] && [ -n "$FLRTVC_KSH" ]; }; then
-      DA_VERSION[$di]=${CU_VERSION[$ci]}; DA_VERSION_BASIS[$di]=${CU_VERSION_BASIS[$ci]}
-      DA_ASOF[$di]=${CU_ASOF[$ci]}; DA_ASOF_BASIS[$di]=${CU_ASOF_BASIS[$ci]}
-      DA_CONTENT[$di]=${CU_SHA256[$ci]}; DA_TRANSPORT[$di]=unknown
-      case "${CU_STATUS[$ci]}" in
-        CURRENT|STALE)
-          DA_VERIFICATION[$di]=VERIFIED; DA_FRESHNESS[$di]=${CU_STATUS[$ci]}
-          [ -n "${CU_AGE[$ci]}" ] && DA_AGE[$di]=${CU_AGE[$ci]} || DA_AGE[$di]=unknown
-          ;;
-        INVALID) definition_set_invalid "$di";;
-        *) DA_VERIFICATION[$di]=UNKNOWN; DA_FRESHNESS[$di]=UNKNOWN;;
-      esac
-    fi
-    di=$((di+1))
-  done
-  if [ "${DA_FRESHNESS[0]}" = CURRENT ] && [ "${DA_FRESHNESS[1]}" = CURRENT ] \
-      && [ "${DA_FRESHNESS[2]}" = CURRENT ]; then
-    VULNERABILITY_DEFINITIONS_STATUS=CURRENT
-  else
-    VULNERABILITY_DEFINITIONS_STATUS=UNVERIFIED
-  fi
-}
-
-# currency_bind_definitions_bundle_rows — (re)bind CU rows 2/3/4 from the
-# validated bundle envelope metadata. Called by parse_definitions_bundle() on
-# success and again after fixture-record replay so an operator-supplied bundle
-# always wins for the sources it frames.
-function currency_bind_definitions_bundle_rows {
-  [ "$DEFINITIONS_BUNDLE_VALID" -eq 1 ] || return 0
-  currency_set_runtime_record 3 1 "$DEFINITIONS_BUNDLE_APAR_VERSION" \
-    "$DEFINITIONS_BUNDLE_APAR_VBASIS" "$DEFINITIONS_BUNDLE_APAR_ASOF" \
-    "$DEFINITIONS_BUNDLE_APAR_ABASIS" "sha256:$DEFINITIONS_BUNDLE_APAR_SHA" \
-    "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  currency_set_runtime_record 4 1 "$DEFINITIONS_BUNDLE_ENGINE_VERSION" \
-    "$DEFINITIONS_BUNDLE_ENGINE_VBASIS" "$DEFINITIONS_BUNDLE_ENGINE_ASOF" \
-    "$DEFINITIONS_BUNDLE_ENGINE_ABASIS" "sha256:$DEFINITIONS_BUNDLE_ENGINE_SHA" \
-    "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  if [ "$DEFINITIONS_BUNDLE_HAS_KEV" -eq 1 ]; then
-    currency_set_runtime_record 2 1 "$DEFINITIONS_BUNDLE_KEV_VERSION" \
-      "$DEFINITIONS_BUNDLE_KEV_VBASIS" "$DEFINITIONS_BUNDLE_KEV_ASOF" \
-      "$DEFINITIONS_BUNDLE_KEV_ABASIS" "sha256:$DEFINITIONS_BUNDLE_KEV_SHA" \
-      "operator-supplied definitions bundle $DEFINITIONS_BUNDLE" verified verified
-  fi
-  return 0
-}
-
 function currency_load_local_flrtvc_metadata {
   typeset actual_sha actual_version apar_sha apar_date pin_file pin_sha pin_version pin_asof
   typeset first second report_version report_date report_valid
   typeset embedded_sha embedded_version embedded_date embedded_integrity prov_unknown apar_valid
-
-  # An operator-supplied definition bundle is a higher-priority carrier for the
-  # same two IBM inputs, so it is parsed BEFORE the fixture records, the
-  # embedded delivery slots, and the per-file flags below. Any validation
-  # failure leaves the CU rows at the no-bundle baseline and the scan proceeds
-  # untouched.
-  parse_definitions_bundle
 
   # A complete fixture record file is the disclosed conformance package.  It
   # replaces metadata only during fixture replay and never exists in production.
@@ -3052,10 +2701,6 @@ function currency_load_local_flrtvc_metadata {
       && [ -r "$AIXRAY_FIXTURES/source-records.tsv" ]; then
     currency_load_fixture_records "$AIXRAY_FIXTURES/source-records.tsv" \
       || return $?
-    # Re-bind the bundle-framed rows AFTER fixture replay so an operator-supplied
-    # bundle always wins for the sources it carries; the fixture records cover
-    # the remaining rows.
-    currency_bind_definitions_bundle_rows
     return 0
   fi
 
@@ -3241,7 +2886,7 @@ function currency_load_local_flrtvc_metadata {
 }
 
 function currency_apply_overrides {
-  typeset override source_id days ci found normalized
+  typeset override source_id days ci found normalized consumer_cap
   for override in $CURRENCY_OVERRIDES; do
     case "$override" in
       *=*) source_id=${override%%=*}; days=${override#*=};;
@@ -3259,6 +2904,16 @@ function currency_apply_overrides {
         found=1
         if [ "${CU_OVERRIDE[$ci]}" -eq 1 ]; then
           echo "ptxray: duplicate currency max-age override: $source_id" >&2
+          return 2
+        fi
+        consumer_cap=${CU_THRESHOLD[$ci]}
+        if ! awk -v requested="$normalized" -v cap="$consumer_cap" '
+          BEGIN {
+            if (length(requested) < length(cap)) exit 0
+            if (length(requested) > length(cap)) exit 1
+            exit (("x" requested) <= ("x" cap) ? 0 : 1)
+          }'; then
+          echo "ptxray: currency max age for $source_id cannot exceed its consumer cap of $consumer_cap days" >&2
           return 2
         fi
         CU_THRESHOLD[$ci]=$normalized
@@ -3680,14 +3335,26 @@ if ! currency_load_local_flrtvc_metadata; then
   echo "ptxray: currency attestation: $CURRENCY_INTERNAL_ERROR" >&2
   exit 1
 fi
+if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ]; then
+  PTXRAY_DEFS_LOCATOR="signed PTxray definitions; $(ptxray_defs_summary)"
+  PTXRAY_DEFS_CURRENCY_INDEX=$(currency_source_index cisa-kev) || {
+    echo 'ptxray: signed definitions cannot bind the CISA KEV currency row' >&2
+    exit 1
+  }
+  currency_set_runtime_record "$PTXRAY_DEFS_CURRENCY_INDEX" 1 \
+    "$PTXRAY_DEFS_KEV_VERSION" source-revision \
+    "$PTXRAY_DEFS_KEV_ASOF" source-declared \
+    "sha256:$PTXRAY_DEFS_KEV_SHA256" "$PTXRAY_DEFS_LOCATOR" verified verified
+  PTXRAY_DEFS_CURRENCY_INDEX=$(currency_source_index ibm-apar-csv) || {
+    echo 'ptxray: signed definitions cannot bind the IBM APAR currency row' >&2
+    exit 1
+  }
+  currency_set_runtime_record "$PTXRAY_DEFS_CURRENCY_INDEX" 1 \
+    "$PTXRAY_DEFS_APAR_VERSION" source-vintage \
+    "$PTXRAY_DEFS_APAR_ASOF" source-declared \
+    "sha256:$PTXRAY_DEFS_APAR_SHA256" "$PTXRAY_DEFS_LOCATOR" verified verified
+fi
 
-# The operator-bundle scratch holds decoded (verified) IBM payload bytes until
-# the invoke path stages them; clean it at exit on every path, including
-# --currency-status and the non-AIX early exit. Registered at top level because
-# a function-set EXIT trap fires when that function returns. The invoke path
-# later replaces this trap with one that also cleans its own scratch.
-trap '[ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"' EXIT
-trap '[ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
 currency_apply_overrides
 CURRENCY_OVERRIDE_RC=$?
 [ "$CURRENCY_OVERRIDE_RC" -eq 0 ] || exit "$CURRENCY_OVERRIDE_RC"
@@ -3703,18 +3370,13 @@ if [ "$CURRENCY_STATUS_MODE" -eq 1 ]; then
   exit 3
 fi
 
-if [ -z "${AIXRAY_FIXTURES:-}" ] && [ "$(uname -s 2>/dev/null)" != "AIX" ]; then
-  echo "ptxray-aix.sh: this is the AIX edition (VIOS temporarily disabled) and this host is not AIX; PTxray assesses AIX." >&2
-  exit 2
-fi
-
 # ---- interactive standard-selection menu (SPEC-tty-menu unit B) ----------------------
 # Shown ONLY when both stdout and stdin are terminals, the operator made NO explicit
 # output-format/mode selection (--json/--html/--compliance/--currency-status/--flrt-export/
 # --flrtvc-* all set EXPLICIT_OUTPUT and win — fix-cycle-2 R1 ruling), and neither --no-menu
 # nor AIXRAY_NO_MENU opts out. Every non-interactive invocation (pipes, < /dev/null, cron,
 # CI, an explicit --compliance) skips this block and stays byte-identical to the pre-menu
-# binary. No download or network behaviour is offered — the scanner has zero egress. The
+# binary. This compliance-format menu itself performs no definitions selection or egress. The
 # menu renders its numbered lines and its ALL token from COMPLIANCE_STANDARDS /
 # COMPLIANCE_STANDARD_LABELS / COMPLIANCE_STANDARD_COUNT (defined after the argument
 # loop), so the numbering cannot drift from the vocabulary.
@@ -3725,7 +3387,7 @@ MENU_ENV_OK=1
 case "${AIXRAY_NO_MENU:-0}" in ""|0) MENU_ENV_OK=1;; *) MENU_ENV_OK=0;; esac
 if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
    && [ "$NO_MENU" -eq 0 ] && [ "$MENU_ENV_OK" -eq 1 ]; then
-  trap 'exit 130' INT
+  trap 'ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 130' INT
   MENU_ATTEMPTS=0
   MENU_ANSWER=""
   while :; do
@@ -3801,7 +3463,11 @@ if [ -t 1 ] && [ -t 0 ] && [ "$EXPLICIT_OUTPUT" -eq 0 ] \
     fi
     break
   done
-  trap - INT
+  if [ "$PTXRAY_DEFS_SNAPSHOT_ACTIVE" -eq 1 ]; then
+    ptxray_defs_arm_snapshot_cleanup
+  else
+    trap - INT
+  fi
   # menu selection -> COMPLIANCE_LIST; ALL expands the authoritative vocabulary in order
   if [ "$MENU_SEL" = "ALL" ]; then
     COMPLIANCE_LIST="${COMPLIANCE_STANDARDS[*]}"
@@ -3904,7 +3570,7 @@ function currency_finding_indices {
   case "$1" in
     os_level|os_tl_sp|hw_gen|firmware|vios_level) echo "0";;
     sec_apars) echo "1";;
-    apar_scan) echo "3 4";;
+    apar_scan) echo "2 3 4";;
     stig_fileperms|stig_secattr|stig_nettune|stig_svcoff) echo "6 7";;
     *) echo "";;
   esac
@@ -4018,10 +3684,6 @@ function add { # category id label status sev observed meaning fix [controls]
   NFIND=$((NFIND+1))
 }
 
-MYUID=$(aix id_u id -u)
-if [ "${MYUID:-0}" != "0" ]; then
-  echo "running without root: root-only checks may report WARN or NOT_ASSESSED" >&2
-fi
 function nr_warn { # category id label <what> <command> [controls] [status] [severity]
   typeset NR_STATUS NR_SEVERITY
   NR_STATUS=${7:-WARN}
@@ -4044,10 +3706,11 @@ if [ -n "${AIXRAY_TODAY:-}" ]; then NOW="$TODAY"; else NOW=$(date '+%Y-%m-%d %H:
 # (Java.auto.ksh, FLRT.report) branch on exactly '[ -f /usr/ios/cli/ioscli ]', NOT on
 # ioslevel (which reads empty on a plain LPAR). Detect ONCE here; reuse $IS_VIOS / $ROLE
 # throughout (presentation, lifecycle weighting, and the VIOS-role depth in checks_vios).
-VIOS_MARKER=$(aix ls_ioscli ls /usr/ios/cli/ioscli); VIOS_MARKER_RC=$?
-VIOS_MARKER_ROWS=$(printf '%s\n' "$VIOS_MARKER" | awk '$0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
-VIOS_MARKER_MATCH=${VIOS_MARKER_ROWS%%:*}
-VIOS_MARKER_NONEMPTY=${VIOS_MARKER_ROWS#*:}
+VIOS_MARKER=$AIXRAY_STARTUP_VIOS_MARKER
+VIOS_MARKER_RC=$AIXRAY_STARTUP_VIOS_RC
+VIOS_MARKER_ROWS=$AIXRAY_STARTUP_VIOS_ROWS
+VIOS_MARKER_MATCH=$AIXRAY_STARTUP_VIOS_MATCH
+VIOS_MARKER_NONEMPTY=$AIXRAY_STARTUP_VIOS_NONEMPTY
 if [ "$VIOS_MARKER_RC" -eq 0 ] && [ "$VIOS_MARKER_MATCH" -eq 1 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 1 ]; then
   IS_VIOS=1; ROLE=vios
 elif [ "$VIOS_MARKER_RC" -eq 2 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 0 ]; then
@@ -4058,13 +3721,9 @@ else
   IS_VIOS=0; ROLE=unknown
 fi
 
-# VIOS lane is temporarily disabled at runtime: the VIOS-role code, fixtures, and oracles
-# stay in the tree, but this release does not run or advertise it -- it is below the
-# quality bar. AIXRAY_VIOS_DEV=1 is a development-only override, never a customer flag.
-if [ "$IS_VIOS" -eq 1 ] && [ "${AIXRAY_VIOS_DEV:-0}" != "1" ]; then
-  echo "ptxray-aix.sh: VIOS assessment is temporarily disabled in this release — below the quality bar; AIX is the supported target of this edition; no scan was run. Set AIXRAY_VIOS_DEV=1 only for development." >&2
-  exit 2
-fi
+# The public VIOS refusal already ran as a startup gate before definitions
+# selection. AIXRAY_VIOS_DEV=1 exists only in private test bytes so the dormant
+# role-specific judgment path can retain fixture coverage pending live acceptance.
 
 # ============================ CHECKS (read-only) ======================================
 
@@ -5019,7 +4678,8 @@ SEC_APARS_EOF
   #   0. Delivery bundle (DEFAULT when present): decode the embedded, pinned data into
   #      this run's private scratch directory and invoke offline. The committed/public
   #      scanner has empty slots, so it retains the seed-only fallback and ships no IBM IP.
-  #   1. --flrtvc-ksh <script> --flrtvc-apar-csv <file> (explicit override): PTxray invokes
+  #   1. --flrtvc-ksh <script> with the selected signed apar.csv (or an explicit
+  #      --flrtvc-apar-csv override): PTxray invokes
   #      flrtvc.ksh ITSELF, in the enforced offline mode (-s -f -l -e), and captures its
   #      real exit status directly via $? — the safe invocation is GUARANTEED, not hoped
   #      for from an externally-produced file (adversarial review round 3, item 2). Fetch both
@@ -5068,24 +4728,16 @@ SEC_APARS_EOF
       && [ "${#apar_csv_sha256}" -gt 0 ] && [ "${#apar_csv_vintage}" -gt 0 ]; then
     FV_BUNDLE_COMPLETE=1
   fi
-  if [ -n "$FLRTVC_KSH" ] && [ -n "$FLRTVC_APARCSV" ]; then
+  if [ -n "$FLRTVC_KSH" ] \
+      && { [ -n "$FLRTVC_APARCSV" ] || [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; }; then
     FV_INVOKE_MODE="external"
-    FLRTVC_DATA_SOURCE="fetched-flag"
-  elif [ -n "$DEFINITIONS_BUNDLE" ] && [ "$DEFINITIONS_BUNDLE_VALID" -eq 1 ]; then
-    # Operator-supplied definition bundle: verified envelope payloads decoded
-    # into a private scratch; the invoke path runs the engine exactly like the
-    # embedded delivery path. The JSON/HTML mode field stays within the frozen
-    # flrtvc_data contract vocabulary ("bundled"); the currency attestation rows
-    # and the finding's ATTRIB disclose "operator-supplied definitions bundle".
-    FV_INVOKE_MODE="bundle"
-    FLRTVC_DATA_SOURCE="bundled"
-    FLRTVC_DATA_VERSION=$DEFINITIONS_BUNDLE_ENGINE_VERSION
-    if [ "$(valid_ymd "$DEFINITIONS_BUNDLE_APAR_ASOF")" -eq 1 ]; then
-      FV_META_AGE=$(( TODAY_J - $(d2j "$DEFINITIONS_BUNDLE_APAR_ASOF") ))
-      if [ "$FV_META_AGE" -ge 0 ]; then
-        FLRTVC_DATA_VINTAGE=$DEFINITIONS_BUNDLE_APAR_ASOF
-        FLRTVC_DATA_AGE=$FV_META_AGE
-      fi
+    if [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; then
+      FLRTVC_DATA_SOURCE="signed-definitions"
+      FLRTVC_DATA_VERSION=$PTXRAY_DEFS_APAR_VERSION
+      FLRTVC_DATA_VINTAGE=$PTXRAY_DEFS_APAR_ASOF
+      FLRTVC_DATA_AGE=$PTXRAY_DEFS_AGE_DAYS
+    else
+      FLRTVC_DATA_SOURCE="fetched-flag"
     fi
   elif [ -z "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
       && [ -z "$FLRTVC_REPORT" ] && [ "${AIXRAY_NO_BUNDLED_FLRTVC:-0}" != "1" ] \
@@ -5104,7 +4756,8 @@ SEC_APARS_EOF
     FLRTVC_DATA_SOURCE="report-flag"
   fi
 
-  if [ -n "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ]; then
+  if [ -n "$FLRTVC_KSH" ] && [ -z "$FLRTVC_APARCSV" ] \
+      && [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -ne 1 ]; then
     FLRTVC_DATA_SOURCE="fetched-flag"
     add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — --flrtvc-ksh given without --flrtvc-apar-csv" \
         "Both are required together to invoke flrtvc.ksh directly." "supply --flrtvc-apar-csv <file> alongside --flrtvc-ksh." "ffiec:II.C.10"
@@ -5119,7 +4772,9 @@ SEC_APARS_EOF
     if [ "$FV_INVOKE_MODE" = "external" ] && [ ! -r "$FLRTVC_KSH" ]; then
       add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — cannot read $FLRTVC_KSH" \
           "The --flrtvc-ksh file could not be read." "check the path and permissions of the flrtvc.ksh script." "ffiec:II.C.10"
-    elif [ "$FV_INVOKE_MODE" = "external" ] && [ ! -r "$FLRTVC_APARCSV" ]; then
+    elif [ "$FV_INVOKE_MODE" = "external" ] \
+        && [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -ne 1 ] \
+        && [ ! -r "$FLRTVC_APARCSV" ]; then
       add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — cannot read $FLRTVC_APARCSV" \
           "The --flrtvc-apar-csv file could not be read." "check the path and permissions of the apar.csv file." "ffiec:II.C.10"
     else
@@ -5343,28 +4998,6 @@ SEC_APARS_EOF
             && { [ "$(valid_ymd "$apar_csv_vintage")" -ne 1 ] || [ -z "$FLRTVC_DATA_AGE" ]; }; then
           FV_PINPROBLEM="bundled apar.csv vintage is invalid or in the future: $apar_csv_vintage"
         fi
-      else
-        # Operator-bundle mode: parse_definitions_bundle() already footer-bound the
-        # envelope and payload digests; this is a defense-in-depth re-check that the
-        # metadata handed to the invoke path is well-formed before any copy/exec.
-        FV_BUNDLE_KHEX=$(printf '%s' "$DEFINITIONS_BUNDLE_ENGINE_SHA" | awk '$0 ~ /^[0-9a-f]+$/ {print "hex"}')
-        FV_BUNDLE_AHEX=$(printf '%s' "$DEFINITIONS_BUNDLE_APAR_SHA" | awk '$0 ~ /^[0-9a-f]+$/ {print "hex"}')
-        if [ "${#DEFINITIONS_BUNDLE_ENGINE_SHA}" -ne 64 ] || [ "$FV_BUNDLE_KHEX" != "hex" ] \
-            || [ "${#DEFINITIONS_BUNDLE_APAR_SHA}" -ne 64 ] || [ "$FV_BUNDLE_AHEX" != "hex" ]; then
-          FV_PINPROBLEM="definitions-bundle SHA256 metadata is missing or malformed"
-        else
-          case "$DEFINITIONS_BUNDLE_ENGINE_VERSION" in
-            ''|*[!A-Za-z0-9._-]*) FV_PINPROBLEM="definitions-bundle engine version metadata is malformed" ;;
-          esac
-        fi
-        if [ -z "$FV_PINPROBLEM" ] \
-            && [ "$(valid_ymd "$DEFINITIONS_BUNDLE_ENGINE_ASOF")" -ne 1 ]; then
-          FV_PINPROBLEM="definitions-bundle engine as-of date is invalid: $DEFINITIONS_BUNDLE_ENGINE_ASOF"
-        fi
-        if [ -z "$FV_PINPROBLEM" ] \
-            && { [ "$(valid_ymd "$DEFINITIONS_BUNDLE_APAR_ASOF")" -ne 1 ] || [ -z "$FLRTVC_DATA_AGE" ]; }; then
-          FV_PINPROBLEM="definitions-bundle apar.csv vintage is invalid or in the future: $DEFINITIONS_BUNDLE_APAR_ASOF"
-        fi
       fi
       FV_HASHTOOL=$(command -v openssl 2>/dev/null)
       # Prefer a binary literally named ksh93 (the standard AIX path, /usr/bin/ksh93);
@@ -5404,10 +5037,6 @@ SEC_APARS_EOF
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
               "The embedded delivery metadata is not trustworthy enough to decode or execute as root; the bundled sweep was refused and the seed remains the only patch signal." \
               "rebuild the local delivery artifact; never hand-edit or publish its slots." "ffiec:II.C.10"
-        elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-          add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
-              "The operator-supplied definitions bundle metadata is not trustworthy enough to decode or execute as root; the bundled sweep was refused and the seed remains the only patch signal." \
-              "re-fetch a valid definitions bundle and re-run." "ffiec:II.C.10"
         else
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — $FV_PINPROBLEM" \
               "There is no trustworthy pinned SHA256 to verify the supplied --flrtvc-ksh script against, and an unverified script must never be executed (it typically runs as root)." \
@@ -5440,8 +5069,8 @@ SEC_APARS_EOF
         # set so an early/fatal shell exit also cleans the mode-700 scratch (which holds
         # the full fileset+efix inventories).
         FV_TMPDIR=""; FV_MADE=""
-        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; [ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"' EXIT
-        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; [ -n "$DEFINITIONS_BUNDLE_SCRATCH" ] && rm -rf "$DEFINITIONS_BUNDLE_SCRATCH"; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; ptxray_defs_cleanup_snapshot' EXIT
+        trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
         FV_TRY=0
         while [ "$FV_TRY" -lt 20 ] && [ -z "$FV_MADE" ]; do
           FV_CAND="$FV_TMPBASE/aixray-flrtvc.$$.$(date +%s 2>/dev/null)${FV_TRY}"
@@ -5453,6 +5082,7 @@ SEC_APARS_EOF
         FV_CLEANUP="$FV_TMPDIR"
         if [ -z "$FV_MADE" ]; then
           trap - EXIT HUP INT TERM   # nothing was created; disarm the (no-op) traps
+          ptxray_defs_arm_snapshot_cleanup
           add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not create a secure temp directory for the flrtvc.ksh invocation" \
               "A private, mode-700 scratch directory could not be created after multiple attempts." \
               "check /tmp permissions and available space, then re-run." "ffiec:II.C.10"
@@ -5464,13 +5094,6 @@ SEC_APARS_EOF
             # introduced. The decoded private copy is still verified before execution.
             FV_PINSHA=$flrtvc_ksh_sha256
             FV_PINVERSION=$flrtvc_ksh_version
-          elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-            # Operator-bundle path has no external pin path either: the expected
-            # engine digest/version come from the envelope the operator supplied,
-            # and the whole envelope was footer-bound before any payload decode.
-            FV_PINSHA=$DEFINITIONS_BUNDLE_ENGINE_SHA
-            FV_PINVERSION=$DEFINITIONS_BUNDLE_ENGINE_VERSION
-            FV_PINASOF=$DEFINITIONS_BUNDLE_ENGINE_ASOF
           else
             # Path 1 PIN: copy into the private scratch dir and read the hash from the
             # COPY (round 6 item 4) — the security-critical SHA256 is never taken from
@@ -5550,73 +5173,6 @@ SEC_APARS_EOF
                   FV_PAYLOAD_READY=1
                 fi
               fi
-            elif [ "$FV_INVOKE_MODE" = "bundle" ]; then
-              # Operator-bundle path: copy the parse-verified decoded payloads
-              # into THIS private scratch and re-hash the copies, so the
-              # canonical attestation binds to exactly the bytes handed to
-              # flrtvc.ksh. The expected digests/version come from the envelope
-              # (FV_PINSHA/FV_PINVERSION set above), not an external pin file.
-              FV_TMPAPAR="$FV_TMPDIR/apar.csv"
-              if ! cp "$DEFINITIONS_BUNDLE_ENGINE" "$FV_TMPKSH" 2>/dev/null; then
-                add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy the definitions-bundle engine payload into the private scratch" \
-                    "The verified bundle engine could not be staged for execution; an unstaged script is never executed." \
-                    "check free space in ${TMPDIR:-/tmp} and re-run." "ffiec:II.C.10"
-              elif ! cp "$DEFINITIONS_BUNDLE_APAR" "$FV_TMPAPAR" 2>/dev/null; then
-                add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy the definitions-bundle apar.csv payload into the private scratch" \
-                    "The verified bundle feed could not be staged; no sweep is claimed from an unstaged input." \
-                    "check free space in ${TMPDIR:-/tmp} and re-run." "ffiec:II.C.10"
-              else
-                chmod 0600 "$FV_TMPKSH" "$FV_TMPAPAR" 2>/dev/null
-                FV_ACTUALSHA=$(sha256_of "$FV_TMPKSH")
-                FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
-                FV_DECODE_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
-                FV_DECODE_VALID=$?
-                if [ -z "$FV_ACTUALSHA" ] || [ -z "$FV_ACTUALAPARSHA" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv could not be integrity-bound"
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
-                    "decoded bundle flrtvc.ksh could not be integrity-bound"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not checksum the decoded definitions-bundle FLRTVC data" \
-                      "The staged private copies could not be integrity-checked, so neither is trusted or executed." \
-                      "confirm openssl works and re-run." "ffiec:II.C.10"
-                elif [ "$FV_ACTUALSHA" != "$FV_PINSHA" ]; then
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
-                    "decoded bundle flrtvc.ksh conflicts with envelope digest"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle flrtvc.ksh SHA256 does not match the envelope digest — REFUSING to execute it" \
-                      "The staged engine does not match the verified envelope's declared SHA256 ($FV_ACTUALSHA vs. expected $FV_PINSHA). Corrupt or tampered code is never executed, especially as root." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_ACTUALAPARSHA" != "$DEFINITIONS_BUNDLE_APAR_SHA" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv conflicts with envelope digest"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv SHA256 does not match the envelope digest" \
-                      "The staged feed does not match the verified envelope's declared SHA256, so it is not a trustworthy assessment input." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_DECODE_VALID" -ne 0 ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv failed structural validation"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv failed structural validation" \
-                      "The decoded feed did not contain the required FLRT CSV header, source-vintage row, and structurally complete advisory records." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                elif [ "$FV_DECODE_VINTAGE" != "$DEFINITIONS_BUNDLE_APAR_ASOF" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
-                    "decoded bundle apar.csv vintage conflicts with envelope metadata"
-                  add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — definitions-bundle apar.csv row-2 vintage does not match envelope metadata ($FV_DECODE_VINTAGE vs. $DEFINITIONS_BUNDLE_APAR_ASOF)" \
-                      "The feed bytes and advertised vintage disagree; the scanner refuses to present either as authoritative." \
-                      "re-fetch the definitions bundle and re-run." "ffiec:II.C.10"
-                else
-                  currency_set_runtime_record 3 1 "$FV_DECODE_VINTAGE" source-vintage \
-                    "$FV_DECODE_VINTAGE" source-declared "sha256:$FV_ACTUALAPARSHA" \
-                    "IBM FLRT apar.csv row-2 vintage" verified verified
-                  currency_evaluate
-                  FV_RUN_APARCSV=$FV_TMPAPAR
-                  FV_PAYLOAD_READY=1
-                fi
-              fi
-              # The parse-time scratch held verified copies; the files are now
-              # staged in FV_TMPDIR, so release it eagerly (the EXIT traps also
-              # no-op once the variable is cleared).
-              rm -rf "$DEFINITIONS_BUNDLE_SCRATCH" 2>/dev/null
-              DEFINITIONS_BUNDLE_SCRATCH=""
             else
               # Path 1 RUNTIME PIN ENFORCEMENT (round 4 item 1, round 5 item 1):
               # Copy BOTH supplied inputs into the private scratch dir first, then
@@ -5629,7 +5185,16 @@ SEC_APARS_EOF
                 FV_SCRIPT_COPIED=1
                 FV_ACTUALSHA=$(sha256_of "$FV_TMPKSH")
               fi
-              if cp "$FLRTVC_APARCSV" "$FV_TMPAPAR" 2>/dev/null; then
+              if [ "$PTXRAY_DEFS_APAR_FOR_FLRTVC" -eq 1 ]; then
+                if ptxray_defs_copy_payload ibm-apar-csv "$FV_TMPAPAR"; then
+                  FV_APAR_COPIED=1
+                  FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
+                  FV_COPY_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
+                  FV_COPY_APAR_VALID=$?
+                else
+                  FV_COPY_APAR_VALID=1
+                fi
+              elif cp "$FLRTVC_APARCSV" "$FV_TMPAPAR" 2>/dev/null; then
                 FV_APAR_COPIED=1
                 FV_ACTUALAPARSHA=$(sha256_of "$FV_TMPAPAR")
                 FV_COPY_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
@@ -5830,8 +5395,6 @@ SEC_APARS_EOF
     fi
     if [ "$FV_INVOKED" -eq 1 ] && [ "$FV_INVOKE_MODE" = "bundled" ]; then
       ATTRIB="path 0 — bundled embedded data; PTxray invoked flrtvc.ksh itself, offline"
-    elif [ "$FV_INVOKED" -eq 1 ] && [ "$FV_INVOKE_MODE" = "bundle" ]; then
-      ATTRIB="operator-supplied definitions bundle; PTxray invoked flrtvc.ksh itself, offline"
     elif [ "$FV_INVOKED" -eq 1 ]; then
       ATTRIB="path 1 — external --flrtvc-* files; PTxray invoked flrtvc.ksh itself, offline"
     else
@@ -6003,6 +5566,36 @@ SEC_APARS_EOF
       FVNCVE=$(printf '%s' "$SUMLINE" | awk -F'\t' '{print $8+0}')
       FVNAPAR=$(printf '%s' "$SUMLINE" | awk -F'\t' '{print $9+0}')
 
+      # Match only CVEs already reported adverse by IBM FLRTVC against the
+      # CVE-ID list derived by the adjacent verifier from the selected signed
+      # CISA KEV JSON. No downloaded data is sourced or executed.
+      PTXRAY_KEV_MATCH_STATE=not-assessed
+      PTXRAY_KEV_MATCH_COUNT=0
+      PTXRAY_KEV_MATCH_NAMES=""
+      # A stale or unknown KEV set cannot prove a CVE is absent. Only current
+      # signed KEV data may populate true/false membership; otherwise the
+      # exposure field remains null/NOT_ASSESSED instead of rendering false/0.
+      if [ "$PTXRAY_DEFS_SELECTED" -eq 1 ] && [ "$PTXRAY_DEFS_FRESHNESS" = current ]; then
+        PTXRAY_KEV_CVES=$(ptxray_defs_read_payload cisa-kev-cves)
+        PTXRAY_KEV_READ_RC=$?
+        if [ "$PTXRAY_KEV_READ_RC" -eq 0 ] \
+            && printf '%s\n' "$PTXRAY_KEV_CVES" | awk '
+              $0 !~ /^CVE-[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9]*$/ {bad=1}
+              seen[$0]++ {bad=1}
+              END{exit bad||NR<1?1:0}'; then
+          DETAILLINES=$(printf '%s\n%s\n%s\n' "$PTXRAY_KEV_CVES" \
+            '--PTXRAY-EXPOSURES--' "$DETAILLINES" | awk -F'\t' '
+              $0=="--PTXRAY-EXPOSURES--" {details=1;next}
+              !details {kev[$1]=1;next}
+              NF>=14 {print $0 "\t" (($1!=""&&kev[$1])?1:0)}')
+          PTXRAY_KEV_MATCH_COUNT=$(printf '%s\n' "$DETAILLINES" \
+            | awk -F'\t' 'NF>=15&&$15==1{n++}END{print n+0}')
+          PTXRAY_KEV_MATCH_NAMES=$(printf '%s\n' "$DETAILLINES" \
+            | awk -F'\t' 'NF>=15&&$15==1&&!seen[$1]++{printf "%s%s",(n++?", ":""),$1}')
+          PTXRAY_KEV_MATCH_STATE=assessed
+        fi
+      fi
+
       # A trailer/body contradiction makes the completion INVALID even when the
       # exit code alone is a legal 0 or 2 — and it fills the disclosure so the
       # FAIL narrative below can carry it. Evaluated only under the unified banner
@@ -6076,7 +5669,12 @@ SEC_APARS_EOF
           }
           END{printf "Critical %d; High %d; Medium %d; Low %d; None %d; Unscored %d",critical+0,high+0,medium+0,low+0,none+0,unscored+0}
         ')
-        add patch apar_scan "FLRT APAR exposure scan" FAIL high "CVSS ladder: Known-Exploited NOT_ASSESSED; $FV_LADDER_COUNTS — $FVNEXP exposure record(s)$HIPERNOTE$IDBREAKDOWN: $FVNAMES$COMPLETION_NOTE" \
+        if [ "$PTXRAY_KEV_MATCH_STATE" = assessed ]; then
+          PTXRAY_KEV_OBSERVED="Known-Exploited $PTXRAY_KEV_MATCH_COUNT"
+        else
+          PTXRAY_KEV_OBSERVED="Known-Exploited NOT_ASSESSED"
+        fi
+        add patch apar_scan "FLRT APAR exposure scan" FAIL high "CVSS ladder: $PTXRAY_KEV_OBSERVED; $FV_LADDER_COUNTS — $FVNEXP exposure record(s)$HIPERNOTE$IDBREAKDOWN: $FVNAMES$COMPLETION_NOTE" \
             "Published fixes you don't have, per IBM's own FLRTVC engine ($ATTRIB) — this box matches $FVNEXP exposure record(s) ($FVNCVE distinct CVE(s), $FVNAPAR distinct APAR/ifix identifier(s)) whose fix exists and is not installed here.$MALNOTE$STALENOTE$COMPLETION_NOTE" \
             "apply the listed APAR/ifix from IBM Fix Central (the bulletin/download URLs are in the JSON exposures[]); re-scan after patching." "ffiec:II.C.10"
         FV_PROVENANCE_REAL=1
@@ -6139,6 +5737,7 @@ SEC_APARS_EOF
   # is not.
   if [ -n "$FV_CLEANUP" ]; then
     trap - EXIT HUP INT TERM
+    ptxray_defs_arm_snapshot_cleanup
     FV_MADE=""
     FV_TMPDIR=""
     rm -rf "$FV_CLEANUP"
@@ -34819,8 +34418,8 @@ _AIXRAY_SESSION_KEYS=""
   #      never executed and no capture ever carried suid_sgid_local /
   #      suid_sgid_all at all.
   #   2. Authorization, decided by the first layer that applies:
-  #        a. site baseline   /etc/security/aixray-suid-sgid-baseline
-  #        b. not-maintained  /etc/security/aixray-suid-sgid-baseline.override
+  #        a. site baseline   /etc/security/ptxray-suid-sgid-baseline
+  #        b. not-maintained  /etc/security/ptxray-suid-sgid-baseline.override
   #                           (consulted only when no site baseline exists)
   #        c. shipped default: vendor ownership read from AIX's own package
   #           database, one `lslpp -w <path>` probe per discovered path.
@@ -34839,7 +34438,7 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSI_PATHS SSI_P SSI_KEY SSI_LW SSI_LW_RC SSI_CLASS
   typeset SSI_UNOWNED SSI_UNKNOWN
 
-  SSI_BASELINE=/etc/security/aixray-suid-sgid-baseline
+  SSI_BASELINE=/etc/security/ptxray-suid-sgid-baseline
   SSI_ALLOW=${SSI_BASELINE}.allow
   SSI_OVERRIDE=${SSI_BASELINE}.override
   SSI_ALLOW_SRC=/dev/null
@@ -35087,7 +34686,7 @@ _AIXRAY_SESSION_KEYS=""
       ;;
     *)
       SSI_MEANING="PTxray could not resolve every setuid/setgid file to an authorization: either the inventory probe failed or fileset ownership could not be read for at least one path."
-      SSI_FIX="rerun as root, confirm lslpp can query the software vital product database, or provision a readable baseline at /etc/security/aixray-suid-sgid-baseline, then rerun PTxray."
+      SSI_FIX="rerun as root, confirm lslpp can query the software vital product database, or provision a readable baseline at /etc/security/ptxray-suid-sgid-baseline, then rerun PTxray."
       SSI_SEV=med
       ;;
   esac
@@ -35168,7 +34767,7 @@ _AIXRAY_SESSION_KEYS=""
   [ -n "$AID_HOSTKEY" ] || AID_HOSTKEY=unknown
   AID_SNAP_DIR=${AIXRAY_ACCOUNT_SNAPSHOT_DIR:-${OUT_DIR:-}}
   if [ -n "$AID_SNAP_DIR" ]; then
-    AID_SNAPSHOT_FILE="$AID_SNAP_DIR/aixray-account-inventory-$AID_HOSTKEY.snapshot"
+    AID_SNAPSHOT_FILE="$AID_SNAP_DIR/ptxray-account-inventory-$AID_HOSTKEY.snapshot"
   fi
 
   AID_UID0=$(aix passwd_uid0 awk -F: '$3==0 {print $1}' /etc/passwd)
@@ -36976,58 +36575,22 @@ add security nfs_server_absent "NFS server fileset" \
   "$NFS_STATUS" high "$NFS_OBSERVED" \
   "$NFS_MEANING" "$NFS_FIX" "cis-l1"
 _AIXRAY_SESSION_KEYS=""
-  # nfs_export_everyone — active NFS exports accessible to unauthenticated clients.
-  # All reads are fixture-routed and side-effect free. showmount -e lists the
-  # local NFS server's currently exported directories with their access lists;
-  # an export line listing (everyone) imposes no client restriction.
-  #
-  # showmount -e is an RPC query to the local mount daemon, and on a host that
-  # exports nothing it exits non-zero with empty stdout — the state captured on
-  # both lab boxes on 2026-08-06 (showmount_e.out empty, showmount_e.rc 1).
-  # Refusing there would leave this check able only to refuse, which is not
-  # coverage. A non-zero rc is therefore resolved against two local, non-RPC
-  # probes that ck-nfs-exports already uses: the no-argument exportfs listing
-  # (/etc/xtab — the active export table) and /etc/exports (the definition
-  # file). The empty conclusion is drawn only when BOTH independently show an
-  # empty export set; a failed exportfs, an inconclusive listing, or an
-  # unestablished /etc/exports state still refuses, so an rc=1 that actually
-  # means "mountd unreachable" can never be laundered into a clean verdict.
-  typeset SHOWMOUNT SHOWMOUNT_RC NEE_EVERYONE NEE_ROWS
-  typeset NEE_LIVE NEE_LIVE_RC NEE_LIVE_NONE
+  # nfs_export_everyone — active NFS exports without an access allow list.
+  # The no-argument exportfs form reads AIX's local active export table
+  # (/etc/xtab). /etc/exports is a second local read used only to corroborate
+  # an empty active table. No RPC or other network probe is permitted here.
+  typeset NEE_LIVE NEE_LIVE_RC NEE_STATE NEE_DETAIL NEE_RESULT
   typeset NEE_CONF NEE_CONF_RC NEE_CONF_EXISTS_OUT NEE_CONF_EXISTS_RC
-  typeset NEE_CONF_NONE NEE_WHY
+  typeset NEE_CONF_NONE NEE_TAB
 
-  SHOWMOUNT=$(aix showmount_e showmount -e); SHOWMOUNT_RC=$?
   NEE_LIVE=$(aix exportfs exportfs); NEE_LIVE_RC=$?
   NEE_CONF_EXISTS_OUT=$(aix etc_exports_exists test -e /etc/exports)
   NEE_CONF_EXISTS_RC=$?
   NEE_CONF=$(aix etc_exports cat /etc/exports); NEE_CONF_RC=$?
 
-  # Corroborator 1 — the active export table. rc is settled before any parsing.
-  # AIX prints the no-export sentinel with or without its message number.
-  NEE_LIVE_NONE=0
-  if [ "$NEE_LIVE_RC" -eq 0 ] && [ -n "$NEE_LIVE" ]; then
-    case "$NEE_LIVE" in
-      "exportfs: nothing exported") NEE_LIVE_NONE=1 ;;
-      "exportfs: "[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9]" nothing exported")
-        NEE_LIVE_NONE=1 ;;
-      *)
-        NEE_LIVE_NONE=$(printf '%s\n' "$NEE_LIVE" | awk '
-          {
-            text=$0
-            sub(/^[ \t]+/, "", text)
-            if (text == "") next
-            nonblank=1
-            if (text !~ /^#/) rows=1
-          }
-          END {print (nonblank && !rows) ? 1 : 0}
-        ')
-        ;;
-    esac
-  fi
-
-  # Corroborator 2 — the definition file. A read failure only settles anything
-  # when the existence probe reports the file as genuinely absent.
+  # The definition file cannot prove that an export is active. It is used only
+  # to keep the no-export PASS fail-closed when the local definitions disagree
+  # with an otherwise empty active table.
   NEE_CONF_NONE=0
   if [ "$NEE_CONF_RC" -eq 0 ]; then
     NEE_CONF_NONE=$(printf '%s\n' "$NEE_CONF" | awk '
@@ -37042,64 +36605,90 @@ _AIXRAY_SESSION_KEYS=""
     NEE_CONF_NONE=1
   fi
 
-  # showmount evidence is parsed only after its rc is known to be 0. OBSERVED is
-  # capped at 120 characters so the finding stays one bounded TSV field.
-  NEE_EVERYONE=""
-  NEE_ROWS=0
-  if [ "$SHOWMOUNT_RC" -eq 0 ] && [ -n "$SHOWMOUNT" ]; then
-    NEE_EVERYONE=$(printf '%s\n' "$SHOWMOUNT" | awk '
-      index($0, "(everyone)") > 0 {
-        n++
-        if (n <= 3) list = (list == "" ? $1 : list " " $1)
+  NEE_STATE=UNKNOWN
+  NEE_DETAIL="local active export table could not be classified"
+  if [ "$NEE_LIVE_RC" -eq 0 ]; then
+    NEE_RESULT=$(printf '%s\n' "$NEE_LIVE" | awk '
+      {
+        text=$0
+        sub(/^[ \t]+/, "", text)
+        sub(/[ \t]+$/, "", text)
+        if (text == "" || text ~ /^#/) next
+        if (text == "exportfs: nothing exported" ||
+            text ~ /^exportfs: [0-9][0-9][0-9][0-9]-[0-9][0-9][0-9] nothing exported$/) {
+          none++
+          next
+        }
+        if (substr(text, 1, 1) != "/") {
+          malformed++
+          next
+        }
+        rows++
+        split(text, field, /[ \t]+/)
+        path=field[1]
+        if (text !~ /(^|[, \t])access=/) {
+          unrestricted++
+          if (unrestricted <= 3)
+            list=(list == "" ? path : list " " path)
+        }
       }
       END {
-        if (n == 0) exit 0
-        text = n " export(s) shared with everyone: " list
-        if (n > 3) text = text " (+" (n - 3) " more)"
-        if (substr(text, 118, 1) != "") text = substr(text, 1, 117) "..."
-        print text
+        if (malformed || (none && rows)) {
+          print "UNKNOWN\tlocal active export table contained unrecognized or contradictory rows"
+        } else if (unrestricted) {
+          detail=unrestricted " active export(s) have no access allow list: " list
+          if (unrestricted > 3) detail=detail " (+" (unrestricted - 3) " more)"
+          if (substr(detail, 118, 1) != "") detail=substr(detail, 1, 117) "..."
+          print "UNRESTRICTED\t" detail
+        } else if (rows) {
+          print "RESTRICTED\t" rows " active export(s); every export has an explicit access allow list"
+        } else {
+          print "NONE\tlocal active export table lists no exported directory"
+        }
       }
     ')
-    NEE_ROWS=$(printf '%s\n' "$SHOWMOUNT" | awk '$1 ~ /^\// {n++} END {print n+0}')
+    NEE_TAB=$(printf '\t')
+    NEE_STATE=${NEE_RESULT%%"$NEE_TAB"*}
+    NEE_DETAIL=${NEE_RESULT#*"$NEE_TAB"}
+    [ "$NEE_DETAIL" != "$NEE_RESULT" ] \
+      || { NEE_STATE=UNKNOWN; NEE_DETAIL="local active export table parser returned malformed evidence"; }
+  else
+    NEE_DETAIL="exportfs failed while reading the local active export table (rc=$NEE_LIVE_RC)"
   fi
 
-  if [ "$SHOWMOUNT_RC" -eq 0 ]; then
-    NEE_WHY="showmount -e listed no export (rc=0)"
-  else
-    NEE_WHY="showmount -e failed (rc=$SHOWMOUNT_RC)"
-  fi
-
-  if [ -n "$NEE_EVERYONE" ]; then
-    add security nfs_export_everyone "NFS export access" FAIL high \
-        "$NEE_EVERYONE" \
-        "At least one currently exported directory is accessible to unauthenticated clients; the NFS server imposes no client restriction on it." \
-        "remove (everyone) from the access list of each affected export and re-export through the approved change process." "cis-l2"
-  elif [ "$SHOWMOUNT_RC" -eq 0 ] && [ "$NEE_ROWS" -gt 0 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "$NEE_ROWS active export(s); every export lists explicit clients" \
-        "Every currently exported directory has a client restriction; showmount -e listed no (everyone) access target." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -eq 1 ] && [ "$NEE_CONF_NONE" -eq 1 ]; then
-    add security nfs_export_everyone "NFS export access" PASS high \
-        "no NFS export is active; exportfs and /etc/exports both list none" \
-        "This host exports nothing: the active export table reports no exported directory and /etc/exports defines none, so no export is shared with unauthenticated clients." \
-        "n/a" "cis-l2"
-  elif [ "$NEE_LIVE_RC" -ne 0 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY and exportfs failed (rc=$NEE_LIVE_RC)" \
-        "Neither the advertised export list nor the local active export table could be read, so no claim about world-accessible exports is possible." \
-        "restore access to the local NFS mount daemon and the no-argument exportfs listing, then rerun PTxray." "cis-l2"
-  elif [ "$NEE_LIVE_NONE" -ne 1 ]; then
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; exportfs did not confirm an empty export set" \
-        "The advertised export list was unavailable and the local active export table neither proved an empty export set nor could be read for (everyone) access targets." \
-        "restore access to the local NFS mount daemon, verify the complete no-argument exportfs listing, then rerun PTxray." "cis-l2"
-  else
-    add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
-        "not assessed — $NEE_WHY; /etc/exports state not established (rc=$NEE_CONF_RC)" \
-        "The active export table reported nothing exported, but /etc/exports could not be read or shows definitions, so the empty export set is not corroborated." \
-        "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
-  fi
+  case "$NEE_STATE" in
+    UNRESTRICTED)
+      add security nfs_export_everyone "NFS export access" FAIL high \
+          "$NEE_DETAIL" \
+          "At least one currently exported directory has no access allow list, so the NFS server does not restrict it to approved clients." \
+          "add an explicit access allow list to each affected export and re-export it through the approved change process." "cis-l2"
+      ;;
+    RESTRICTED)
+      add security nfs_export_everyone "NFS export access" PASS high \
+          "$NEE_DETAIL" \
+          "Every directory in the local active export table has an explicit client access allow list." \
+          "n/a" "cis-l2"
+      ;;
+    NONE)
+      if [ "$NEE_CONF_NONE" -eq 1 ]; then
+        add security nfs_export_everyone "NFS export access" PASS high \
+            "no NFS export is active; exportfs and /etc/exports both list none" \
+            "The local active export table reports no exported directory and /etc/exports defines none, so no export is available without a client allow list." \
+            "n/a" "cis-l2"
+      else
+        add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+            "not assessed — local active export table is empty but /etc/exports state was not corroborated (rc=$NEE_CONF_RC)" \
+            "The active table reported no exports, but local definitions could not be read or still define exports, so the empty state is not independently corroborated." \
+            "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
+      fi
+      ;;
+    *)
+      add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
+          "not assessed — $NEE_DETAIL" \
+          "The local active export table did not provide complete, trustworthy evidence about access allow lists." \
+          "restore access to the no-argument exportfs listing, verify the complete local active export table, then rerun PTxray." "cis-l2"
+      ;;
+  esac
 _AIXRAY_SESSION_KEYS=""
   # nfs_export_sec — every NFS export must declare a sec= security flavour and
   # that flavour list must not include none. Reads the lsnfsexp listing once and
@@ -39893,7 +39482,7 @@ _AIXRAY_SESSION_KEYS=""
     PW_READ_RC=$?
     case "$PW_READ_RC" in
       0)
-        PW_SCAN_RAW=$(aix pw_blank_scan /usr/bin/egrep -p "password = +$" /etc/security/passwd)
+        PW_SCAN_RAW=$(aix pw_blank_scan /usr/bin/egrep -p 'password = +$' /etc/security/passwd)
         PW_SCAN_RC=$?
         if [ "$PW_SCAN_RC" -ge 2 ]; then
           PW_STATUS=NOT_ASSESSED
@@ -41991,16 +41580,59 @@ if [ -n "$FLRT_EXPORT" ]; then
   if ! mkdir -p "$FLRT_EXPORT" 2>/dev/null; then
     echo "ptxray: --flrt-export: cannot create directory '$FLRT_EXPORT'" >&2; exit 2
   fi
-  FLRT_EPOCH=$(date +%s 2>/dev/null); [ -n "$FLRT_EPOCH" ] || FLRT_EPOCH=0
+  FLRT_EXPORT=$(CDPATH= cd -- "$FLRT_EXPORT" 2>/dev/null \
+    && (pwd -P 2>/dev/null || pwd)) \
+    || { echo "ptxray: --flrt-export: cannot resolve the output directory" >&2; exit 2; }
+  FLRT_EXPORT_PROBLEM=$(path_untrusted "$FLRT_EXPORT")
+  [ -z "$FLRT_EXPORT_PROBLEM" ] \
+    || { echo "ptxray: --flrt-export: untrusted output directory ancestry: $FLRT_EXPORT_PROBLEM" >&2; exit 2; }
+  if [ -n "$AIXRAY_FIXTURES" ] && [ -n "${AIXRAY_TEST_FLRT_EPOCH:-}" ]; then
+    FLRT_EPOCH=$AIXRAY_TEST_FLRT_EPOCH
+  else
+    FLRT_EPOCH=$(date +%s 2>/dev/null)
+  fi
+  case "$FLRT_EPOCH" in ''|*[!0-9]*) FLRT_EPOCH=0;; esac
   FLRT_DATE=$(echo "$TODAY" | tr -d ' ')
   FLRT_HOST=$(printf '%s' "${HOST%%.*}" | tr -cd 'A-Za-z0-9_.-'); [ -n "$FLRT_HOST" ] || FLRT_HOST=unknown
-  FLRT_OS=${OSLEVEL:-unknown}
+  FLRT_OS=$(printf '%s' "${OSLEVEL:-unknown}" | tr -cd 'A-Za-z0-9_.-'); [ -n "$FLRT_OS" ] || FLRT_OS=unknown
   FLRT_BASE="${FLRT_EPOCH}_${FLRT_HOST}_${FLRT_OS}_${FLRT_DATE}"
   FLRT_LSLPP="$FLRT_EXPORT/$FLRT_BASE.lslpp.txt"
   FLRT_EMGR="$FLRT_EXPORT/$FLRT_BASE.emgr.txt"
+  FLRT_TMP_LSLPP="$FLRT_EXPORT/.$FLRT_BASE.lslpp.txt.tmp.$$"
+  FLRT_TMP_EMGR="$FLRT_EXPORT/.$FLRT_BASE.emgr.txt.tmp.$$"
+  if [ -e "$FLRT_LSLPP" ] || [ -L "$FLRT_LSLPP" ] \
+      || [ -e "$FLRT_EMGR" ] || [ -L "$FLRT_EMGR" ]; then
+    echo "ptxray: --flrt-export: refusing existing destination for '$FLRT_BASE'" >&2
+    exit 2
+  fi
   umask 077
-  aix lslpp_qcL lslpp -qcL > "$FLRT_LSLPP" 2>/dev/null
-  aix emgr_lv3 emgr -lv3   > "$FLRT_EMGR"  2>/dev/null
+  trap 'rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"; ptxray_defs_cleanup_snapshot' EXIT
+  trap 'rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"; ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
+  if ! (set -C; aix lslpp_qcL lslpp -qcL > "$FLRT_TMP_LSLPP") 2>/dev/null; then
+    echo "ptxray: --flrt-export: fileset inventory capture failed" >&2
+    exit 1
+  fi
+  if ! (set -C; aix emgr_lv3 emgr -lv3 > "$FLRT_TMP_EMGR") 2>/dev/null; then
+    echo "ptxray: --flrt-export: interim-fix inventory capture failed" >&2
+    exit 1
+  fi
+  [ -f "$FLRT_TMP_LSLPP" ] && [ ! -L "$FLRT_TMP_LSLPP" ] \
+    && [ -f "$FLRT_TMP_EMGR" ] && [ ! -L "$FLRT_TMP_EMGR" ] \
+    || { echo "ptxray: --flrt-export: capture temporary-file safety check failed" >&2; exit 1; }
+  if ! ln "$FLRT_TMP_LSLPP" "$FLRT_LSLPP" 2>/dev/null; then
+    echo "ptxray: --flrt-export: cannot publish fileset inventory without clobbering" >&2
+    exit 1
+  fi
+  if ! ln "$FLRT_TMP_EMGR" "$FLRT_EMGR" 2>/dev/null; then
+    rm -f "$FLRT_LSLPP"
+    echo "ptxray: --flrt-export: cannot publish interim-fix inventory without clobbering" >&2
+    exit 1
+  fi
+  rm -f "$FLRT_TMP_LSLPP" "$FLRT_TMP_EMGR"
+  FLRT_TMP_LSLPP=""; FLRT_TMP_EMGR=""
+  [ -f "$FLRT_LSLPP" ] && [ ! -L "$FLRT_LSLPP" ] \
+    && [ -f "$FLRT_EMGR" ] && [ ! -L "$FLRT_EMGR" ] \
+    || { echo "ptxray: --flrt-export: published-file safety check failed" >&2; exit 1; }
   FLRT_NL=$(awk 'END{print NR+0}' "$FLRT_LSLPP" 2>/dev/null)
   FLRT_NE=$(awk 'END{print NR+0}' "$FLRT_EMGR" 2>/dev/null)
   echo "ptxray: FLRT export written to $FLRT_EXPORT/"
@@ -45611,8 +45243,8 @@ footer b,footer a{color:var(--copper-d)}
   .exec-summary{margin-inline:22px}
 }
 </style></head><body>
-<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-compliance-v1">by PowerTrue Systems · AIX · IBM Power · VIOS</div></div><div class="ey" data-aixray-field="authored" data-aixray-copy-id="product:compliance-report-v1">Compliance report</div><h1>Compliance report — <span data-aixray-field="technical" data-aixray-location="report:compliance-label">${STDLABEL}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
-<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${COMPLIANCE_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <b>Standard:</b> <span data-aixray-field="technical" data-aixray-location="report:compliance-standard">${STDFULL}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">READ-ONLY — nothing was changed</span></div>
+<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-compliance-v1">by PowerTrue Systems · AIX · IBM Power</div></div><div class="ey" data-aixray-field="authored" data-aixray-copy-id="product:compliance-report-v1">Compliance report</div><h1>Compliance report — <span data-aixray-field="technical" data-aixray-location="report:compliance-label">${STDLABEL}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
+<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${COMPLIANCE_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <b>Standard:</b> <span data-aixray-field="technical" data-aixray-location="report:compliance-standard">${STDFULL}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">ASSESSMENT PROBES — no system configuration changed</span></div>
 <div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
 ${CURRENCY_HTML_BLOCK}
 ${COV_HTML}
@@ -45673,8 +45305,8 @@ if [ "$FORMAT" = "compliance" ]; then
       # a per-run tmp file, refuse a directory/symlink destination, atomic mv, verify a real
       # regular file landed. A failure is a per-standard ptxray diagnostic and the loop
       # continues to the next standard.
-      REPORT_FILE="$OUT_DIR/aixray-$REPORT_HOST-$REPORT_DATE-$std.html"
-      REPORT_TMP="$OUT_DIR/.aixray-$REPORT_HOST-$REPORT_DATE-$std.html.tmp.$$"
+      REPORT_FILE="$OUT_DIR/ptxray-$REPORT_HOST-$REPORT_DATE-$std.html"
+      REPORT_TMP="$OUT_DIR/.ptxray-$REPORT_HOST-$REPORT_DATE-$std.html.tmp.$$"
       # A pre-planted symlink at the predictable report name is refused up front (before
       # any mv could replace it) so a hostile link is never silently swapped for a real
       # report — the victim target stays untouched and the standard reports a failure.
@@ -45969,7 +45601,7 @@ if [ "$FORMAT" = "json" ]; then
           return out "]"
         }
         BEGIN{printf "["}
-        NF>=14{ printf "%s{ \"cve\": \"%s\", \"hiper\": %s, \"fileset\": \"%s\", \"installed\": \"%s\", \"vulnerable_range\": \"%s\", \"fixed_at_or_above\": %s, \"apars\": %s, \"ifix\": \"%s\", \"bulletin\": \"%s\", \"cvss\": %s, \"reboot\": \"%s\", \"abstract\": %s }", (n++?", ":""), jescape($1), ($2=="1"?"true":"false"), jescape($3), jescape($4), jescape($5), ($6==""?"null":"\"" jescape($6) "\""), apars_json($7), jescape($8), jescape($9), ($10==""?"null":$10), jescape($11), ($14==""?"null":"\"" jescape($14) "\"") }
+        NF>=14{ printf "%s{ \"cve\": \"%s\", \"known_exploited\": %s, \"hiper\": %s, \"fileset\": \"%s\", \"installed\": \"%s\", \"vulnerable_range\": \"%s\", \"fixed_at_or_above\": %s, \"apars\": %s, \"ifix\": \"%s\", \"bulletin\": \"%s\", \"cvss\": %s, \"reboot\": \"%s\", \"abstract\": %s }", (n++?", ":""), jescape($1), (NF>=15?($15=="1"?"true":"false"):"null"), ($2=="1"?"true":"false"), jescape($3), jescape($4), jescape($5), ($6==""?"null":"\"" jescape($6) "\""), apars_json($7), jescape($8), jescape($9), ($10==""?"null":$10), jescape($11), ($14==""?"null":"\"" jescape($14) "\"") }
         END{printf "]"}')
       EXPSUF=", \"exposures\": $EJ"
     fi
@@ -46083,9 +45715,9 @@ else
   SNAP_EY="System Health Check"; SNAP_H1="Posture snapshot"
 fi
 
-# C2: surface the full CVSS ladder ahead of category detail. This native v1
-# path has no KEV-feed input, so Known-Exploited is explicitly NOT ASSESSED;
-# the Contract-v2 report fills that tier when an-flrtvc receives --kev-json.
+# C2: surface the full CVSS ladder ahead of category detail. When signed
+# definitions were selected, the adjacent verifier's derived KEV CVE list
+# classifies the adverse FLRT exposure rows; without it the tier stays NA.
 CVSS_APAR_INDEX=-1
 i=0
 while [ "$i" -lt "$NFIND" ]; do
@@ -46136,12 +45768,18 @@ else
   if [ "$CVSS_INCOMPLETE_ROWS" -gt 0 ]; then
     CVSS_NOTE="$CVSS_NOTE<div class=\"cov\" data-aixray-container=\"fields\"><b data-aixray-field=\"authored\" data-aixray-copy-id=\"native:cvss-incomplete-label-v1\">Incomplete CVSS evidence.</b> <span data-aixray-field=\"technical\" data-aixray-location=\"report:cvss-incomplete-count\">$CVSS_INCOMPLETE_ROWS</span><span data-aixray-field=\"authored\" data-aixray-copy-id=\"native:cvss-incomplete-detail-v1\"> exposure record(s) came from a row whose CVSS field was incomplete or malformed. Recovered scores remain listed; unscored CVEs are NOT ASSESSED and are not guessed into the None tier.</span></div>"
   fi
-  CVSSBLOCK="<section id=\"cvss-ladder\" class=\"cvss\"><div class=\"cathead\"><span class=\"cl\">CVE exposure ladder</span><span class=\"cr\"><span class=\"cnt\">worst first · every exposure listed</span></span></div>$CVSS_NOTE<table><thead><tr><th>Tier</th><th>Count</th><th>Actual CVE / exposure list</th></tr></thead><tbody><tr data-tier=\"Known-Exploited\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">NOT ASSESSED</td><td class=\"obs\" data-aixray-field=\"authored\" data-aixray-copy-id=\"native:kev-not-supplied-v1\">No dated KEV feed was supplied to this native report path; zero is not assumed.</td></tr>$CVSS_NUMERIC_ROWS</tbody></table></section>"
+  if [ "$PTXRAY_KEV_MATCH_STATE" = assessed ]; then
+    PTXRAY_KEV_HTML_NAMES=$(printf '%s' "${PTXRAY_KEV_MATCH_NAMES:-none}" | hesc)
+    PTXRAY_KEV_HTML_ROW="<tr data-tier=\"Known-Exploited\" data-count=\"$PTXRAY_KEV_MATCH_COUNT\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">$PTXRAY_KEV_MATCH_COUNT</td><td class=\"obs\" data-aixray-field=\"observed\" data-aixray-location=\"finding:apar_scan:exposures\">$PTXRAY_KEV_HTML_NAMES</td></tr>"
+  else
+    PTXRAY_KEV_HTML_ROW="<tr data-tier=\"Known-Exploited\"><td class=\"ctl\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-tier\">Known-Exploited</td><td class=\"obs\" data-aixray-field=\"technical\" data-aixray-location=\"report:kev-status\">NOT ASSESSED</td><td class=\"obs\" data-aixray-field=\"authored\" data-aixray-copy-id=\"native:kev-not-supplied-v1\">No valid selected signed KEV feed was available; zero is not assumed.</td></tr>"
+  fi
+  CVSSBLOCK="<section id=\"cvss-ladder\" class=\"cvss\"><div class=\"cathead\"><span class=\"cl\">CVE exposure ladder</span><span class=\"cr\"><span class=\"cnt\">worst first · every exposure listed</span></span></div>$CVSS_NOTE<table><thead><tr><th>Tier</th><th>Count</th><th>Actual CVE / exposure list</th></tr></thead><tbody>$PTXRAY_KEV_HTML_ROW$CVSS_NUMERIC_ROWS</tbody></table></section>"
 fi
 
 # Complete, uncapped action inventory. CVE tier is read only from recovered
 # FLRT exposure rows; an absent score/row stays absent rather than being
-# guessed. The native report has no KEV input, disclosed in the ladder below.
+# guessed. KEV membership comes only from selected signed definitions.
 function action_cve_tier { # <finding-index> -> tier or empty
   typeset ACTION_INDEX
   ACTION_INDEX=$1
@@ -46149,6 +45787,7 @@ function action_cve_tier { # <finding-index> -> tier or empty
   printf '%s\n' "${F_EXPOSURES[$ACTION_INDEX]}" | awk -F'\t' '
     NF>=13 {
       rows++
+      if(NF>=15&&$15==1)known_exploited=1
       if($2=="1") hiper=1
       if($12!="1") unscored++
       else if($10!="") {
@@ -46158,6 +45797,7 @@ function action_cve_tier { # <finding-index> -> tier or empty
     }
     END {
       if(!rows) exit
+      if(known_exploited){printf "Known-Exploited";exit}
       if(hiper){printf "Critical / HIPER";exit}
       if(max>=9){printf "Critical";exit}
       if(unscored)exit
@@ -46173,7 +45813,7 @@ function action_priority { # <finding-index> <cve-tier> -> numeric sort bucket
   typeset ACTION_INDEX ACTION_TIER ACTION_STATUS ACTION_SEVERITY
   ACTION_INDEX=$1; ACTION_TIER=$2
   ACTION_STATUS=${F_ST[$ACTION_INDEX]}; ACTION_SEVERITY=${F_SEV[$ACTION_INDEX]}
-  case "$ACTION_TIER" in Critical*) echo 1; return;; esac
+  case "$ACTION_TIER" in Known-Exploited) echo 1; return;; Critical*) echo 2; return;; esac
   case "$ACTION_STATUS:$ACTION_SEVERITY" in
     FAIL:critical|FAIL:high) echo 2;;
     FAIL:med|FAIL:medium) echo 3;;
@@ -46189,12 +45829,13 @@ function cve_tier_rank { # <cve-tier> -> numeric sort rank, lower ranks first (0
   typeset CTR_TIER
   CTR_TIER=$1
   case "$CTR_TIER" in
-    "Critical / HIPER") echo 0;;
-    "Critical") echo 1;;
-    "High") echo 2;;
-    "Medium") echo 3;;
-    "Low") echo 4;;
-    *) echo 5;;
+    "Known-Exploited") echo 0;;
+    "Critical / HIPER") echo 1;;
+    "Critical") echo 2;;
+    "High") echo 3;;
+    "Medium") echo 4;;
+    "Low") echo 5;;
+    *) echo 6;;
   esac
 }
 
@@ -46639,8 +46280,8 @@ footer b,footer a{color:var(--copper-d)}
   .exec-summary{margin-inline:22px}
 }
 </style></head><body>
-<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-native-v1">by PowerTrue Systems · AIX · IBM Power · VIOS</div></div><div class="ey" data-aixray-field="technical" data-aixray-location="report:report-kind">${SNAP_EY}</div><h1><span data-aixray-field="technical" data-aixray-location="report:title-kind">${SNAP_H1}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
-<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${DATA_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">READ-ONLY — nothing was changed</span></div>
+<div class="band"><div class="wm"><span data-aixray-field="authored" data-aixray-copy-id="product:brand-name-v1">PTxray</span><div class="tag" data-aixray-field="authored" data-aixray-copy-id="product:brand-tag-native-v1">by PowerTrue Systems · AIX · IBM Power</div></div><div class="ey" data-aixray-field="technical" data-aixray-location="report:report-kind">${SNAP_EY}</div><h1><span data-aixray-field="technical" data-aixray-location="report:title-kind">${SNAP_H1}</span> — <span data-aixray-field="identity" data-aixray-location="report:title-host">${HOST_H}</span></h1><a class="review-offer" href="mailto:review@powertruesystems.com" data-aixray-field="authored" data-aixray-copy-id="product:review-cta-v1">${REVIEW_CTA}</a></div>
+<div class="meta"><b>Host:</b> <span data-aixray-field="identity" data-aixray-location="report:host">${HOST_H}</span> &nbsp;·&nbsp; <b>Generated:</b> <span data-aixray-field="technical" data-aixray-location="report:generated-date">${NOW}</span> &nbsp;·&nbsp; <b>Reference data:</b> <span data-aixray-field="observed" data-aixray-location="report:reference-data">${DATA_VINTAGE_H}${FLRTVC_HTML_META}</span> &nbsp;·&nbsp; <span class="ro" data-aixray-field="authored" data-aixray-copy-id="product:read-only-v1">ASSESSMENT PROBES — no system configuration changed</span></div>
 <div class="privacy-callout" data-aixray-field="authored" data-aixray-copy-id="raw-privacy-callout-v1">This raw report contains identifying system data. Create a separate pseudonymized review copy before sharing: <code>./ptxray-review-pack.sh --pseudonymize &lt;this-report&gt;</code>. Inspect the review copy and local removals manifest before anything leaves this machine.</div>
 ${CURRENCY_HTML_BLOCK}
 <div class="score">
@@ -46688,8 +46329,8 @@ if [ -n "$OUT_DIR" ]; then
     fi
     exit 2
   fi
-  REPORT_FILE="$OUT_DIR/aixray-$REPORT_HOST-$REPORT_DATE.html"
-  REPORT_TMP="$OUT_DIR/.aixray-$REPORT_HOST-$REPORT_DATE.html.tmp.$$"
+  REPORT_FILE="$OUT_DIR/ptxray-$REPORT_HOST-$REPORT_DATE.html"
+  REPORT_TMP="$OUT_DIR/.ptxray-$REPORT_HOST-$REPORT_DATE.html.tmp.$$"
   if (umask 077; set -C; emit_html_report > "$REPORT_TMP") &&
      [ ! -d "$REPORT_FILE" ] &&
      mv -f "$REPORT_TMP" "$REPORT_FILE" &&

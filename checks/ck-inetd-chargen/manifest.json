@@ -6,7 +6,7 @@
     "inetd_chargen"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "grep -E '^[\t ]*chargen[\t ]' /etc/inetd.conf"

@@ -6,7 +6,7 @@
     "firmware_uak_expiry"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lparstat -u",

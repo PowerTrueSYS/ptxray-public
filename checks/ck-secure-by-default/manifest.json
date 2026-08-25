@@ -6,7 +6,7 @@
     "secure_by_default"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ls -l /etc/security/aixpert/log",

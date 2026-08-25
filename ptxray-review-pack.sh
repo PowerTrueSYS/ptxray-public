@@ -8,9 +8,9 @@ set -u
 # artifact's version against the release tag; a review pack without this line
 # was silently skipped by that check and v1.0.0 nearly shipped unversioned,
 # a regression from v0.1.0 which carried it.
-AIXRAY_REVIEW_PACK_VERSION="1.4.0"
+AIXRAY_REVIEW_PACK_VERSION="1.5.0"
 
-PATH=/usr/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin:${PATH:-}
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin
 export PATH
 LC_ALL=C
 export LC_ALL
@@ -64,6 +64,89 @@ function owner_only_regular {
   [ "$PRIVATE_INODE_BEFORE" = "$PRIVATE_INODE_AFTER" ]
 }
 
+function directory_untrusted {
+  TRUST_DIR=$1
+  TRUST_LS=$(LC_ALL=C ls -ldn "$TRUST_DIR" 2>/dev/null) \
+    || { echo "cannot inspect $TRUST_DIR"; return; }
+  printf '%s\n' "$TRUST_LS" | awk -v uid="$CURRENT_UID" '
+    NR == 1 {
+      mode = substr($1, 1, 10)
+      owner = $3
+      if (substr(mode, 1, 1) != "d") {
+        print "not a directory: " mode
+        exit
+      }
+      if (owner != "0" && owner != uid) {
+        print "owned by untrusted uid " owner
+        exit
+      }
+      sticky = substr(mode, 10, 1)
+      if (sticky == "t" || sticky == "T") exit
+      if (substr(mode, 6, 1) == "w" || substr(mode, 9, 1) == "w")
+        print "group/other-writable without sticky bit: " mode
+    }
+  '
+}
+
+function path_untrusted {
+  TRUST_PATH=$1
+  case "$TRUST_PATH" in
+    /*) ;;
+    *) echo "not an absolute physical path: $TRUST_PATH"; return ;;
+  esac
+  while :; do
+    TRUST_PROBLEM=$(directory_untrusted "$TRUST_PATH")
+    [ -z "$TRUST_PROBLEM" ] \
+      || { echo "$TRUST_PATH: $TRUST_PROBLEM"; return; }
+    [ "$TRUST_PATH" = / ] && return
+    TRUST_PARENT=${TRUST_PATH%/*}
+    [ -n "$TRUST_PARENT" ] || TRUST_PARENT=/
+    [ "$TRUST_PARENT" != "$TRUST_PATH" ] \
+      || { echo "cannot walk ancestors of $TRUST_PATH"; return; }
+    TRUST_PATH=$TRUST_PARENT
+  done
+}
+
+function regular_file_untrusted {
+  TRUST_FILE=$1
+  TRUST_LS=$(LC_ALL=C ls -ln "$TRUST_FILE" 2>/dev/null) \
+    || { echo "cannot inspect file metadata"; return; }
+  printf '%s\n' "$TRUST_LS" | awk -v uid="$CURRENT_UID" '
+    NR == 1 {
+      mode = substr($1, 1, 10)
+      owner = $3
+      if (substr(mode, 1, 1) != "-") {
+        print "not a regular file: " mode
+        exit
+      }
+      if (owner != "0" && owner != uid) {
+        print "owned by untrusted uid " owner
+        exit
+      }
+      if (substr(mode, 6, 1) == "w" || substr(mode, 9, 1) == "w")
+        print "group/other-writable: " mode
+    }
+  '
+}
+
+function sha256_file {
+  SHA256_LINE=$(openssl dgst -sha256 -r "$1" 2>/dev/null) || return 1
+  SHA256_VALUE=$(printf '%s\n' "$SHA256_LINE" | awk 'NR == 1 {print $1}')
+  printf '%s\n' "$SHA256_VALUE" | awk '
+    function hex64(s, i, c) {
+      if (length(s) != 64) return 0
+      for (i = 1; i <= 64; i++) {
+        c = substr(s, i, 1)
+        if (c !~ /[0-9a-f]/) return 0
+      }
+      return 1
+    }
+    hex64($0) {ok = 1}
+    END {exit ok ? 0 : 1}
+  ' || return 1
+  printf '%s\n' "$SHA256_VALUE"
+}
+
 function cleanup {
   if [ -n "$PUBLISHED_HTML" ]; then
     remove_if_ours "$PUBLISHED_HTML" "$HTML_TMP"
@@ -82,7 +165,8 @@ function cleanup {
       "$SCRATCH/review.map" "$SCRATCH/stats" "$SCRATCH/date" \
       "$SCRATCH/error" "$SCRATCH/tokens" "$SCRATCH/validation" \
       "$SCRATCH/violations" "$SCRATCH/failure" "$SCRATCH/ledger" \
-      "$SCRATCH/manifest" "$SCRATCH/reconcile" 2>/dev/null
+      "$SCRATCH/manifest" "$SCRATCH/reconcile" \
+      "$SCRATCH/validator.awk" 2>/dev/null
     rmdir "$SCRATCH" 2>/dev/null
   fi
 }
@@ -136,15 +220,15 @@ function inject_hard_failure {
 }
 
 function usage {
-  echo "usage: ./$PROGRAM --pseudonymize aixray-<host>-<date>.html" >&2
-  echo "       ./$PROGRAM aixray-<host>-<date>.html  # compatibility alias" >&2
+  echo "usage: ./$PROGRAM --pseudonymize ptxray-<host>-<date>.html" >&2
+  echo "       ./$PROGRAM ptxray-<host>-<date>.html  # compatibility alias" >&2
   exit 2
 }
 
 function help {
   cat <<EOF
-usage: ./$PROGRAM --pseudonymize aixray-<host>-<date>.html
-       ./$PROGRAM aixray-<host>-<date>.html
+usage: ./$PROGRAM --pseudonymize ptxray-<host>-<date>.html
+       ./$PROGRAM ptxray-<host>-<date>.html
 
 Create a separate pseudonymized review candidate from a current PTxray native
 or compliance HTML report carrying privacy schema 1. The raw report is never
@@ -152,10 +236,10 @@ changed. Automated gates may publish a candidate only with status REVIEW REQUIRE
 the result is NOT ANONYMIZED and must be inspected before sharing.
 
 Local-only artifacts:
-  aixray-local-key-*.map       DO NOT SEND decoding key
-  aixray-local-removals-*.txt  DO NOT SEND item-level manifest
+  ptxray-local-key-*.map       DO NOT SEND decoding key
+  ptxray-local-removals-*.txt  DO NOT SEND item-level manifest
 
-Only an inspected aixray-review-*.html candidate is eligible to leave this
+Only an inspected ptxray-review-*.html candidate is eligible to leave this
 machine. PTxray sends nothing and performs no network action.
 
 There is no --scrub alias: "scrubbed" would imply a clean guarantee this
@@ -192,7 +276,7 @@ function publish_refusal {
       *[!0-9a-f]*) FAILURE_CANDIDATE=;;
     esac
     if [ -n "$FAILURE_CANDIDATE" ]; then
-      FAILURE_PATH=$INPUT_DIR/aixray-local-pseudonymize-failed-$FAILURE_CANDIDATE.txt
+      FAILURE_PATH=$INPUT_DIR/ptxray-local-pseudonymize-failed-$FAILURE_CANDIDATE.txt
       if ! LC_ALL=C ls -ld "$FAILURE_PATH" >/dev/null 2>&1; then
         FAILURE_TOKEN=$FAILURE_CANDIDATE
       fi
@@ -277,16 +361,8 @@ fi
   || fail "independent validator is missing or unreadable beside the helper"
 [ ! -L "$VALIDATOR_PROGRAM" ] \
   || fail "refusing symlinked independent validator"
-VALIDATOR_CONTRACT='# validator-contract: pseudonymize-1'
-if ! LC_ALL=C awk -v expected="$VALIDATOR_CONTRACT" '
-  /^# validator-contract:/ {
-    marker_count++
-    if ($0 == expected) match_count++
-  }
-  END { exit !(marker_count == 1 && match_count == 1) }
-' "$VALIDATOR_PROGRAM"; then
-  fail "independent validator contract mismatch; copy the helper and validator from the same release"
-fi
+VALIDATOR_SOURCE_PROGRAM=$VALIDATOR_PROGRAM
+PTXRAY_REVIEW_VALIDATOR_SHA256=d4e61beed5aa185ed59f8d2a0c93cfc90464b295cb0d9e991f957126a30a7438
 
 case "$INPUT" in
   */*)
@@ -338,10 +414,28 @@ if [ "$PRIVACY_MARKER_COUNT" != "1" ]; then
   exit 2
 fi
 
-for REQUIRED_COMMAND in awk cat chmod cksum dd id ln ls mkdir od rm rmdir sed sleep tr; do
+for REQUIRED_COMMAND in awk cat chmod cksum dd id ln ls mkdir od openssl rm rmdir sed sleep tr; do
   command -v "$REQUIRED_COMMAND" >/dev/null 2>&1 \
     || fail "required local command is unavailable: $REQUIRED_COMMAND"
 done
+printf '%s\n' "$PTXRAY_REVIEW_VALIDATOR_SHA256" | awk '
+  function hex64(s, i, c) {
+    if (length(s) != 64) return 0
+    for (i = 1; i <= 64; i++) {
+      c = substr(s, i, 1)
+      if (c !~ /[0-9a-f]/) return 0
+    }
+    return 1
+  }
+  hex64($0) {ok = 1}
+  END {exit ok ? 0 : 1}
+' || fail "embedded independent validator digest is malformed"
+VALIDATOR_PATH_PROBLEM=$(path_untrusted "$PROGRAM_DIR")
+[ -z "$VALIDATOR_PATH_PROBLEM" ] \
+  || fail "untrusted helper directory ancestry: $VALIDATOR_PATH_PROBLEM"
+VALIDATOR_FILE_PROBLEM=$(regular_file_untrusted "$VALIDATOR_SOURCE_PROGRAM")
+[ -z "$VALIDATOR_FILE_PROBLEM" ] \
+  || fail "untrusted independent validator: $VALIDATOR_FILE_PROBLEM"
 [ -d "$INPUT_DIR" ] && [ -w "$INPUT_DIR" ] \
   || fail "the report directory is not writable for local review artifacts"
 
@@ -490,7 +584,7 @@ esac
 
 TRY=0
 while [ "$TRY" -lt 20 ] && [ -z "$SCRATCH_MADE" ]; do
-  CANDIDATE=$INPUT_DIR/.aixray-review.$$.$SCRATCH_SEED.$TRY
+  CANDIDATE=$INPUT_DIR/.ptxray-review.$$.$SCRATCH_SEED.$TRY
   if mkdir -m 700 "$CANDIDATE" 2>/dev/null; then
     SCRATCH=$CANDIDATE
     SCRATCH_MADE=1
@@ -513,6 +607,29 @@ FAILURE_TMP=$SCRATCH/failure
 LEDGER_TMP=$SCRATCH/ledger
 MANIFEST_TMP=$SCRATCH/manifest
 RECONCILE_TMP=$SCRATCH/reconcile
+VALIDATOR_TMP=$SCRATCH/validator.awk
+
+cat "$VALIDATOR_SOURCE_PROGRAM" > "$VALIDATOR_TMP" \
+  || fail "could not copy the independent validator into protected scratch space"
+chmod 0600 "$VALIDATOR_TMP" \
+  || fail "could not protect the independent validator scratch copy"
+owner_only_regular "$VALIDATOR_TMP" "$VALIDATOR_TMP" \
+  || fail "could not verify the protected independent validator scratch copy"
+VALIDATOR_ACTUAL_SHA256=$(sha256_file "$VALIDATOR_TMP") \
+  || fail "could not hash the independent validator"
+[ "$VALIDATOR_ACTUAL_SHA256" = "$PTXRAY_REVIEW_VALIDATOR_SHA256" ] \
+  || fail "independent validator digest mismatch; copy the helper and validator from the same release"
+VALIDATOR_CONTRACT='# validator-contract: pseudonymize-1'
+if ! LC_ALL=C awk -v expected="$VALIDATOR_CONTRACT" '
+  /^# validator-contract:/ {
+    marker_count++
+    if ($0 == expected) match_count++
+  }
+  END { exit !(marker_count == 1 && match_count == 1) }
+' "$VALIDATOR_TMP"; then
+  fail "independent validator contract mismatch; copy the helper and validator from the same release"
+fi
+VALIDATOR_PROGRAM=$VALIDATOR_TMP
 
 if ! cat > "$AWK_PROGRAM" <<'AWK'
 function die(message) {
@@ -2299,53 +2416,53 @@ function independent_identifier_check(text, td_class, context, evidence, strong_
 # embedded matrix to match pipeline.report_plan.PLAN_QR_ROWS.
 function initialize_plan_qr_rows() {
   PLAN_QR_ROW[1] = "1111111000001100000100010000001101011100101111111"
-  PLAN_QR_ROW[2] = "1000001000011110110011101101011000001111101000001"
-  PLAN_QR_ROW[3] = "1011101011101010011100111110111010000001101011101"
-  PLAN_QR_ROW[4] = "1011101011001010011100001100011100011101001011101"
-  PLAN_QR_ROW[5] = "1011101011011110000001111111111100001100001011101"
+  PLAN_QR_ROW[2] = "1000001001011100100011101101011000001111101000001"
+  PLAN_QR_ROW[3] = "1011101011001010010100111110111010000001101011101"
+  PLAN_QR_ROW[4] = "1011101011101010001100001100011100011101001011101"
+  PLAN_QR_ROW[5] = "1011101011011110010001111111111100001100001011101"
   PLAN_QR_ROW[6] = "1000001010101010100100100010000101101110001000001"
   PLAN_QR_ROW[7] = "1111111010101010101010101010101010101010101111111"
-  PLAN_QR_ROW[8] = "0000000011000101010000100011111111100100100000000"
-  PLAN_QR_ROW[9] = "1011111000011011100110111110011100011101001111100"
-  PLAN_QR_ROW[10] = "1110100101010110111101011000011010011101011100000"
-  PLAN_QR_ROW[11] = "1001101000100010001010101010010100101111000101101"
-  PLAN_QR_ROW[12] = "0000010100010101100110000101111010110000000010001"
-  PLAN_QR_ROW[13] = "0000101100101001111001111000011101011101100100111"
-  PLAN_QR_ROW[14] = "0000010011101011111110110100111000000100001111010"
-  PLAN_QR_ROW[15] = "0110101110100011101011110010100101101011000110011"
-  PLAN_QR_ROW[16] = "0000110001111000111110110101010000101111010010001"
-  PLAN_QR_ROW[17] = "1100011000110011011011001100100111110010111100100"
-  PLAN_QR_ROW[18] = "1101110001000000111100011101110010100110011000010"
-  PLAN_QR_ROW[19] = "0011111111111100011100010110101111010000111101011"
-  PLAN_QR_ROW[20] = "0110100101100110110100010111110010010100101110011"
-  PLAN_QR_ROW[21] = "0001101011101101100110111011011100011111110000110"
-  PLAN_QR_ROW[22] = "1100110101101001101101010110011010011100011110100"
+  PLAN_QR_ROW[8] = "0000000011000101010000100011111110010100100000000"
+  PLAN_QR_ROW[9] = "1011111000011011100110111110011101011101001111100"
+  PLAN_QR_ROW[10] = "1110100101010110111101011000011010001101011100000"
+  PLAN_QR_ROW[11] = "0101101000100010001010101010010100101111000101101"
+  PLAN_QR_ROW[12] = "1000010100010101100110000101111010110000000010001"
+  PLAN_QR_ROW[13] = "1000101100100000011001111000011101011101100100111"
+  PLAN_QR_ROW[14] = "0100010011101010011110110100111000000100001111010"
+  PLAN_QR_ROW[15] = "0110101110101010001011110010100101101011000110011"
+  PLAN_QR_ROW[16] = "0000000101110000111110110101010000101111010010001"
+  PLAN_QR_ROW[17] = "1100011010110011011011001100100111110010111100100"
+  PLAN_QR_ROW[18] = "1101100011000000111100011101110010100110011000010"
+  PLAN_QR_ROW[19] = "0011111000111010001100010110101111010000111101011"
+  PLAN_QR_ROW[20] = "0110100100100100110100010111110010010100101110011"
+  PLAN_QR_ROW[21] = "0001101011101111110110111011011100011111110000110"
+  PLAN_QR_ROW[22] = "1101110101101101110101010110011010011100011110100"
   PLAN_QR_ROW[23] = "0111111110010111101110111111110000110011111110101"
-  PLAN_QR_ROW[24] = "0101100011000101111111100011111011100001100011001"
+  PLAN_QR_ROW[24] = "0111100011000101111111100011111011110001100011001"
   PLAN_QR_ROW[25] = "1110101010001111000011101010001001011011101010111"
   PLAN_QR_ROW[26] = "1010100011100000010100100010011100011101100010010"
-  PLAN_QR_ROW[27] = "1001111110101100100100111110100010110011111110011"
-  PLAN_QR_ROW[28] = "0100100000101001001110001001110111010010100000000"
-  PLAN_QR_ROW[29] = "0110011100000101010100101110000100011101100110110"
-  PLAN_QR_ROW[30] = "1010000010100001100001110110111110001101111101000"
-  PLAN_QR_ROW[31] = "0111101000000010100100100101010001111011111111111"
-  PLAN_QR_ROW[32] = "1100100101000001010001010010001101011000100101001"
+  PLAN_QR_ROW[27] = "0001111110101100100100111110100010110011111110011"
+  PLAN_QR_ROW[28] = "1000100000101001001110001001110111010010100000000"
+  PLAN_QR_ROW[29] = "1010011100011101110100101110000100011101100110110"
+  PLAN_QR_ROW[30] = "1010000010101001100001110110111110001101111101000"
+  PLAN_QR_ROW[31] = "0111101000000011000100100101010001111011111111111"
+  PLAN_QR_ROW[32] = "1100100101001001110001010010001101011000100101001"
   PLAN_QR_ROW[33] = "0010111000011001001011011011011000001101110101110"
   PLAN_QR_ROW[34] = "1101110100101110101101111100001101011001110100010"
-  PLAN_QR_ROW[35] = "0001101101000001100001011101011000001100001101001"
-  PLAN_QR_ROW[36] = "0101000111111111011101110110101111010100100110001"
-  PLAN_QR_ROW[37] = "1010001100001000110010000100010100101101110110111"
-  PLAN_QR_ROW[38] = "1010000000010000011101111001101110000100010100110"
-  PLAN_QR_ROW[39] = "0100011110010100111000111101000110110111111100111"
+  PLAN_QR_ROW[35] = "0001101101000111111001011101011000001100001101001"
+  PLAN_QR_ROW[36] = "0101000110111001011101110110101111010100100110001"
+  PLAN_QR_ROW[37] = "1000111010101010101010000100010100101101110110111"
+  PLAN_QR_ROW[38] = "1011110111110010011101111001101110000100010100110"
+  PLAN_QR_ROW[39] = "0100011000010100111000111101000110110111111100111"
   PLAN_QR_ROW[40] = "0111000001101101011001111011110111010000110100000"
   PLAN_QR_ROW[41] = "1110001111100000111010111110011101101111111110101"
   PLAN_QR_ROW[42] = "0000000010011001001101100010111100011100100010000"
   PLAN_QR_ROW[43] = "1111111000011101111110101010111001111010101011011"
   PLAN_QR_ROW[44] = "1000001010001001100001100011111110110100100010011"
-  PLAN_QR_ROW[45] = "1011101010100110010000111110001101111110111111111"
-  PLAN_QR_ROW[46] = "1011101011010101010110110001111100000101101111010"
-  PLAN_QR_ROW[47] = "1011101011000100001010111100110010001010011100111"
-  PLAN_QR_ROW[48] = "1000001000101010100111111001010000101111011000001"
+  PLAN_QR_ROW[45] = "1011101010101111010000111110001101111110111111111"
+  PLAN_QR_ROW[46] = "1011101011000101110110110001111100000101101111010"
+  PLAN_QR_ROW[47] = "1011101011001101001010111100110010001010011100111"
+  PLAN_QR_ROW[48] = "1000001000110011000111111001010000101111011000001"
   PLAN_QR_ROW[49] = "1111111010111110111110001100100111110010000001111"
 }
 
@@ -2385,11 +2502,11 @@ function canonical_plan_qr_open_tag() {
 }
 
 function canonical_plan_link_url() {
-  return "https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided"
+  return "https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=link#guided"
 }
 
 function canonical_plan_qr_url() {
-  return "https://powertruesystems.com/assessment/?utm_source=aixray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided"
+  return "https://powertruesystems.com/assessment/?utm_source=ptxray&utm_medium=report&utm_campaign=plan_reentry&utm_content=qr#guided"
 }
 
 function plan_qr_surface_count(document) {
@@ -3369,9 +3486,9 @@ while [ "$ATTEMPT" -lt 40 ] && [ -z "$TOKEN" ]; do
   case "$CANDIDATE_TOKEN" in
     *[!0-9a-f]*) fail "random token source returned non-hexadecimal data";;
   esac
-  CANDIDATE_HTML=$INPUT_DIR/aixray-review-$CANDIDATE_TOKEN-$REPORT_DATE.html
-  CANDIDATE_MAP=$INPUT_DIR/aixray-local-key-$CANDIDATE_TOKEN.map
-  CANDIDATE_MANIFEST=$INPUT_DIR/aixray-local-removals-$CANDIDATE_TOKEN.txt
+  CANDIDATE_HTML=$INPUT_DIR/ptxray-review-$CANDIDATE_TOKEN-$REPORT_DATE.html
+  CANDIDATE_MAP=$INPUT_DIR/ptxray-local-key-$CANDIDATE_TOKEN.map
+  CANDIDATE_MANIFEST=$INPUT_DIR/ptxray-local-removals-$CANDIDATE_TOKEN.txt
   if ! LC_ALL=C ls -ld "$CANDIDATE_HTML" >/dev/null 2>&1 \
       && ! LC_ALL=C ls -ld "$CANDIDATE_MAP" >/dev/null 2>&1 \
       && ! LC_ALL=C ls -ld "$CANDIDATE_MANIFEST" >/dev/null 2>&1; then

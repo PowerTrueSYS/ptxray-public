@@ -8,7 +8,7 @@
   "captures": [
     "cap-ps-e"
   ],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ps -e -o comm"

@@ -9,7 +9,7 @@
     "cap-cis-rctcpip",
     "cap-cis-services-lssrc-a"
   ],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "cat /etc/rc.tcpip",

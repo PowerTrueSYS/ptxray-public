@@ -7,7 +7,7 @@
     "vscsi_reserve"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "ioscli lsmap -all",

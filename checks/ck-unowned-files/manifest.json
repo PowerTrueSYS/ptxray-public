@@ -6,7 +6,7 @@
     "unowned_files"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "/usr/bin/find / \\( -fstype jfs -o -fstype jfs2 \\) \\( -type d -o -type f \\) \\( -nouser -o -nogroup \\) -ls"

@@ -6,7 +6,7 @@
     "errpt_recent"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "odmget errnotify",

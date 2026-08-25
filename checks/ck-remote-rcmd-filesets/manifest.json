@@ -6,7 +6,7 @@
     "remote_rcmd_filesets"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lslpp -L bos.net.tcp.rcmd_server",

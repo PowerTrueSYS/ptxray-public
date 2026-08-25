@@ -7,7 +7,7 @@
     "proc_limits"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lsattr -El sys0",

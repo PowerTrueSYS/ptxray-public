@@ -7,7 +7,7 @@
     "dangling_symlink"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "find -L / \\( -fstype jfs -o -fstype jfs2 \\) -type l -ls 2> /dev/null"

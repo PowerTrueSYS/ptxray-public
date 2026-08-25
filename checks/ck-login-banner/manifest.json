@@ -6,7 +6,7 @@
     "login_banner"
   ],
   "captures": [],
-  "requires_root": false,
+  "requires_root": true,
   "read_only": true,
   "commands": [
     "lssec -f /etc/security/login.cfg -s default -a herald"
