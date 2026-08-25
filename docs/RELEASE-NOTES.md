@@ -241,10 +241,12 @@ an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls
 are CIS-manual or not-yet-implemented and are disclosed by the scanner rather
 than dropped (registry as_of 2026-08-19); on other releases it reports the
 release-independent evidence it can assess and omits borrowed control numbers.
-Like the AIX edition it
-changes nothing, installs nothing, and makes no network calls during
-assessment, and it reports `NOT_ASSESSED` when evidence is unavailable rather
-than inventing a result. There is no DISA STIG for IBM i, so none is claimed.
+Like the AIX edition it changes no system configuration and installs nothing,
+and it reports `NOT_ASSESSED` when evidence is unavailable rather than
+inventing a result. The 1.3 and 1.4 IBM i runner does use IBM's network-backed
+`SYSTOOLS.FIRMWARE_CURRENCY` and `SYSTOOLS.GROUP_PTF_CURRENCY` views, so those
+published IBM i releases are not no-egress assessments. There is no DISA STIG
+for IBM i, so none is claimed.
 
 ### PTxray rename
 
@@ -326,10 +328,11 @@ operator-supplied FLRTVC path.
 reports. It does not remediate a host, install or remove software, change
 configuration, restart services, alter accounts, or reboot the system.
 
-**Zero network calls during assessment execution.** The scanner does not phone
+**Zero network calls in the AIX assessment.** The AIX runner does not phone
 home, fetch reference data, upload a report, perform a live DNS lookup, or open
-an outbound network connection. Reports stay local unless an operator chooses to
-transfer them. Obtaining the script is, as always, a separate download.
+an outbound network connection. The IBM i exception is documented above.
+Reports stay local unless an operator chooses to transfer them. Obtaining the
+script is, as always, a separate download.
 
 **The download is still the monolith plus the standalone `ck-*` tools.**
 
