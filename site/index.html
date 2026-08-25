@@ -3,14 +3,14 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PTxray — IBM AIX, IBM i, and VIOS posture assessment</title>
-  <meta name="description" content="Review the unpublished PTxray 1.5 release candidate for IBM AIX, IBM i, and VIOS: signed definitions before assessment; no remediation, assessment network calls, or assessment telemetry.">
-  <meta name="keywords" content="IBM AIX health check, IBM i assessment, VIOS assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, ksh88, read-only assessment, air-gapped assessment">
+  <title>PTxray — IBM AIX and IBM i posture assessment</title>
+  <meta name="description" content="Review the unpublished PTxray 1.5 release candidate for IBM AIX and IBM i: signed definitions before assessment; no remediation, assessment network calls, or assessment telemetry. VIOS remains disabled pending live acceptance.">
+  <meta name="keywords" content="IBM AIX health check, IBM i assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, ksh88, read-only assessment, air-gapped assessment">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
   <link rel="canonical" href="https://powertruesystems.com/ptxray/">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="PowerTrue Systems">
-  <meta property="og:title" content="PTxray — IBM AIX, IBM i, and VIOS posture assessment">
+  <meta property="og:title" content="PTxray — IBM AIX and IBM i posture assessment">
   <meta property="og:description" content="Unpublished PTxray 1.5 release candidate: separate signed-definitions update before read-only, no-egress assessment probes.">
   <meta property="og:url" content="https://powertruesystems.com/ptxray/">
   <meta name="twitter:card" content="summary">
@@ -21,24 +21,21 @@
   "@type": "SoftwareApplication",
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
-  "alternateName": "PTxray AIX, IBM i, and VIOS posture assessment",
-  "description": "An unpublished PTxray 1.5 release candidate for IBM AIX, IBM i, and VIOS. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
+  "alternateName": "PTxray AIX and IBM i posture assessment",
+  "description": "An unpublished PTxray 1.5 release candidate for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "downloadUrl": "https://powertruesystems.com/ptxray/",
   "softwareVersion": "1.5.0",
-  "releaseStatus": "Unpublished release candidate",
   "applicationCategory": "System administration and security assessment",
-  "applicationSubCategory": "IBM AIX, IBM i, and VIOS health check and posture assessment",
+  "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
     "IBM AIX 7.2",
     "IBM AIX 7.3",
     "IBM i 7.4",
-    "IBM i 7.5",
-    "IBM VIOS"
+    "IBM i 7.5"
   ],
   "programmingLanguage": "KornShell (ksh88-compatible AIX /bin/sh; IBM i PASE ksh)",
-  "softwareRequirements": "IBM AIX 7.2 or 7.3 and VIOS with AIX /bin/sh; AIX and VIOS require root. IBM i 7.4 or 7.5 uses PASE ksh and IBM i requires QSECOFR as both session and system user. Keep the same-release digest-bound ptxray-defs.sh adjacent to the runner. Assessment probes require no network access; connected definitions updates require fixed-path curl and OpenSSL.",
+  "softwareRequirements": "IBM AIX 7.2 or 7.3 with AIX /bin/sh; AIX requires root. IBM i 7.4 or 7.5 uses PASE ksh and IBM i requires QSECOFR as both session and system user. The VIOS lane is disabled pending live acceptance. Keep the same-release digest-bound ptxray-defs.sh adjacent to the runner. Assessment probes require no network access; connected definitions updates require fixed-path curl and OpenSSL.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",
@@ -49,7 +46,7 @@
   "featureList": [
     "Assessment changes no system configuration and performs no remediation",
     "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
-    "PTxray 1.5 AIX and VIOS require root; IBM i requires QSECOFR",
+    "PTxray 1.5 AIX requires root; IBM i requires QSECOFR; VIOS is not yet enabled",
     "The runner verifies and invokes the separate adjacent same-release digest-bound ptxray-defs.sh before assessment",
     "Connected mode attempts to download current signed definitions by default; --offline uses signed cache; --definitions-bundle imports a local signed bundle and adjacent signature",
     "Old or stale definitions produce an explicit age warning",
@@ -59,7 +56,7 @@
     "Explicit NOT_ASSESSED status for unavailable evidence",
     "387 standalone check tools with machine-readable manifests"
   ],
-  "keywords": "IBM AIX health check, IBM i assessment, VIOS assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, ksh88, read-only assessment, air-gapped assessment",
+  "keywords": "IBM AIX health check, IBM i assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
     {
       "@type": "PropertyValue",
@@ -328,14 +325,14 @@
         <div>
           <p class="eyebrow">Free &amp; open source · Apache-2.0</p>
           <h1>Know what is true <em>before</em> you change it.</h1>
-          <p class="lede">PTxray is a free, open-source IBM AIX, IBM i, and VIOS health, risk, and security assessment. The separate signed-definitions downloader runs before the no-egress assessment probes. Read every inspectable ksh program before privileged execution.</p>
+          <p class="lede">PTxray is a free, open-source IBM AIX and IBM i health, risk, and security assessment. The separate signed-definitions downloader runs before the no-egress assessment probes. The VIOS lane remains disabled pending live acceptance. Read every inspectable ksh program before privileged execution.</p>
         </div>
         <aside class="version-card" aria-label="PTxray v1 trust summary">
           <code>PTXRAY / 1.5 RELEASE CANDIDATE</code>
           <strong>Unpublished — not a release.</strong>
           <ul>
             <li>Open source — Apache-2.0</li>
-            <li>AIX/VIOS require root; IBM i requires QSECOFR</li>
+            <li>AIX requires root; IBM i requires QSECOFR</li>
             <li>No remediation or configuration changes</li>
             <li>Separate signed-definitions update before assessment</li>
             <li>No network calls or telemetry during assessment probes</li>
@@ -352,7 +349,7 @@
       <div class="wrap">
         <div class="section-head">
           <p class="eyebrow">What PTxray answers</p>
-          <h2 id="what-title">Where does this AIX, IBM i, or VIOS system actually stand?</h2>
+          <h2 id="what-title">Where does this AIX or IBM i system actually stand?</h2>
           <p>PTxray reads observable posture across lifecycle, patching, storage, performance, errors, resilience, security, configuration, and monitoring. It reports the evidence; it does not repair the host.</p>
         </div>
         <div class="proof-grid">
@@ -385,7 +382,7 @@
         <div class="section-head">
           <p class="eyebrow">Unpublished PTxray 1.5 release candidate</p>
           <h2 id="future-title">Candidate behavior, not a published download.</h2>
-          <p>PTxray 1.5 is not a published release and is not available from <code>releases/latest</code>. Its AIX and VIOS runners require root, and its IBM i runner requires QSECOFR. Before assessment probes begin, the runner verifies and invokes the separate, adjacent, same-release digest-bound <code>ptxray-defs.sh</code>.</p>
+          <p>PTxray 1.5 is not a published release and is not available from <code>releases/latest</code>. Its AIX runner requires root, and its IBM i runner requires QSECOFR. The VIOS lane remains disabled pending live acceptance. Before assessment probes begin, the runner verifies and invokes the separate, adjacent, same-release digest-bound <code>ptxray-defs.sh</code>.</p>
           <p>Connected mode is the default and attempts to download current signed definitions. <code>--offline</code> uses the last valid signed cache; <code>--definitions-bundle</code> verifies a local signed bundle and adjacent signature. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.</p>
           <p>The downloader discloses its two fixed HTTPS GET requests and observable DNS/TLS metadata before connecting, sends no request body or assessment data, and writes verified generations under <code>/var/ptxray/definitions</code>. Assessment probes then make no network calls, send no telemetry or assessment data, change no system configuration, and perform no remediation. A valid signed cache or local signed bundle supports an air-gapped assessment run.</p>
         </div>
@@ -403,14 +400,14 @@
           <section class="panel" aria-labelledby="get-title">
             <h3 id="get-title">Current published download: PTxray 1.4</h3>
             <p>The links in this panel still download the published 1.4 programs. They do not provide the unpublished 1.5 candidate described above. Review the source and published checksum before copying either program to a host.</p>
-            <p class="fine">Published 1.4 is best run as root on AIX and VIOS. Its privilege and definitions behavior differs from the 1.5 candidate; follow the documentation shipped with the exact release you download.</p>
+            <p class="fine">Published 1.4 is best run as root on AIX and refuses VIOS. Its privilege and definitions behavior differs from the 1.5 candidate; follow the documentation shipped with the exact release you download.</p>
             <p><a class="button" href="https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh">Download ptxray-aix.sh</a></p>
             <p class="fine">Version 1.4.0 · Apache-2.0. <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Read every line of the source on GitHub</a> and verify the published SHA-256 before you run it.</p>
-            <p class="fine">On IBM i 7.4 / 7.5? Download the single self-contained monolith <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh">ptxray-ibmi.sh</a>, graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0. On 7.5, 76 of 89 CIS Level 1 controls receive an automated verdict; on 7.4, 73 of 88. There is no DISA STIG for IBM i. Verify it against SHA256SUMS before you run it.</p>
+            <p class="fine">On IBM i 7.4 / 7.5? The published 1.4 monolith <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh">ptxray-ibmi.sh</a> includes IBM network-backed SYSTOOLS firmware and PTF-currency views. It is read-only on system configuration, but it is not a no-egress assessment. Inspect and approve that network behavior before running it. On 7.5, 76 of 89 CIS Level 1 controls receive an automated verdict; on 7.4, 73 of 88. There is no DISA STIG for IBM i. Verify it against SHA256SUMS before you run it.</p>
             <ul class="mini-proof">
               <li>No email, no gate — read before you run</li>
               <li>Read-only on system configuration</li>
-              <li>No network calls or telemetry during the assessment</li>
+              <li>AIX 1.4 makes no assessment network calls; IBM i 1.4 uses the disclosed network-backed SYSTOOLS currency views</li>
             </ul>
             <p class="soft-cta">Make it better: <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">star the repo</a>, <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public/issues">suggest a check</a>, or contribute one.</p>
             <p class="teaser">Coming soon: run PTxray straight from your AI agent (MCP).</p>
@@ -478,7 +475,7 @@ jq '.tool_version, .check_count, .license' catalog.json</code></pre>
 
   <footer>
     <div class="wrap">
-      <span>PowerTrue Systems · AIX · IBM i · VIOS · IBM Power</span>
+      <span>PowerTrue Systems · AIX · IBM i · IBM Power</span>
       <span>Apache-2.0 · PTxray 1.5 release candidate · unpublished</span>
     </div>
   </footer>

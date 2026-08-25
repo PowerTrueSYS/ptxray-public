@@ -49,12 +49,9 @@ RELEASE_ASSET_URL = (
 RELEASE_ASSET_URL_IBMI = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh"
 )
-# Tracks the shipped artifact, not the v0.1.0 one this file was written
-# against. Private commit 93c14326 ("remove review CTA response-time promise")
-# deliberately dropped "replies within 2 business days" -- a response-time SLA
-# on a free review is a commitment the product does not want to make. Pinning
-# the old wording here made this gate assert a promise the scanner no longer
-# prints, so it could only pass against a stale artifact.
+# Tracks the shipped artifact rather than preserving an obsolete response-time
+# promise. A free review has no response-time SLA, so this gate pins only the
+# wording the public scanner actually prints.
 REVIEW_CTA = (
     "Free engineer review: email your report to "
     "review@powertruesystems.com — a principal engineer will review it "
@@ -592,8 +589,8 @@ class PublicFunnelTests(unittest.TestCase):
         # The public download page is still the advertised entry point.
         self.assertIn(DOWNLOAD_PAGE_URL, readme)
         self.assertIn(DOWNLOAD_PAGE_URL, llms)
-        self.assertEqual(DOWNLOAD_PAGE_URL, root_jsonld.get("downloadUrl"))
-        self.assertEqual(DOWNLOAD_PAGE_URL, site_jsonld.get("downloadUrl"))
+        self.assertNotIn("downloadUrl", root_jsonld)
+        self.assertNotIn("downloadUrl", site_jsonld)
 
         # It links straight to the public release asset — no lead gate.
         self.assertIn(RELEASE_ASSET_URL, site_html)
@@ -662,7 +659,7 @@ class PublicFunnelTests(unittest.TestCase):
                     CANONICAL_REPOSITORY_URL,
                     metadata.get("codeRepository"),
                 )
-                self.assertEqual(DOWNLOAD_PAGE_URL, metadata.get("downloadUrl"))
+                self.assertNotIn("downloadUrl", metadata)
 
         for surface, text in (
             ("README.md", readme),
@@ -732,17 +729,25 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertRegex(site_candidate, r"(?i)not (?:a )?(?:published )?release")
         self.assertRegex(site_candidate, r"(?i)AIX[^<.]{0,100}\brequires? root\b")
         self.assertRegex(site_candidate, r"(?i)IBM i[^<.]{0,100}\brequires? QSECOFR\b")
+        self.assertRegex(site_candidate, r"(?i)VIOS lane remains disabled")
+        self.assertIn("network-backed SYSTOOLS", site_html)
+        self.assertNotIn(
+            "<li>No network calls or telemetry during the assessment</li>",
+            site_html,
+        )
 
         for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
             with self.subTest(metadata=label):
                 self.assertEqual("1.5.0", metadata.get("softwareVersion"))
-                self.assertEqual(
-                    "Unpublished release candidate",
-                    metadata.get("releaseStatus"),
+                self.assertNotIn("releaseStatus", metadata)
+                self.assertRegex(
+                    str(metadata.get("description", "")),
+                    r"(?i)unpublished PTxray 1\.5 release candidate",
                 )
                 requirements = str(metadata.get("softwareRequirements", ""))
-                self.assertRegex(requirements, r"AIX(?: and VIOS)? requires? root")
+                self.assertRegex(requirements, r"AIX requires? root")
                 self.assertRegex(requirements, r"IBM i requires? QSECOFR")
+                self.assertRegex(requirements, r"VIOS lane is disabled")
 
         combined = "\n".join(
             (readme, security, llms, site_html, json.dumps(root_jsonld))
@@ -1286,13 +1291,13 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIn("VIOS", prerequisites)
         self.assertIn("/bin/sh", prerequisites)
         self.assertRegex(prerequisites_lower, r"standard aix userland")
-        self.assertRegex(prerequisites_lower, r"aix(?: and vios)?[^\n.]{0,80}requires? root")
+        self.assertRegex(prerequisites_lower, r"aix[^\n.]{0,80}requires? root")
         self.assertRegex(prerequisites_lower, r"ibm i[^\n.]{0,80}requires?[^\n.]{0,40}qsecofr")
         self.assertRegex(prerequisites_lower, r"several minutes")
         self.assertRegex(prerequisites_lower, r"runtime varies|varies by")
         self.assertRegex(prerequisites_lower, r"system size")
         self.assertRegex(prerequisites_lower, r"flrtvc")
-        self.assertRegex(prerequisites_lower, r"nothing (is )?installed|installs nothing")
+        self.assertRegex(prerequisites_lower, r"no package or agent is installed")
         self.assertRegex(readme, r"(?m)^## Verify what you run\s*$")
 
         bare = re.search(r"(?m)^\./ptxray-aix\.sh\s*$", readme)

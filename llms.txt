@@ -21,18 +21,18 @@ License text: https://www.apache.org/licenses/LICENSE-2.0
 
 ## Verifiable facts
 
-- The unpublished PTxray 1.5 candidate consists of the AIX/VIOS and IBM i runners, the separate adjacent ptxray-defs.sh downloader, and offline review helpers. Candidate files are not a release.
+- The unpublished PTxray 1.5 candidate consists of the AIX and IBM i runners, the separate adjacent ptxray-defs.sh downloader, and offline review helpers. Candidate files are not a release. The VIOS lane remains disabled pending live acceptance.
 - checks/ contains 387 standalone ksh tools. Every tool is paired with a manifest.json.
 - catalog.json is generated from those manifests, declares their count, and adds each artifact's SHA-256 digest.
 - Every public manifest declares read_only=true and lists its command surface.
-- PTxray 1.5 AIX and VIOS require root. IBM i requires SESSION_USER=QSECOFR and SYSTEM_USER=QSECOFR. The privilege gate runs before definitions selection.
+- PTxray 1.5 AIX requires root. IBM i requires SESSION_USER=QSECOFR and SYSTEM_USER=QSECOFR. The privilege gate runs before definitions selection.
 - The assessment probes change no system configuration and perform no remediation. Requested reports, documented temporary scratch data, and the protected definitions cache are local writes.
 - Assessment execution makes no network calls and sends no assessment data or telemetry away from the host.
 - Missing, unreadable, malformed, ambiguous, or unsupported evidence can produce NOT_ASSESSED; it is not silently treated as PASS.
 
 ## Unpublished PTxray 1.5 release candidate
 
-This is not a published release. AIX and VIOS require root, and IBM i requires QSECOFR. Before assessment probes begin, each runner verifies and invokes the separate, adjacent, release-bound and digest-bound ptxray-defs.sh. Connected mode attempts to download the current signed definitions by default. --offline uses only the signed cache. --definitions-bundle SIGNED_FILE imports a local signed bundle with its adjacent SIGNED_FILE.sig. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.
+This is not a published release. AIX requires root, and IBM i requires QSECOFR. The VIOS lane is disabled pending live acceptance. Before assessment probes begin, each runner verifies and invokes the separate, adjacent, release-bound and digest-bound ptxray-defs.sh. Connected mode attempts to download the current signed definitions by default. --offline uses only the signed cache. --definitions-bundle SIGNED_FILE imports a local signed bundle with its adjacent SIGNED_FILE.sig. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.
 
 Only ptxray-defs.sh may use the network. Before a connected update it discloses two fixed public HTTPS GET requests, the cache destination, and observable DNS/TLS metadata; it sends no request body or assessment data. Verified generations are written under /var/ptxray/definitions. Assessment probes begin after selection, remain no-egress and read-only on system configuration, and perform no remediation. Air-gapped assessment execution uses --offline with a valid signed cache or --definitions-bundle with a transferred local signed bundle.
 

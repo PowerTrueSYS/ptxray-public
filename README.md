@@ -33,7 +33,7 @@ PTxray is useful for:
 
 ## What is included?
 
-- `ptxray-aix.sh` — the AIX and VIOS assessment runner. PTxray 1.5 requires root before definitions selection or assessment begins.
+- `ptxray-aix.sh` — the AIX assessment runner. PTxray 1.5 requires root before definitions selection or assessment begins. Its VIOS lane remains disabled pending live VIOS acceptance.
 - `ptxray-ibmi.sh` — the IBM i assessment runner, graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. PTxray 1.5 requires both the signed-on and system user to be QSECOFR.
 - `ptxray-defs.sh` — the separate, adjacent signed-definitions downloader and verifier. It is the only assessment component permitted to make a network request.
 - [`ptxray-review-pack.sh`](ptxray-review-pack.sh) — the offline helper that creates a pseudonymized review copy and a separate local decoding key
@@ -48,8 +48,8 @@ The standalone tools are independently callable check modules. Their inventory c
 
 ## Unpublished PTxray 1.5 release candidate
 
-This candidate is not a published release. The AIX and VIOS runners require
-root, and the IBM i runner requires QSECOFR. Before assessment probes begin,
+This candidate is not a published release. The AIX runner requires root, and
+the IBM i runner requires QSECOFR. Before assessment probes begin,
 the runner verifies and invokes the separate, adjacent, same-release
 digest-bound `ptxray-defs.sh`; a missing, replaced, or mismatched downloader is
 not executed.
@@ -106,13 +106,13 @@ of local inputs.
 
 ## Prerequisites
 
-- IBM AIX 7.2 or 7.3, or VIOS; the IBM i assessment runs on IBM i 7.4 or 7.5 through PASE
+- IBM AIX 7.2 or 7.3; the IBM i assessment runs on IBM i 7.4 or 7.5 through PASE. The VIOS lane remains disabled pending live acceptance.
 - AIX `/bin/sh` and standard AIX userland; bash, Python, GNU userland, and package installation are not required
-- PTxray 1.5 AIX and VIOS require root; the runner refuses before definitions selection or assessment when that requirement is not met.
+- PTxray 1.5 AIX requires root; the runner refuses before definitions selection or assessment when that requirement is not met.
 - PTxray 1.5 IBM i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`.
 - Keep the same-release `ptxray-defs.sh` adjacent to the runner. Signed-definitions verification needs OpenSSL at a supported fixed path; connected updates also need curl at a supported fixed path.
 - Plan for several minutes; runtime varies by system size and optional locally supplied FLRTVC data
-- Nothing is installed. Assessment probes make no network calls, and no assessment data or telemetry leaves the host. Use `--offline` with a valid signed cache or `--definitions-bundle` with a transferred signed bundle for an air-gapped assessment run.
+- No package or agent is installed. The downloader may create the documented persistent definitions cache. Assessment probes make no network calls, and no assessment data or telemetry leaves the host. Use `--offline` with a valid signed cache or `--definitions-bundle` with a transferred signed bundle for an air-gapped assessment run.
 
 ## How do I run PTxray?
 

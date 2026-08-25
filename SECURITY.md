@@ -1,7 +1,8 @@
 # Security and trust model
 
 PTxray is intended to be inspected before it is run. The unpublished PTxray 1.5
-release candidate requires root for AIX and VIOS and QSECOFR for IBM i. The
+release candidate requires root for AIX and QSECOFR for IBM i. The VIOS lane
+remains disabled pending live VIOS acceptance. The
 security boundary is the exact, verified release asset set for the selected
 platform, not a brand claim or a download page. Candidate files are not a
 release, and PTxray 1.5 is not available from `releases/latest` yet.
@@ -123,7 +124,7 @@ digests.
 
 ## Unpublished PTxray 1.5 release candidate boundary
 
-This candidate is not a published release. AIX and VIOS require root, and IBM
+This candidate is not a published release. AIX requires root, and IBM
 i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`. The privilege
 gate runs before definitions selection, so an unprivileged invocation neither
 starts a scan nor reaches the network.

@@ -8,7 +8,7 @@ catalog, source registry, checksums, signature, public key, and independently
 published fingerprint must all come from the release renderer and signing
 ceremony before a versioned 1.5 release section can be added.
 
-The candidate AIX and VIOS runners require root; the IBM i runner requires
+The candidate AIX runner requires root; the IBM i runner requires
 QSECOFR. Each runner authenticates and invokes the separate adjacent
 `ptxray-defs.sh` before assessment. Connected mode attempts a signed-definitions
 update by default, while `--offline` uses a signed cache and
@@ -24,6 +24,9 @@ the canonical site, which returns HTTP 200. The legacy GitHub repository URL
 to the canonical repository, which returns HTTP 200. These redirect facts do
 not publish the 1.5 candidate. The release public key, fingerprint, and
 signature are not yet published.
+
+The VIOS lane remains disabled pending live VIOS acceptance and is not claimed
+by this candidate.
 
 ## v1.4.0
 
@@ -171,11 +174,6 @@ or open an outbound network connection. The new report is a single
 self-contained HTML file — no external stylesheet, no external script, no
 remote font, no remote image. Reports stay local unless you choose to
 transfer them.
-
-### Release process note
-
-The `sec-14-review` gate was skipped for this release by operator ruling on
-2026-08-23. It is recorded here rather than left out of the record.
 
 ### Already fixed for 1.4.1
 

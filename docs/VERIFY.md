@@ -11,7 +11,7 @@ is.
 Run checkout code only in a disposable, credential-free review VM or a
 locked-down container without sensitive mounts, host sockets, tokens, or
 production data. Until review is complete, assume the revision could egress.
-Do not run it first on a production AIX/VIOS target.
+Do not run it first on a production AIX target.
 
 ## Verify the signed manifest first
 

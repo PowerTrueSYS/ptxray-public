@@ -84,12 +84,16 @@ What makes it safe to run on a production system you care about:
 
 - **Read-only assessment probes.** They read state and report; they do not remediate or change the host. Requested reports, protected temporary scratch, and the separate signed-definitions cache are documented local writes.
 - **No network during assessment.** Before the probes begin, the runner may invoke the separate, adjacent, digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions update by default and discloses the request first; `--offline` uses the signed cache. The assessment probes themselves send nothing off the box.
-- **Inspectable ksh, no install.** The AIX runner is one ksh88-compatible shell script under AIX `/bin/sh`; the definitions downloader is a separate adjacent ksh program. PTxray 1.5 requires root on AIX and VIOS.
+- **Inspectable ksh, no package or agent install.** The AIX runner is one ksh88-compatible shell script under AIX `/bin/sh`; the definitions downloader is a separate adjacent ksh program and may create its documented cache. PTxray 1.5 requires root on AIX. Its VIOS lane remains disabled pending live acceptance.
 - **It refuses to guess.** When evidence is missing, unreadable, or ambiguous, PTxray reports `NOT_ASSESSED` rather than quietly converting it to a `PASS`. An audit tool that invents reassurance is worse than no tool; PTxray is honest about what it could and could not see.
 
 Because it is open source, you do not have to take any of that on faith — the source, the per-check manifests, and the SHA-256 hashes are all public on [GitHub](https://github.com/PowerTrueSYS/ptxray-public), so a cautious admin can read exactly what runs before it runs.
 
-Download it, review it, copy it to your AIX host, and run:
+The commands below describe PTxray 1.5 after it is published. Until then,
+`releases/latest` remains 1.4, whose automatic report filename uses the legacy
+`aixray-` prefix; follow the documentation shipped with the exact release.
+After 1.5 is published, download it, review it, copy it to your AIX host, and
+run:
 
 ```sh
 chmod 700 ptxray-aix.sh
