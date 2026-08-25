@@ -3561,8 +3561,8 @@ set -A CF 0 0 0 0 0 0 0 0 0
 # admittedly uncaptured observation, e.g. FC adapter counters "not reported" yet PASS).
 # NOT_ASSESSED is deliberately its own status, excluded from PASS/WARN/FAIL/SCORE — a
 # gap in what was measured must never silently read as either "clean" or "found a
-# problem." See docs/aixray-spec-v2.md's NOT_ASSESSED precedent (the v2 contract
-# pipeline); this is the same status literal, ported to the v1 engine's own model.
+# problem." See the v2 assessment contract's NOT_ASSESSED precedent; this is
+# the same status literal, ported to the v1 engine's own model.
 set -A CN 0 0 0 0 0 0 0 0 0
 set -A CNA 0 0 0 0 0 0 0 0 0
 
@@ -3955,8 +3955,8 @@ function checks_lifecycle {
     UAKGEN=$(printf '%s\n' "$HW_GEN" | awk -F'|' -v tm="$UAKGEN_TM" 'NF>=3 {p=$1; gsub(/\./,"\\.",p); gsub(/\*/,".*",p); if (tm ~ "^"p"$") {print $2; exit}}')
   fi
 
-  # firmware_uak_expiry / aix_uak_expiry — Update Access Key expiry (spec v2 docs/aixray-spec-v2.md
-  # Sec 5/Sec 15 M5, cap-firmware). Ranked the single most-missed check in the sourced research's
+  # firmware_uak_expiry / aix_uak_expiry — Update Access Key expiry (v2 assessment contract
+  # Sections 5/15 M5, cap-firmware). Ranked the single most-missed check in the sourced research's
   # own "5 hidden-risk checks" list: an expired UAK silently blocks applying any firmware/AIX level
   # RELEASED AFTER the expiry date — discovered only at the worst moment (an emergency update).
   # Sourced two ways, NEITHER requiring a new HMC credential surface (spec Sec 5: the HMC-observable
@@ -4402,7 +4402,7 @@ function checks_patch {
   # fileset_state reads lslpp's own recorded STATE column (catches a fileset already marked
   # BROKEN); lppchk -v independently verifies REQUISITE/dependency consistency across the whole
   # installed set (catches a fileset whose prerequisites are missing/mismatched even though its
-  # own STATE looks fine) — docs/aixray-spec-v2.md Sec 5 cap-filesets row, IBM-sourced
+  # own STATE looks fine) — v2 assessment contract Section 5 cap-filesets row, IBM-sourced
   # (upgrade-readiness-checks.md Sec 4). Escalates to 'lppchk -m3 -v' (Sec 5's own escalation
   # rule) for full detail on any inconsistency — never asserts a specific IBM error-message
   # shape (real failure text was not observable on the read-only, currently-clean lab boxes);
@@ -4485,7 +4485,7 @@ function checks_patch {
     fi
   fi
 
-  # upgrade_headroom_preview — framing note, docs/aixray-spec-v2.md Sec 5 cap-runtime row: the
+  # upgrade_headroom_preview — framing note, v2 assessment contract Section 5 cap-runtime row: the
   # IBM-sourced AUTHORITATIVE "will this update fit" answer is 'smitty update_all' with "PREVIEW
   # only? = yes" (or 'installp -p'), which reports an "Estimated system resource requirements"
   # table (Needed vs Free PER FILESYSTEM) against the SPECIFIC lpp_source being applied. PTxray
@@ -5073,7 +5073,7 @@ SEC_APARS_EOF
         trap '[ -n "$FV_MADE" ] && [ -n "$FV_TMPDIR" ] && rm -rf "$FV_TMPDIR"; ptxray_defs_cleanup_snapshot; trap - EXIT HUP INT TERM; exit 1' HUP INT TERM
         FV_TRY=0
         while [ "$FV_TRY" -lt 20 ] && [ -z "$FV_MADE" ]; do
-          FV_CAND="$FV_TMPBASE/aixray-flrtvc.$$.$(date +%s 2>/dev/null)${FV_TRY}"
+          FV_CAND="$FV_TMPBASE/ptxray-flrtvc.$$.$(date +%s 2>/dev/null)${FV_TRY}"
           # mkdir first; publish FV_TMPDIR/FV_MADE only on success, so the trap never
           # names a path PTxray did not itself create.
           if mkdir -m 700 "$FV_CAND" 2>/dev/null; then FV_TMPDIR="$FV_CAND"; FV_MADE=1; fi
@@ -6267,7 +6267,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage vg_pvs "Volume group disks" PASS low "all PVs active" "Every volume group disk is present and active." "n/a"
   fi
 
-  # hd5_sizing — boot-image LV sizing (docs/aixray-spec-v2.md Sec 5 cap-filesets row): target
+  # hd5_sizing — boot-image LV sizing (v2 assessment contract Section 5 cap-filesets row): target
   # 64 MB (current IBM guidance), older 32 MB guidance cited alongside so a 32 MB hd5 on an older
   # box is not treated as automatically fine. hd5's own LP count comes from the SAME 'lsvg -l
   # rootvg' capture the vg_stale/vg_pvs checks above already made (ROOTVG_LVL, no duplicate
@@ -6316,7 +6316,7 @@ _AIXRAY_SESSION_KEYS=""
   else
     HD5MB=""
   fi
-  # Contiguity — size alone is NOT "upgrade-ready": both the spec (aixray-spec-v2.md Sec 5
+  # Contiguity — size alone is NOT "upgrade-ready": both the v2 assessment contract (Section 5
   # cap-filesets row) and the sourced rule (upgrade-readiness-checks.md Sec 4) require hd5's
   # PPs to be CONTIGUOUS; noncontiguity is explicitly "not ready" regardless of total size
   # (adversarial review, M5, HIGH finding #1: the size math above was being trusted into a
@@ -6575,8 +6575,8 @@ EOF
   fi
 _AIXRAY_SESSION_KEYS=""
 
-  # multibos_residue — leftover standby-BOS state from a prior multibos operation (docs/aixray-
-  # spec-v2.md Sec 5 cap-filesets row; the multibos+nimadm version-dependent interaction, Sec 4,
+  # multibos_residue — leftover standby-BOS state from a prior multibos operation (v2 assessment
+  # contract Section 5 cap-filesets row; the multibos+nimadm version-dependent interaction, Section 4,
   # is Blueprint sequencing's concern — this check only detects PRESENCE, informational, never a
   # verdict on whether it's safe to proceed with a specific migration method). Sourced two ways,
   # both IBM-documented: 'bos_'-prefixed LV names in the SAME rootvg LV list already captured
@@ -44007,8 +44007,8 @@ function cat_status { # <index> -> RED/AMBER/INCOMPLETE/GREEN
   # GREEN — CN (the not-assessed count) was never consulted here at all, even though
   # §62 finding #9 already established NOT_ASSESSED as its own status specifically so a
   # measurement gap could never silently read as "clean." INCOMPLETE is the SAME term
-  # and the SAME RED > AMBER > INCOMPLETE > GREEN precedence docs/aixray-spec-v2.md's
-  # §10.1.3 DISTILL pipeline already uses for this identical situation ("no new grade
+  # and follows the SAME RED > AMBER > INCOMPLETE > GREEN precedence used by the v2
+  # assessment contract's §10.1.3 DISTILL pipeline for this identical situation ("no new grade
   # names exist beyond John's model") — ported here so the v1 engine's own category
   # chip stops re-hiding exactly what that spec exists to keep visible. (INCOMPLETE's
   # exact visual/color treatment is flagged §10.1.4 in that same
@@ -44056,8 +44056,8 @@ done
 # but carried unassessed findings (missing/unreadable source data, §62 finding #9's own
 # class) still rendered the bare GREEN "No issues detected in this snapshot." banner,
 # an unqualified clean claim over content that was never actually looked at. Ported the
-# SAME RED > AMBER > INCOMPLETE > GREEN precedence docs/aixray-spec-v2.md's DISTILL
-# pipeline (§10.1.3) already uses for this identical situation, and every tier's own
+# SAME RED > AMBER > INCOMPLETE > GREEN precedence as the v2 assessment contract's
+# DISTILL pipeline (§10.1.3), and every tier's own
 # message now separately discloses the unassessed count whenever NASSESSED>0 -- a scan
 # is never allowed to claim completeness (via its FAIL/WARN wording) while silently
 # carrying gaps in what was actually measured, regardless of which tier it lands in.
@@ -45519,7 +45519,7 @@ function emit_fact_filesystems {
 if [ "$FORMAT" = "json" ]; then
   prepare_facts
   printf '{\n'
-  printf '  "tool": "aixray",\n  "contract": "1.1",\n  "version": "%s",\n  "platform": "aix",\n  "role": "%s",\n' "$VERSION" "$ROLE"
+  printf '  "tool": "ptxray",\n  "contract": "1.1",\n  "version": "%s",\n  "platform": "aix",\n  "role": "%s",\n' "$VERSION" "$ROLE"
   printf '  "host": "%s",\n  "generated": "%s",\n  "read_only": true,\n  "data_vintage": "%s",\n' \
          "$(printf '%s' "$HOST"|jesc)" "$(printf '%s' "$NOW"|jesc)" "$DATA_VINTAGE"
   printf '  "currency": '

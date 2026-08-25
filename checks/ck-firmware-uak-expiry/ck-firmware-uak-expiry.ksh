@@ -426,8 +426,8 @@ if [ "$PRTCONF_RC" -ne 0 ]; then PRTCONF=""; fi
     UAKGEN=$(printf '%s\n' "$HW_GEN" | awk -F'|' -v tm="$UAKGEN_TM" 'NF>=3 {p=$1; gsub(/\./,"\\.",p); gsub(/\*/,".*",p); if (tm ~ "^"p"$") {print $2; exit}}')
   fi
 
-  # firmware_uak_expiry / aix_uak_expiry — Update Access Key expiry (spec v2 docs/aixray-spec-v2.md
-  # Sec 5/Sec 15 M5, cap-firmware). Ranked the single most-missed check in the sourced research's
+  # firmware_uak_expiry / aix_uak_expiry — Update Access Key expiry (v2 assessment contract
+  # Sections 5/15 M5, cap-firmware). Ranked the single most-missed check in the sourced research's
   # own "5 hidden-risk checks" list: an expired UAK silently blocks applying any firmware/AIX level
   # RELEASED AFTER the expiry date — discovered only at the worst moment (an emergency update).
   # Sourced two ways, NEITHER requiring a new HMC credential surface (spec Sec 5: the HMC-observable

@@ -529,7 +529,7 @@ _AIXRAY_SESSION_KEYS=""
     add storage vg_pvs "Volume group disks" PASS low "all PVs active" "Every volume group disk is present and active." "n/a"
   fi
 
-  # hd5_sizing — boot-image LV sizing (docs/aixray-spec-v2.md Sec 5 cap-filesets row): target
+  # hd5_sizing — boot-image LV sizing (v2 assessment contract Section 5 cap-filesets row): target
   # 64 MB (current IBM guidance), older 32 MB guidance cited alongside so a 32 MB hd5 on an older
   # box is not treated as automatically fine. hd5's own LP count comes from the SAME 'lsvg -l
   # rootvg' capture the vg_stale/vg_pvs checks above already made (ROOTVG_LVL, no duplicate
@@ -578,7 +578,7 @@ _AIXRAY_SESSION_KEYS=""
   else
     HD5MB=""
   fi
-  # Contiguity — size alone is NOT "upgrade-ready": both the spec (aixray-spec-v2.md Sec 5
+  # Contiguity — size alone is NOT "upgrade-ready": both the v2 assessment contract (Section 5
   # cap-filesets row) and the sourced rule (upgrade-readiness-checks.md Sec 4) require hd5's
   # PPs to be CONTIGUOUS; noncontiguity is explicitly "not ready" regardless of total size
   # (adversarial review, M5, HIGH finding #1: the size math above was being trusted into a

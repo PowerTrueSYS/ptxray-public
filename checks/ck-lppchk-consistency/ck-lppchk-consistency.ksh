@@ -419,7 +419,7 @@ function aixv_confirmed {
   # fileset_state reads lslpp's own recorded STATE column (catches a fileset already marked
   # BROKEN); lppchk -v independently verifies REQUISITE/dependency consistency across the whole
   # installed set (catches a fileset whose prerequisites are missing/mismatched even though its
-  # own STATE looks fine) — docs/aixray-spec-v2.md Sec 5 cap-filesets row, IBM-sourced
+  # own STATE looks fine) — v2 assessment contract Section 5 cap-filesets row, IBM-sourced
   # (upgrade-readiness-checks.md Sec 4). Escalates to 'lppchk -m3 -v' (Sec 5's own escalation
   # rule) for full detail on any inconsistency — never asserts a specific IBM error-message
   # shape (real failure text was not observable on the read-only, currently-clean lab boxes);

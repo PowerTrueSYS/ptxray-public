@@ -388,8 +388,8 @@ function capture_cap_lsvg_l_rootvg {
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
 
-  # multibos_residue — leftover standby-BOS state from a prior multibos operation (docs/aixray-
-  # spec-v2.md Sec 5 cap-filesets row; the multibos+nimadm version-dependent interaction, Sec 4,
+  # multibos_residue — leftover standby-BOS state from a prior multibos operation (v2 assessment
+  # contract Section 5 cap-filesets row; the multibos+nimadm version-dependent interaction, Section 4,
   # is Blueprint sequencing's concern — this check only detects PRESENCE, informational, never a
   # verdict on whether it's safe to proceed with a specific migration method). Sourced two ways,
   # both IBM-documented: 'bos_'-prefixed LV names in the SAME rootvg LV list already captured

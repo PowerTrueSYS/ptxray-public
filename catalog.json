@@ -2969,7 +2969,7 @@
       "blurb": "IBM firmware and AIX updates require a current Update Access Key. This check reads the expiry date of the key and reports whether it has expired or is within 30 days of doing so. An expired key silently blocks any update released after the expiry date, and that is usually discovered only during an emergency fix, when the delay hurts most.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-firmware-uak-expiry/ck-firmware-uak-expiry.ksh",
-      "sha256": "9ad9d9283cafdee869b835080dad8a8a4af70af374016cdc331e35b88d900f95"
+      "sha256": "1f84fc4436dfc6f887e67abd9f2bc1e6a0dcae1427f30dd875d48d49802c923d"
     },
     {
       "id": "ck-fs-full",
@@ -3191,7 +3191,7 @@
       "blurb": "This control checks the health of the AIX boot disk: that the boot logical volume hd5 is large enough to hold a rebuilt boot image, that its partitions sit in one contiguous run, and that the volume group mirror copies are in sync with no disks missing. If it fails, the next operating-system update can try to rebuild the boot image into a volume too small or too fragmented to hold it, leaving the server unable to start, or a disk failure can go unnoticed because a mirror copy is already out of date.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-hd5-sizing/ck-hd5-sizing.ksh",
-      "sha256": "5c6240878f77713f32c466bd1f4f3214080e06668231d098d991f7e0adefef82"
+      "sha256": "c59006e05b8e8b5aceb17fa14f229d483a828e56bab6157b882844fcf03903d3"
     },
     {
       "id": "ck-home-config-file-perms",
@@ -4368,7 +4368,7 @@
       "blurb": "This check confirms that an AIX system has a consistent set of installed fileset requisites and dependencies. lppchk -v verifies that every installed fileset has all prerequisites present and matching, corroborated by an independent lppchk -m3 -v escalation and a real lslpp -qcL fileset inventory. A fileset with missing or mismatched prerequisites can block update_all and install_all_updates the same way a BROKEN state does, even when the recorded state of the fileset itself looks fine. The check only runs read-only lppchk and lslpp commands; it never writes anything.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-lppchk-consistency/ck-lppchk-consistency.ksh",
-      "sha256": "9c63a285947d611621a5d635881c5583c2e453a74f903feea54f5668212a7b4e"
+      "sha256": "7241d66c4e20bf7a0cd69a6e2d118e241ea5477de091fd0a6cca6375f09880dd"
     },
     {
       "id": "ck-lv-mirror-placement",
@@ -4521,7 +4521,7 @@
       "blurb": "This check looks for a standby copy of the operating system left behind by a previous multibos or alternate-disk operation, detected as bos_-prefixed logical volumes or a mounted /bos_inst filesystem. If that standby copy remains, an AIX migration can be blocked or forced onto an unexpected sequence, risking a failed or delayed upgrade and a wasted maintenance window.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-multibos-residue/ck-multibos-residue.ksh",
-      "sha256": "4f15860663564bd7ed1309f27ab4142358e119c05105807206ae3d561bb9a29d"
+      "sha256": "5658e49d2653e325622a2d9f78186dff2c72786e430c15eebd15cb0913f7e4f3"
     },
     {
       "id": "ck-net-adapter-health",
@@ -8337,7 +8337,7 @@
   "assembled_scanner": {
     "artifact": "ptxray-aix.sh",
     "site_artifact": "site/ptxray-aix.sh",
-    "sha256": "f16d0b451f3c35d24f36b65d3c182aba9de19c638bb9f48e59fee27ebdb02618"
+    "sha256": "a626d7d773099ff652b41f296019af643d6754badff748f18c3a53eb7096647d"
   },
   "review_pack": {
     "artifact": "ptxray-review-pack.sh",
