@@ -49,6 +49,15 @@ RELEASE_ASSET_URL = (
 RELEASE_ASSET_URL_IBMI = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh"
 )
+PUBLISHED_VERSION = "1.4.0"
+SIGNED_PAYLOADS = (
+    "aixray-aix.sh",
+    "ptxray-aix.sh",
+    "ptxray-defs.sh",
+    "ptxray-ibmi.sh",
+    "ptxray-review-pack.sh",
+    "ptxray-review-validate.awk",
+)
 # Tracks the shipped artifact rather than preserving an obsolete response-time
 # promise. A free review has no response-time SLA, so this gate pins only the
 # wording the public scanner actually prints.
@@ -273,8 +282,10 @@ class PublicFunnelTests(unittest.TestCase):
         (destination / "site").mkdir(parents=True)
         for relative in (
             "README.md",
+            "aixray-aix.sh",
             "catalog.json",
             "ptxray-aix.sh",
+            "ptxray-defs.sh",
             "ptxray-ibmi.sh",
             "ptxray-review-pack.sh",
             "ptxray-review-validate.awk",
@@ -294,29 +305,18 @@ class PublicFunnelTests(unittest.TestCase):
     def write_release_checksums(
         self, candidate: Path, overrides: dict[str, str] | None = None
     ) -> None:
-        """Write a SHA256SUMS covering exactly what catalog.json declares.
+        """Write the exact six-payload signed-release manifest.
 
-        A release manifest lists the three top-level payloads plus one
-        standalone tool per catalog check. Fixtures that hand-write only the
-        three top-level lines describe a shape no render produces, so they stop
-        exercising the digest logic they exist for and fail on payload-set
-        membership instead. `overrides` plants a specific digest for one path.
+        Standalone check digests remain bound by catalog.json; they are not
+        separately published release assets. `overrides` plants a specific
+        digest for one payload without weakening payload-set membership.
         """
-        catalog = json.loads(
-            (candidate / "catalog.json").read_text(encoding="utf-8")
-        )
-        artifacts = [
-            "ptxray-aix.sh",
-            "ptxray-ibmi.sh",
-            "ptxray-review-pack.sh",
-            "ptxray-review-validate.awk",
-        ] + [entry["artifact"] for entry in catalog["checks"]]
         overrides = overrides or {}
         (candidate / "SHA256SUMS").write_text(
             "".join(
                 f"{overrides.get(artifact) or sha256(candidate / artifact)}"
                 f"  {artifact}\n"
-                for artifact in artifacts
+                for artifact in SIGNED_PAYLOADS
             ),
             encoding="utf-8",
         )
@@ -356,22 +356,6 @@ class PublicFunnelTests(unittest.TestCase):
                 encoding="utf-8",
             )
             shutil.rmtree(candidate / "checks" / removed["id"])
-            # SHA256SUMS covers every payload the catalog declares, so a tree
-            # that declares one check fewer also ships one payload fewer. Before
-            # the manifest listed the standalone tools this pruning was
-            # unnecessary and the fixture omitted it; leaving it out now makes
-            # the fixture describe a release shape that could never be built.
-            sums_path = candidate / "SHA256SUMS"
-            sums_path.write_text(
-                "".join(
-                    line
-                    for line in sums_path.read_text(encoding="utf-8").splitlines(
-                        keepends=True
-                    )
-                    if line.split("  ", 1)[-1].strip() != removed["artifact"]
-                ),
-                encoding="utf-8",
-            )
             readme_path = candidate / "README.md"
             readme = readme_path.read_text(encoding="utf-8")
             readme_path.write_text(
@@ -435,20 +419,13 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertNotIn("Traceback", combined)
 
-    def test_documented_hash_verification_checks_v020_manifest(self) -> None:
+    def test_documented_hash_verification_checks_signed_manifest(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="ptxray-verify-v020-manifest-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
             shutil.copytree(ROOT / "checks", candidate / "checks")
-            catalog_path = candidate / "catalog.json"
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-            catalog["tool_version"] = "0.2.0"
-            catalog_path.write_text(
-                json.dumps(catalog, indent=2) + "\n",
-                encoding="utf-8",
-            )
             validator = candidate / "ptxray-review-validate.awk"
             validator.write_text('BEGIN { print "validated" }\n', encoding="utf-8")
             self.write_release_checksums(
@@ -466,20 +443,13 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertNotIn("Traceback", combined)
 
-    def test_documented_hash_verification_accepts_v020_manifest_docs(self) -> None:
+    def test_documented_hash_verification_accepts_signed_manifest_docs(self) -> None:
         with tempfile.TemporaryDirectory(
             prefix="ptxray-verify-v020-manifest-docs-"
         ) as temporary:
             candidate = Path(temporary)
             self.copy_verification_inputs(candidate)
             shutil.copytree(ROOT / "checks", candidate / "checks")
-            catalog_path = candidate / "catalog.json"
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-            catalog["tool_version"] = "0.2.0"
-            catalog_path.write_text(
-                json.dumps(catalog, indent=2) + "\n",
-                encoding="utf-8",
-            )
             validator = candidate / "ptxray-review-validate.awk"
             validator.write_text('BEGIN { print "validated" }\n', encoding="utf-8")
             self.write_release_checksums(candidate)
@@ -840,15 +810,30 @@ class PublicFunnelTests(unittest.TestCase):
             r"(?s)(?:key|fingerprint|signature).{0,160}not\s+(?:yet\s+)?published",
         )
 
-    def test_ibmi_asset_is_advertised_with_download_and_hashes(self) -> None:
-        # The IBM i monolith ships as its own downloadable release asset. The
-        # public surface must advertise it directly and point at SHA256SUMS for
-        # verification, exactly as the AIX scanner is advertised.
+    def test_ibmi_candidate_and_published_download_are_distinguished(self) -> None:
+        # Candidate source is inspectable in-tree, but releases/latest still
+        # serves published 1.4. Do not turn the unpublished 1.5 file into a
+        # latest-release claim before the signed release exists.
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn(RELEASE_ASSET_URL_IBMI, readme)
+        self.assertRegex(readme, r"(?is)1\.5.{0,100}unpublished release candidate")
+        self.assertIn(RELEASE_ASSET_URL_IBMI, site_html)
+        published_panel = site_html.split(
+            "Current published download: PTxray 1.4", 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn(RELEASE_ASSET_URL_IBMI, published_panel)
+        self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
+        llms_ibmi_download = next(
+            line for line in llms.splitlines() if RELEASE_ASSET_URL_IBMI in line
+        )
+        self.assertRegex(
+            llms_ibmi_download,
+            r"(?i)releases/latest[^.]{0,100}published 1\.4[^.]{0,100}"
+            r"not the unpublished 1\.5 candidate",
+        )
         for surface, text in (("README.md", readme), ("site/index.html", site_html)):
-            with self.subTest(surface=surface, contract="ibmi download link"):
-                self.assertIn(RELEASE_ASSET_URL_IBMI, text)
             with self.subTest(surface=surface, contract="ibmi hash verification"):
                 self.assertIn("SHA256SUMS", text)
             with self.subTest(surface=surface, contract="ibmi scanner named"):
@@ -1178,20 +1163,21 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIsInstance(declared_version, str)
         if not isinstance(declared_version, str):
             return
-        version_claim = re.compile(
-            r"\bversion(?:\s*:\s*|\s+)`?"
+        candidate_version_claim = re.compile(
+            r"\bcandidate version(?:\s*:\s*|\s+)`?"
             r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
             r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
             re.IGNORECASE,
         )
-        for path, expected_claims in (
-            (ROOT / "README.md", 3),
-            (SITE / "index.html", 3),
-            (ROOT / "llms.txt", 3),
-        ):
-            claims = version_claim.findall(path.read_text(encoding="utf-8"))
-            with self.subTest(path=path.name, contract="all claims are current"):
-                self.assertEqual([declared_version] * expected_claims, claims)
+        llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
+        self.assertEqual([declared_version], candidate_version_claim.findall(llms))
+
+        site_html = (SITE / "index.html").read_text(encoding="utf-8")
+        published_panel = site_html.split(
+            "Current published download: PTxray 1.4", 1
+        )[1].split("</section>", 1)[0]
+        self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
+        self.assertNotIn(f"Version {declared_version}", published_panel)
 
         root_jsonld = json.loads(JSONLD.read_text())
         site_jsonld = inline_jsonld((SITE / "index.html").read_text(encoding="utf-8"))
@@ -1223,6 +1209,12 @@ class PublicFunnelTests(unittest.TestCase):
                 json.dumps(catalog, indent=2) + "\n",
                 encoding="utf-8",
             )
+            original_readme = (candidate / "README.md").read_text(encoding="utf-8")
+            original_published_panel = (candidate / "site/index.html").read_text(
+                encoding="utf-8"
+            ).split("Current published download: PTxray 1.4", 1)[1].split(
+                "</section>", 1
+            )[0]
 
             stale = self.run_release_shape_sync(candidate, check=True)
             self.assertNotEqual(0, stale.returncode, stale.stdout + stale.stderr)
@@ -1231,22 +1223,28 @@ class PublicFunnelTests(unittest.TestCase):
             verified = self.run_release_shape_sync(candidate, check=True)
             self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
 
-            version_claim = re.compile(
-                r"\bversion(?:\s*:\s*|\s+)`?"
+            candidate_version_claim = re.compile(
+                r"\bcandidate version(?:\s*:\s*|\s+)`?"
                 r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
                 r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
                 re.IGNORECASE,
             )
-            for relative, expected_claims in (
-                ("README.md", 3),
-                ("llms.txt", 3),
-                ("site/index.html", 3),
-            ):
-                claims = version_claim.findall(
-                    (candidate / relative).read_text(encoding="utf-8")
-                )
-                with self.subTest(relative=relative, contract="rendered version"):
-                    self.assertEqual([declared_version] * expected_claims, claims)
+            llms = (candidate / "llms.txt").read_text(encoding="utf-8")
+            self.assertEqual(
+                [declared_version],
+                candidate_version_claim.findall(llms),
+            )
+            self.assertEqual(
+                original_readme,
+                (candidate / "README.md").read_text(encoding="utf-8"),
+            )
+            rendered_published_panel = (candidate / "site/index.html").read_text(
+                encoding="utf-8"
+            ).split("Current published download: PTxray 1.4", 1)[1].split(
+                "</section>", 1
+            )[0]
+            self.assertEqual(original_published_panel, rendered_published_panel)
+            self.assertIn(f"Version {PUBLISHED_VERSION}", rendered_published_panel)
 
             root_jsonld = json.loads(
                 (candidate / "ptxray.jsonld").read_text(encoding="utf-8")

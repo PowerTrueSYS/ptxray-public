@@ -252,28 +252,17 @@ require_equal(
 legacy_release = catalog.get("tool_version") == "0.1.0"
 release_digests = {}
 if not legacy_release:
-    # v0.1.0 shipped three top-level payloads. Every release since also ships
-    # one standalone tool per catalog check, so this set is DERIVED from
-    # catalog.json rather than written out: the previous hard-coded triple
-    # silently became wrong the moment the standalone tools joined the release,
-    # and rejected a correct v1.0.0 SHA256SUMS covering 327 payloads.
-    catalog_checks = catalog.get("checks")
-    if not isinstance(catalog_checks, list):
-        fail("catalog.json checks is not a list")
-    check_artifacts = []
-    for entry in catalog_checks:
-        if not isinstance(entry, dict):
-            fail("catalog.json contains a check entry that is not an object")
-        artifact_path = entry.get("artifact")
-        if not isinstance(artifact_path, str) or not artifact_path:
-            fail(f"catalog check {entry.get('id')!r} has no artifact path")
-        check_artifacts.append(artifact_path)
+    # PTxray 1.5 publishes exactly these six executable/data payloads. The
+    # standalone tools remain source-visible and catalog-digest-bound, but are
+    # not separately uploaded release assets.
     payloads = (
+        "aixray-aix.sh",
         "ptxray-aix.sh",
+        "ptxray-defs.sh",
         "ptxray-ibmi.sh",
         "ptxray-review-pack.sh",
         "ptxray-review-validate.awk",
-    ) + tuple(check_artifacts)
+    )
     checksum_source = read_text("SHA256SUMS")
     for line_number, line in enumerate(checksum_source.splitlines(), start=1):
         match = re.fullmatch(r"([0-9A-Fa-f]{64})[ \t]+\*?(\S+)", line)
@@ -301,6 +290,13 @@ if not legacy_release:
             f"SHA256SUMS digest mismatch for {relative} "
             f"(manifest sha256 {expected}, file sha256 {actual})",
         )
+    compatibility_alias = sha256("aixray-aix.sh")
+    require_equal(
+        compatibility_alias,
+        scanner,
+        "byte mismatch between aixray-aix.sh compatibility alias and "
+        f"ptxray-aix.sh (sha256 {compatibility_alias} != {scanner})",
+    )
 if legacy_release:
     if scanner not in readme:
         fail(f"README.md does not contain the ptxray-aix.sh digest {scanner}")

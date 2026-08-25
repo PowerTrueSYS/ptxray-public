@@ -97,14 +97,14 @@ class ReviewPackTests(unittest.TestCase):
             path
             for path in created
             if re.fullmatch(
-                r"aixray-review-[0-9a-f]{8}-\d{4}-\d{2}-\d{2}\.html",
+                r"ptxray-review-[0-9a-f]{8}-\d{4}-\d{2}-\d{2}\.html",
                 path.name,
             )
         )
         maps = sorted(
             path
             for path in created
-            if re.fullmatch(r"aixray-local-key-[0-9a-f]{8}\.map", path.name)
+            if re.fullmatch(r"ptxray-local-key-[0-9a-f]{8}\.map", path.name)
         )
         return (
             result,
@@ -133,7 +133,7 @@ class ReviewPackTests(unittest.TestCase):
         about the reason therefore read the manifest.
         """
         manifests = sorted(
-            directory.glob("aixray-local-pseudonymize-failed-*.txt")
+            directory.glob("ptxray-local-pseudonymize-failed-*.txt")
         )
         self.assertEqual(1, len(manifests), sorted(directory.iterdir()))
         text = manifests[0].read_text(encoding="utf-8")
@@ -254,7 +254,7 @@ class ReviewPackTests(unittest.TestCase):
                     self.assertNotIn(removed, review)
                     self.assertNotIn(removed, map_path.read_text(encoding="utf-8"))
             manifest = next(
-                directory.glob("aixray-local-removals-*.txt")
+                directory.glob("ptxray-local-removals-*.txt")
             ).read_text(encoding="utf-8")
             self.assertIn("kind=secret-in-removed-field", manifest)
             self.assertIn("kind=GECOS-in-removed-field", manifest)
@@ -283,18 +283,18 @@ class ReviewPackTests(unittest.TestCase):
             self.assertNotIn("prod-aix01", review_path.name)
             self.assertNotIn("prod-aix01", map_path.name)
             review_name = re.fullmatch(
-                r"aixray-review-([0-9a-f]{8})-2026-07-20\.html",
+                r"ptxray-review-([0-9a-f]{8})-2026-07-20\.html",
                 review_path.name,
             )
             map_name = re.fullmatch(
-                r"aixray-local-key-([0-9a-f]{8})\.map",
+                r"ptxray-local-key-([0-9a-f]{8})\.map",
                 map_path.name,
             )
             self.assertIsNotNone(review_name, review_path.name)
             self.assertIsNotNone(map_name, map_path.name)
             if review_name is not None and map_name is not None:
                 self.assertEqual(review_name.group(1), map_name.group(1))
-            self.assertEqual([], list(directory.glob("aixray-review-*.map")))
+            self.assertEqual([], list(directory.glob("ptxray-review-*.map")))
 
             summary = result.stderr.splitlines()
             self.assertEqual(5, len(summary), result.stderr)
