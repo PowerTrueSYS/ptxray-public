@@ -592,6 +592,18 @@ class PublicFunnelTests(unittest.TestCase):
         root_jsonld = json.loads(JSONLD.read_text(encoding="utf-8"))
         site_jsonld = inline_jsonld(site_html)
 
+        for artifact in (
+            ROOT / "ptxray-aix.sh",
+            ROOT / "aixray-aix.sh",
+            SITE / "ptxray-aix.sh",
+        ):
+            scanner = artifact.read_text(encoding="utf-8")
+            with self.subTest(artifact=artifact.relative_to(ROOT)):
+                self.assertIn('"tool": "ptxray"', scanner)
+                self.assertNotIn('"tool": "aixray"', scanner)
+                self.assertNotIn("aixray-flrtvc.", scanner)
+                self.assertNotIn("aixray-spec-v2.md", scanner)
+
         self.assertEqual("ptxray-public-tests", package.get("name"))
         self.assertEqual("ptxray-public-tests", package_lock.get("name"))
         self.assertEqual(
