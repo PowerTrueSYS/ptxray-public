@@ -2001,6 +2001,14 @@ START_HERE_ITEMS=""
             r"(?m)^\s+types:\s*\[published, edited, released\]\s*$",
         )
         self.assertIn("fetch-depth: 0", workflow)
+        self.assertEqual(
+            2,
+            workflow.count(
+                "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"
+            ),
+        )
+        self.assertNotIn("actions/checkout@v", workflow)
+        self.assertGreaterEqual(workflow.count("persist-credentials: false"), 2)
         self.assertIn("sudo apt-get install -y ksh", workflow)
         self.assertIn("python3 tools/sync-release-shape.py --check", workflow)
         self.assertIn("sh tests/run-tests.sh", workflow)
