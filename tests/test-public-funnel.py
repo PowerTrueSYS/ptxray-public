@@ -1377,6 +1377,14 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIn("data-aixray-*", allowlist)
         self.assertIn("AIXRAY_*", allowlist)
         self.assertIn("docs/RELEASE-NOTES.md", allowlist)
+        self.assertTrue((ROOT / "aixray-aix.sh").is_file())
+        for retired_path in (
+            ROOT / "aixray-review-pack.sh",
+            ROOT / "aixray-review-validate.awk",
+            SITE / "aixray-aix.sh",
+        ):
+            with self.subTest(retired_path=retired_path):
+                self.assertFalse(retired_path.exists())
 
     def test_v010_release_note_records_exact_tag_asset_discrepancy(self) -> None:
         self.assertTrue(RELEASE_NOTES.is_file())
