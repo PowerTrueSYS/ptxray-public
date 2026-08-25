@@ -2,8 +2,9 @@
 
 No single grep, digest, test, or trace proves arbitrary code safe. This
 checklist gives a skeptical administrator repeatable evidence about one exact
-public revision of the on-box `ptxray-aix.sh` scanner and the offline
-`ptxray-review-pack.sh` helper. Read the evidence scopes in
+public revision of the `ptxray-aix.sh` and `ptxray-ibmi.sh` runners, the
+separate `ptxray-defs.sh` downloader, and the offline `ptxray-review-pack.sh`
+helper. Read the evidence scopes in
 [`SECURITY.md`](../SECURITY.md) before treating any pass as broader than it
 is.
 
@@ -14,7 +15,8 @@ Do not run it first on a production AIX/VIOS target.
 
 ## Verify the signed manifest first
 
-This is the verification order for the PTxray 1.5 release design. That release,
+This is the verification order for the unpublished PTxray 1.5 release
+candidate. That release,
 its release public key, and its authoritative fingerprint are not yet
 published. Until the release ceremony publishes the real fingerprint through
 an independent PowerTrue Systems channel, stop here: candidate files are not a
@@ -35,11 +37,11 @@ SHA256SUMS.sig
 POWERTRUE-RELEASE-PUBLIC.pem
 ```
 
-`aixray-aix.sh` is the compatibility asset and must be byte-identical to
-`ptxray-aix.sh`. `PTXRAY-RELEASE-METADATA.json` belongs to the signed tag and
-the namespaced checksum manifest; it is not a tenth release asset. The exact
-metadata JSON key set remains a renderer dependency and must be frozen before
-the 1.5 release-integrity gate can validate it.
+`aixray-aix.sh` is the only legacy-named compatibility asset and must be
+byte-identical to `ptxray-aix.sh`. `SHA256SUMS` must contain exactly six
+basename entries: the five `ptxray-*` payloads above and the compatibility
+asset. It does not hash itself, its signature, or the public key. Repository or
+tag metadata is not an additional release asset.
 
 On a trusted review workstation with OpenSSL, print the downloaded key's
 SPKI-DER SHA-256 fingerprint:
@@ -61,10 +63,13 @@ Only after the independent fingerprint matches, verify the RSA-3072 / SHA-256
 openssl dgst -sha256 -verify POWERTRUE-RELEASE-PUBLIC.pem -signature SHA256SUMS.sig SHA256SUMS
 ```
 
-Require `Verified OK`. Then verify the `assets/NAME` entries in `SHA256SUMS`
-before running a payload. The same manifest uses `tag/PATH` entries to bind the
-other tag files; it deliberately excludes the checksum manifest itself, its
-signature, and the public key from tag hashes.
+Require `Verified OK`, then verify all six payload digests before running a
+payload:
+
+```sh
+sha256sum -c SHA256SUMS
+cmp ptxray-aix.sh aixray-aix.sh
+```
 
 ## Pin the public revision
 
@@ -82,16 +87,17 @@ result below is revision-specific.
 ## Run the release-integrity gate
 
 Before pushing a release tag, run the tree-only gate from the committed
-candidate revision. Replace `v0.1.0` with the tag being prepared:
+candidate revision:
 
 ```sh
-python3 tools/verify-release-integrity.py --tag v0.1.0
+python3 tools/verify-release-integrity.py --tag v1.5.0
 ```
 
 For `v1.0.0` through the current published 1.4 line, use that release's
-documented asset set. The 1.5 design uses the nine assets listed in the
-signature-first section above; the renderer, real metadata, release public key,
-and signature ceremony must land before that candidate can pass the final gate.
+documented asset set. The 1.5 candidate uses the nine assets listed in the
+signature-first section above; the renderer, release public key, signed
+manifest, and signature ceremony must land before that candidate can pass the
+final gate.
 The immutable `v0.1.0` release retains its historical two-asset contract
 (`ptxray-aix.sh` and `ptxray-review-pack.sh`):
 
@@ -100,12 +106,12 @@ python3 tools/verify-release-integrity.py --tag v0.1.0 \
   --assets-dir release-assets
 ```
 
-The current gate checks the required tree paths, all catalog digests, root/site
-scanner identity, artifact version declarations, the exact versioned release
-asset set, the checksum manifest, and asset bytes. The 1.5 signature and
-namespaced-manifest checks remain blocked until the renderer freezes the exact
-metadata schema and produces the real candidate. Any `FAIL` line blocks a
-release.
+The gate checks the required tree paths, catalog digests, root/site scanner
+identity, artifact version declarations, the exact versioned release asset
+set, the signed checksum manifest, and asset bytes. The unpublished candidate
+cannot pass its final release check until the renderer produces the exact 1.5
+payloads and the signing ceremony signs their manifest. Any `FAIL` line blocks
+a release.
 
 ## Verify byte identity and catalog hashes
 
@@ -414,6 +420,20 @@ git grep -n -E '(^|[^[:alnum:]_])(curl|wget|ftp|tftp|telnet|nc|socat|ssh|scp|sft
 This is a review aid, not a pass/fail gate. The artifacts contain network words
 in comments, local-configuration reads, report text, and remediation text.
 Review every hit. An unexplained executable client or socket call is a failure.
+Do not add `ptxray-defs.sh` to this no-egress set: it is the separately named
+network-capable downloader. Inspect it independently and require its executable
+network surface to be limited to the two disclosed fixed HTTPS GET endpoints:
+
+```sh
+git grep -n -E 'curl|https://' -- ptxray-defs.sh
+```
+
+Connected mode is the default before assessment and writes a verified cache
+generation. `--offline` must select only the signed cache;
+`--definitions-bundle SIGNED_FILE` must verify the local signed bundle and
+adjacent `SIGNED_FILE.sig`. In every mode, require the runner to validate the
+adjacent downloader's same-release digest before invocation and require an old
+or stale definitions age warning.
 
 Run the shipped command-position lint against those exact sources:
 
@@ -446,8 +466,9 @@ The first search is intentionally noisy: most mutating command names in the
 scanner are remediation prose that is never evaluated. The second highlights
 the current local writer variables. Inspect each actual `mkdir`, `cp`,
 `chmod`, `ln`, `rm`, `mv`, and redirection operand. Scanner
-writes must remain confined to operator-selected report/export paths or private
-FLRTVC scratch. Review-helper writes must remain beside the selected report,
+writes must remain confined to operator-selected report/export paths, private
+FLRTVC scratch, or the protected `/var/ptxray/definitions` cache written
+through the separate verified downloader. Review-helper writes must remain beside the selected report,
 inside private scratch or the final mode-`0600` review/map paths. Neither
 grep proves read-only behavior by itself.
 
@@ -468,11 +489,11 @@ ksh -n ptxray-review-pack.sh
 For a report you own, run:
 
 ```sh
-./ptxray-review-pack.sh aixray-<hostname>-<date>.html
+./ptxray-review-pack.sh ptxray-<hostname>-<date>.html
 ```
 
-Success creates one owner-only `aixray-review-*.html` and one owner-only
-`aixray-local-key-*.map`. Open the review HTML and inspect it. Send only
+Success creates one owner-only `ptxray-review-*.html` and one owner-only
+`ptxray-local-key-*.map`. Open the review HTML and inspect it. Send only
 the review HTML. The map starts with a DO-NOT-SEND warning and contains the
 local token-to-identifier mapping; keep it mode `0600` and local. A
 successful pseudonymization is not a claim of anonymity. A nonzero exit with no

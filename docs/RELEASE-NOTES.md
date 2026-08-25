@@ -2,11 +2,19 @@
 
 ## Unpublished candidate status
 
-The latest published release remains version 1.4.0. The current working
-candidate is not a release: its exact rendered programs, catalog, source
-registry, release metadata, checksums, signature, public key, and independently
+The latest published release remains version 1.4.0. PTxray 1.5.0 is an
+unpublished release candidate, not a release. Its exact rendered programs,
+catalog, source registry, checksums, signature, public key, and independently
 published fingerprint must all come from the release renderer and signing
-ceremony before versioned release notes can be added.
+ceremony before a versioned 1.5 release section can be added.
+
+The candidate AIX and VIOS runners require root; the IBM i runner requires
+QSECOFR. Each runner authenticates and invokes the separate adjacent
+`ptxray-defs.sh` before assessment. Connected mode attempts a signed-definitions
+update by default, while `--offline` uses a signed cache and
+`--definitions-bundle` accepts a local signed bundle. Assessment probes remain
+no-egress, read-only on system configuration, and non-remediating. These facts
+do not make 1.5 available from `releases/latest`.
 
 The canonical site is `https://powertruesystems.com/ptxray/` and the canonical
 repository is `https://github.com/PowerTrueSYS/ptxray-public`. The legacy site

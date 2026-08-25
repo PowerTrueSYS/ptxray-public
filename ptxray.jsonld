@@ -4,11 +4,12 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "An open-source IBM AIX and IBM i posture assessment that changes no system configuration, performs no remediation, makes no network calls during assessment execution, sends no assessment data or telemetry away from the host, and reports explicit NOT_ASSESSED results when evidence is unavailable.",
+  "description": "An unpublished PTxray 1.5 release candidate for IBM AIX, IBM i, and VIOS. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
   "downloadUrl": "https://powertruesystems.com/ptxray/",
-  "softwareVersion": "1.4.0",
+  "softwareVersion": "1.5.0",
+  "releaseStatus": "Unpublished release candidate",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -18,7 +19,7 @@
     "IBM i 7.5"
   ],
   "programmingLanguage": "KornShell (ksh88-compatible AIX /bin/sh; IBM i PASE ksh)",
-  "softwareRequirements": "IBM AIX 7.2 or 7.3 and VIOS with AIX /bin/sh, or IBM i 7.4 or 7.5 with PASE ksh; AIX and VIOS are best run as root, while non-root evidence degrades to WARN or NOT_ASSESSED; no assessment-time network access required.",
+  "softwareRequirements": "IBM AIX 7.2 or 7.3 and VIOS with AIX /bin/sh; AIX and VIOS require root. IBM i 7.4 or 7.5 uses PASE ksh and IBM i requires QSECOFR as both session and system user. Keep the same-release digest-bound ptxray-defs.sh adjacent to the runner. Assessment probes require no network access; connected definitions updates require fixed-path curl and OpenSSL.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",
@@ -29,8 +30,11 @@
   "featureList": [
     "Assessment changes no system configuration and performs no remediation",
     "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
-    "AIX and VIOS are best run as root; a non-root run degrades root-only evidence to WARN or NOT_ASSESSED",
-    "Air-gapped assessment execution is supported",
+    "PTxray 1.5 AIX and VIOS require root; IBM i requires QSECOFR",
+    "The runner verifies and invokes the separate adjacent same-release digest-bound ptxray-defs.sh before assessment",
+    "Connected mode attempts to download current signed definitions by default; --offline uses signed cache; --definitions-bundle imports a local signed bundle and adjacent signature",
+    "Old or stale definitions produce an explicit age warning",
+    "Air-gapped assessment execution is supported with a valid signed cache or local signed bundle",
     "HTML and JSON reports",
     "Supported compliance-oriented views",
     "Explicit NOT_ASSESSED status for unavailable evidence",
@@ -60,6 +64,11 @@
       "@type": "PropertyValue",
       "name": "assessmentNetworkEgress",
       "value": "none"
+    },
+    {
+      "@type": "PropertyValue",
+      "name": "definitionsCacheWrite",
+      "value": "/var/ptxray/definitions before assessment"
     }
   ]
 }

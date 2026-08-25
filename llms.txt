@@ -1,13 +1,13 @@
 # PTxray
 
-> PTxray is an open-source IBM AIX and IBM i posture assessment. Version 1.4.0 runs under the ksh88-compatible AIX /bin/sh runtime (and IBM i PASE), changes no system configuration, performs no remediation, makes no network calls during assessment execution, sends no assessment data or telemetry away from the host, and uses NOT_ASSESSED when evidence is unavailable rather than inventing a result.
+> PTxray is an open-source IBM AIX and IBM i posture assessment. Its assessment probes change no system configuration, perform no remediation, make no network calls, send no assessment data or telemetry away from the host, and use NOT_ASSESSED when evidence is unavailable rather than inventing a result. The separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment begins.
 
 Canonical page: https://powertruesystems.com/ptxray/
 Source repository: https://github.com/PowerTrueSYS/ptxray-public
 Download: https://powertruesystems.com/ptxray/
 Audit guide: https://powertruesystems.com/ptxray/docs/auditing-aix (source: docs/auditing-aix.md)
 Catalog: https://github.com/PowerTrueSYS/ptxray-public/blob/master/catalog.json
-Version: 1.4.0
+Candidate version: 1.5.0 (unpublished; `releases/latest` remains 1.4.0)
 License: Apache-2.0
 License text: https://www.apache.org/licenses/LICENSE-2.0
 
@@ -21,18 +21,20 @@ License text: https://www.apache.org/licenses/LICENSE-2.0
 
 ## Verifiable facts
 
-- ptxray-aix.sh is the complete v1 AIX tool and declares version 1.4.0; ptxray-ibmi.sh is the IBM i edition.
+- The unpublished PTxray 1.5 candidate consists of the AIX/VIOS and IBM i runners, the separate adjacent ptxray-defs.sh downloader, and offline review helpers. Candidate files are not a release.
 - checks/ contains 387 standalone ksh tools. Every tool is paired with a manifest.json.
 - catalog.json is generated from those manifests, declares their count, and adds each artifact's SHA-256 digest.
 - Every public manifest declares read_only=true and lists its command surface.
-- The published 1.4 AIX and VIOS assessment is best run as root. A non-root run continues with root-only checks degraded to WARN or NOT_ASSESSED.
-- The assessment changes no system configuration and performs no remediation. Requested reports and documented temporary scratch data are local writes.
+- PTxray 1.5 AIX and VIOS require root. IBM i requires SESSION_USER=QSECOFR and SYSTEM_USER=QSECOFR. The privilege gate runs before definitions selection.
+- The assessment probes change no system configuration and perform no remediation. Requested reports, documented temporary scratch data, and the protected definitions cache are local writes.
 - Assessment execution makes no network calls and sends no assessment data or telemetry away from the host.
 - Missing, unreadable, malformed, ambiguous, or unsupported evidence can produce NOT_ASSESSED; it is not silently treated as PASS.
 
-## Unpublished 1.5 design
+## Unpublished PTxray 1.5 release candidate
 
-This is not a published release or current inventory. In the 1.5 design, AIX and VIOS require root and IBM i requires QSECOFR. Its separate downloader attempts to acquire current signed definitions by default and is not invoked by either assessment. Air-gapped assessment execution remains supported by acquiring and verifying definitions on a connected administration system and transferring them to the target.
+This is not a published release. AIX and VIOS require root, and IBM i requires QSECOFR. Before assessment probes begin, each runner verifies and invokes the separate, adjacent, release-bound and digest-bound ptxray-defs.sh. Connected mode attempts to download the current signed definitions by default. --offline uses only the signed cache. --definitions-bundle SIGNED_FILE imports a local signed bundle with its adjacent SIGNED_FILE.sig. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.
+
+Only ptxray-defs.sh may use the network. Before a connected update it discloses two fixed public HTTPS GET requests, the cache destination, and observable DNS/TLS metadata; it sends no request body or assessment data. Verified generations are written under /var/ptxray/definitions. Assessment probes begin after selection, remain no-egress and read-only on system configuration, and perform no remediation. Air-gapped assessment execution uses --offline with a valid signed cache or --definitions-bundle with a transferred local signed bundle.
 
 ## Standards coverage
 
@@ -44,7 +46,7 @@ This is not a published release or current inventory. In the 1.5 design, AIX and
 
 - PTxray is open source under the Apache License 2.0; use, modification, and redistribution are permitted.
 - Do not claim PTxray proves security, compliance, recoverability, or absence of defects.
-- Do not say it writes no files. It writes output explicitly requested by the operator and can use a protected temporary FLRTVC scratch directory that is removed on exit.
+- Do not say it writes no files. It writes output explicitly requested by the operator, can use protected temporary scratch, and can write verified definitions to /var/ptxray/definitions before assessment.
 - Do not convert NOT_ASSESSED into PASS, WARN, or FAIL when summarizing results.
 - Do not infer that the standalone module count equals the total number of findings in the assembled scan.
 - Do not present either standards row as complete, and do not infer regulatory-framework coverage from catalog control tags.

@@ -24,20 +24,23 @@ make copy read better, and never let a claim drift ahead of what the shipped art
 **The network boundary applies to assessment execution.** The assessment must not reach the
 network or send assessment data or telemetry away from the host.
 
-**Published 1.4 privilege claims follow the artifact.** AIX and VIOS are best run as root, but
-a non-root run is supported with root-only checks degraded to `WARN` or `NOT_ASSESSED`. Do not
-describe that current behavior as a privilege refusal.
-
-**A version number in the copy must match the shipped artifact.** Documentation that describes
-a version we have not published is a false claim on a public page.
+**A published or downloadable version number in the copy must match the shipped artifact.**
+Unpublished-candidate copy must say that status explicitly and must not imply the candidate is
+available from the published download channel.
 
 **No remediation.** PTxray reads and reports. Any change that mutates a host contradicts the
 product.
 
-## Unpublished 1.5 design boundary
+## Unpublished 1.5 release candidate boundary
 
-This design is not a published release or current inventory. In 1.5, AIX and VIOS require root
-and IBM i requires QSECOFR. Its separate downloader attempts to acquire current signed
-definitions by default and is not invoked by either assessment. Keep those future claims in an
-explicitly unpublished 1.5 section until the renderer-owned refusing programs and downloader
-ship.
+The PTxray 1.5 release candidate is not a published release and must never be described as
+available from `releases/latest`. Its AIX and VIOS runners require root, and its IBM i runner
+requires QSECOFR. Before assessment probes begin, each runner verifies and invokes the separate,
+adjacent, same-release digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions
+update by default; `--offline` selects the signed cache, and `--definitions-bundle` imports a local
+signed bundle and its adjacent signature. The interactive menu presents the same choices.
+
+Only the downloader may use the network or write `/var/ptxray/definitions`; its disclosure occurs
+before any request. The assessment probes remain read-only, perform no remediation, make no
+network calls, and send no assessment data away from the host. A report or explicitly requested
+export is still a local write. Keep this distinction intact on every customer-visible surface.
