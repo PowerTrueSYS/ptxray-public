@@ -1,5 +1,22 @@
 # Release notes
 
+## Unpublished candidate status
+
+The latest published release remains version 1.4.0. The current working
+candidate is not a release: its exact rendered programs, catalog, source
+registry, release metadata, checksums, signature, public key, and independently
+published fingerprint must all come from the release renderer and signing
+ceremony before versioned release notes can be added.
+
+The canonical site is `https://powertruesystems.com/ptxray/` and the canonical
+repository is `https://github.com/PowerTrueSYS/ptxray-public`. The legacy site
+URL `https://powertruesystems.com/aixray/` has an active HTTP 308 redirect to
+the canonical site, which returns HTTP 200. The legacy GitHub repository URL
+`https://github.com/PowerTrueSYS/aixray-public` has an active HTTP 301 redirect
+to the canonical repository, which returns HTTP 200. These redirect facts do
+not publish the 1.5 candidate. The release public key, fingerprint, and
+signature are not yet published.
+
 ## v1.4.0
 
 If you downloaded v1.3.0, download v1.4.0 and run it again. This release

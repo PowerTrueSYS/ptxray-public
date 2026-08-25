@@ -14,12 +14,12 @@ import tempfile
 
 COUNT_CLAIM_TARGETS = {
     "README.md": 1,
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "llms.txt": 1,
     "site/index.html": 2,
 }
 COUNT_PROPERTY_TARGETS = {
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "site/index.html": 1,
 }
 VERSION_CLAIM_TARGETS = {
@@ -28,7 +28,7 @@ VERSION_CLAIM_TARGETS = {
     "site/index.html": 3,
 }
 VERSION_PROPERTY_TARGETS = {
-    "aixray.jsonld": 1,
+    "ptxray.jsonld": 1,
     "site/index.html": 1,
 }
 COUNT_CLAIM_RE = re.compile(

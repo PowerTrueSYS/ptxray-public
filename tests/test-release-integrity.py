@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -30,7 +31,7 @@ def sha256(path: Path) -> str:
 class ReleaseIntegrityTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(
-            prefix="aixray-release-integrity-"
+            prefix="ptxray-release-integrity-"
         )
         self.base = Path(self.temporary.name)
         self.tree = self.base / "tree"
@@ -149,6 +150,96 @@ class ReleaseIntegrityTests(unittest.TestCase):
             text=True,
             check=False,
         )
+
+    def configure_signed_v150_candidate(self) -> None:
+        version = "1.5.0"
+        scanner = (
+            "#!/bin/sh\n"
+            f'VERSION="{version}"\n'
+            "exit 0\n"
+        ).encode()
+        review = (
+            "#!/bin/sh\n"
+            f'AIXRAY_REVIEW_PACK_VERSION="{version}"\n'
+            "exit 0\n"
+        ).encode()
+        definitions = b"#!/bin/sh\n# signed definitions downloader fixture\nexit 0\n"
+        for directory in (self.tree, self.assets):
+            (directory / "ptxray-aix.sh").write_bytes(scanner)
+            (directory / "ptxray-review-pack.sh").write_bytes(review)
+            (directory / "ptxray-defs.sh").write_bytes(definitions)
+        (self.tree / "site" / "ptxray-aix.sh").write_bytes(scanner)
+        (self.assets / "aixray-aix.sh").write_bytes(scanner)
+        self.write_catalog(version=version)
+        self.write_sha256sums()
+
+        (self.tree / "PTXRAY-RELEASE-METADATA.json").write_text(
+            '{"fixture_schema":"ptxray-release-metadata/1"}\n',
+            encoding="utf-8",
+        )
+        private_key = self.base / "fixture-private.pem"
+        key_generation = subprocess.run(
+            [
+                "openssl",
+                "genpkey",
+                "-algorithm",
+                "RSA",
+                "-pkeyopt",
+                "rsa_keygen_bits:3072",
+                "-out",
+                str(private_key),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            0,
+            key_generation.returncode,
+            key_generation.stdout + key_generation.stderr,
+        )
+        public_key = self.tree / "POWERTRUE-RELEASE-PUBLIC.pem"
+        public_generation = subprocess.run(
+            [
+                "openssl",
+                "pkey",
+                "-in",
+                str(private_key),
+                "-pubout",
+                "-out",
+                str(public_key),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            0,
+            public_generation.returncode,
+            public_generation.stdout + public_generation.stderr,
+        )
+        signature = self.tree / "SHA256SUMS.sig"
+        signing = subprocess.run(
+            [
+                "openssl",
+                "dgst",
+                "-sha256",
+                "-sign",
+                str(private_key),
+                "-out",
+                str(signature),
+                str(self.tree / "SHA256SUMS"),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(0, signing.returncode, signing.stdout + signing.stderr)
+        shutil.copy2(public_key, self.assets / public_key.name)
+        shutil.copy2(signature, self.assets / signature.name)
 
     def assert_failed_with(self, expected: str) -> subprocess.CompletedProcess[str]:
         result = self.run_gate()
@@ -331,6 +422,46 @@ class ReleaseIntegrityTests(unittest.TestCase):
         self.assert_failed_with(
             "SHA256SUMS digest mismatch for ptxray-review-validate.awk"
         )
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_signed_surface_stops_at_unfrozen_metadata_schema(self) -> None:
+        self.configure_signed_v150_candidate()
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn(
+            "PTxray 1.5 namespaced manifest validation is blocked until "
+            "the release metadata schema is frozen",
+            combined,
+        )
+        self.assertNotIn("required release artifact is missing", combined)
+        self.assertNotIn("required release asset is missing", combined)
+        self.assertNotIn("unexpected release asset", combined)
+        self.assertNotIn("release signature verification failed", combined)
+
+        shutil.copy2(
+            self.tree / "PTXRAY-RELEASE-METADATA.json",
+            self.assets / "PTXRAY-RELEASE-METADATA.json",
+        )
+        with_metadata_asset = self.run_gate(tag="v1.5.0")
+        self.assertIn(
+            "unexpected release asset: PTXRAY-RELEASE-METADATA.json",
+            with_metadata_asset.stdout + with_metadata_asset.stderr,
+        )
+
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_a_tampered_manifest_signature(self) -> None:
+        self.configure_signed_v150_candidate()
+        (self.tree / "SHA256SUMS.sig").write_bytes(b"not a signature\n")
+        (self.assets / "SHA256SUMS.sig").write_bytes(b"not a signature\n")
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("release signature verification failed", combined)
 
     def test_v010_legacy_two_asset_surface_still_passes(self) -> None:
         legacy_version = "0.1.0"

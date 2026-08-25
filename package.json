@@ -1,5 +1,5 @@
 {
-  "name": "aixray-public-tests",
+  "name": "ptxray-public-tests",
   "private": true,
   "type": "module",
   "scripts": {

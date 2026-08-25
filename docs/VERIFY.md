@@ -12,6 +12,60 @@ locked-down container without sensitive mounts, host sockets, tokens, or
 production data. Until review is complete, assume the revision could egress.
 Do not run it first on a production AIX/VIOS target.
 
+## Verify the signed manifest first
+
+This is the verification order for the PTxray 1.5 release design. That release,
+its release public key, and its authoritative fingerprint are not yet
+published. Until the release ceremony publishes the real fingerprint through
+an independent PowerTrue Systems channel, stop here: candidate files are not a
+release, and a public key downloaded beside a payload cannot authenticate
+itself.
+
+The designed release asset set is exactly:
+
+```text
+ptxray-aix.sh
+ptxray-ibmi.sh
+ptxray-defs.sh
+ptxray-review-pack.sh
+ptxray-review-validate.awk
+aixray-aix.sh
+SHA256SUMS
+SHA256SUMS.sig
+POWERTRUE-RELEASE-PUBLIC.pem
+```
+
+`aixray-aix.sh` is the compatibility asset and must be byte-identical to
+`ptxray-aix.sh`. `PTXRAY-RELEASE-METADATA.json` belongs to the signed tag and
+the namespaced checksum manifest; it is not a tenth release asset. The exact
+metadata JSON key set remains a renderer dependency and must be frozen before
+the 1.5 release-integrity gate can validate it.
+
+On a trusted review workstation with OpenSSL, print the downloaded key's
+SPKI-DER SHA-256 fingerprint:
+
+```sh
+openssl pkey -pubin -in POWERTRUE-RELEASE-PUBLIC.pem -outform DER \
+  | openssl dgst -sha256
+```
+
+Compare that value with the authoritative fingerprint obtained through the
+independent channel. Do not compare it only with another file or page from the
+same download location. No expected fingerprint is printed here because no
+authoritative 1.5 fingerprint exists yet.
+
+Only after the independent fingerprint matches, verify the RSA-3072 / SHA-256
+/ PKCS#1 v1.5 signature over the exact `SHA256SUMS` bytes:
+
+```sh
+openssl dgst -sha256 -verify POWERTRUE-RELEASE-PUBLIC.pem -signature SHA256SUMS.sig SHA256SUMS
+```
+
+Require `Verified OK`. Then verify the `assets/NAME` entries in `SHA256SUMS`
+before running a payload. The same manifest uses `tag/PATH` entries to bind the
+other tag files; it deliberately excludes the checksum manifest itself, its
+signature, and the public key from tag hashes.
+
 ## Pin the public revision
 
 ```sh
@@ -34,21 +88,24 @@ candidate revision. Replace `v0.1.0` with the tag being prepared:
 python3 tools/verify-release-integrity.py --tag v0.1.0
 ```
 
-For `v1.0.0` and later, place exactly `ptxray-aix.sh`, `ptxray-ibmi.sh`,
-`ptxray-review-pack.sh`, `ptxray-review-validate.awk`, and `SHA256SUMS` in a
-separate directory and compare them with the same candidate tree. The immutable
-`v0.1.0` release retains its historical two-asset contract (`ptxray-aix.sh` and
-`ptxray-review-pack.sh`):
+For `v1.0.0` through the current published 1.4 line, use that release's
+documented asset set. The 1.5 design uses the nine assets listed in the
+signature-first section above; the renderer, real metadata, release public key,
+and signature ceremony must land before that candidate can pass the final gate.
+The immutable `v0.1.0` release retains its historical two-asset contract
+(`ptxray-aix.sh` and `ptxray-review-pack.sh`):
 
 ```sh
 python3 tools/verify-release-integrity.py --tag v0.1.0 \
   --assets-dir release-assets
 ```
 
-The gate checks the required tree paths, all catalog digests, root/site scanner
-identity, artifact version declarations, the exact versioned release asset set,
-the v1.0.0-and-later checksum manifest, and asset bytes. Any `FAIL` line blocks
-the release.
+The current gate checks the required tree paths, all catalog digests, root/site
+scanner identity, artifact version declarations, the exact versioned release
+asset set, the checksum manifest, and asset bytes. The 1.5 signature and
+namespaced-manifest checks remain blocked until the renderer freezes the exact
+metadata schema and produces the real candidate. Any `FAIL` line blocks a
+release.
 
 ## Verify byte identity and catalog hashes
 
@@ -343,13 +400,13 @@ A digest identifies the reviewed bytes. It becomes an authenticity check only
 when compared with a digest obtained through an independently trusted release
 channel.
 
-## Inspect and test the zero-egress boundary
+## Inspect and test the assessment no-network boundary
 
 Start with a deliberately broad source search against the scanner, review
 helper, and companion validator when present:
 
 ```sh
-set -- ptxray-aix.sh ptxray-review-pack.sh
+set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh
 [ ! -f ptxray-review-validate.awk ] || set -- "$@" ptxray-review-validate.awk
 git grep -n -E '(^|[^[:alnum:]_])(curl|wget|ftp|tftp|telnet|nc|socat|ssh|scp|sftp|rcp|rsh|rexec|ping|traceroute|sendmail|host|nslookup|dig)([^[:alnum:]_]|$)|/dev/(tcp|udp)|socket[[:space:]]*\(|connect[[:space:]]*\(' -- "$@" || true
 ```
@@ -361,7 +418,7 @@ Review every hit. An unexplained executable client or socket call is a failure.
 Run the shipped command-position lint against those exact sources:
 
 ```sh
-set -- ptxray-aix.sh ptxray-review-pack.sh
+set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh
 [ ! -f ptxray-review-validate.awk ] || set -- "$@" ptxray-review-validate.awk
 sh tools/ci/egress-lint.sh "$@"
 ```
@@ -373,7 +430,7 @@ catches direct and wrapped network-client forms. It is a static tripwire, not a
 complete shell parser or live AIX runtime trace. Its limits—including inherited
 descriptors, other address families, cooperating daemons, and network-mounted
 output paths—are described in
-[`SECURITY.md`](../SECURITY.md#zero-egress-evidence-and-limits).
+[`SECURITY.md`](../SECURITY.md#how-the-assessment-network-boundary-is-enforced).
 
 ## Inspect the read-only and local-write boundary
 

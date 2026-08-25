@@ -1,13 +1,13 @@
 {
   "@context": "https://schema.org",
   "@type": "SoftwareApplication",
-  "@id": "https://powertruesystems.com/aixray#software",
+  "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "An open-source, read-only IBM AIX and IBM i posture assessment delivered as a single ksh88-compatible shell file with zero egress during assessment execution and explicit NOT_ASSESSED results when evidence is unavailable.",
-  "url": "https://powertruesystems.com/aixray",
+  "description": "An open-source IBM AIX and IBM i posture assessment that changes no system configuration, performs no remediation, makes no network calls during assessment execution, sends no assessment data or telemetry away from the host, and reports explicit NOT_ASSESSED results when evidence is unavailable.",
+  "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "downloadUrl": "https://powertruesystems.com/aixray/",
+  "downloadUrl": "https://powertruesystems.com/ptxray/",
   "softwareVersion": "1.4.0",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
@@ -18,7 +18,7 @@
     "IBM i 7.5"
   ],
   "programmingLanguage": "KornShell (ksh88-compatible AIX /bin/sh; IBM i PASE ksh)",
-  "softwareRequirements": "AIX /bin/sh and standard AIX userland, or IBM i PASE ksh for the IBM i edition; no bash, Python, GNU userland, package installation, or assessment-time network access required.",
+  "softwareRequirements": "IBM AIX 7.2 or 7.3 and VIOS with AIX /bin/sh, or IBM i 7.4 or 7.5 with PASE ksh; AIX and VIOS are best run as root, while non-root evidence degrades to WARN or NOT_ASSESSED; no assessment-time network access required.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",
@@ -27,8 +27,10 @@
     "url": "https://powertruesystems.com"
   },
   "featureList": [
-    "Read-only system posture assessment",
-    "Zero network egress during assessment execution",
+    "Assessment changes no system configuration and performs no remediation",
+    "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
+    "AIX and VIOS are best run as root; a non-root run degrades root-only evidence to WARN or NOT_ASSESSED",
+    "Air-gapped assessment execution is supported",
     "HTML and JSON reports",
     "Supported compliance-oriented views",
     "Explicit NOT_ASSESSED status for unavailable evidence",
@@ -37,7 +39,7 @@
     "IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5: 76 of 89 CIS Level 1 controls receive an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i",
     "387 standalone check tools with machine-readable manifests"
   ],
-  "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only, zero egress",
+  "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
     {
       "@type": "PropertyValue",

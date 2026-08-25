@@ -2,7 +2,7 @@
 
 If you run IBM Power, you already know the quiet problem: AIX and IBM Power systems are extraordinarily stable, and that stability breeds silence. Systems run for years without a reboot, the person who built them has retired, and nobody is quite sure what is current, what is exposed, and what would actually happen in a failure. An audit is how you replace assumption with evidence.
 
-This is a practical, vendor-honest checklist for auditing an AIX system end to end — what to check, why it matters, and what "good" looks like. It is written the way an administrator actually works, with the real commands. At the end of each section we note how [PTxray](https://powertruesystems.com/aixray) — a free, open-source, read-only assessment — collects the same evidence in one pass, so you can choose to do it by hand or let the tool do the gathering.
+This is a practical, vendor-honest checklist for auditing an AIX system end to end — what to check, why it matters, and what "good" looks like. It is written the way an administrator actually works, with the real commands. At the end of each section we note how [PTxray](https://powertruesystems.com/ptxray/) — a free, open-source, read-only assessment — collects the same evidence in one pass, so you can choose to do it by hand or let the tool do the gathering.
 
 **Two ground rules for any honest audit.** First, an audit reports what is *measurably true right now*; it does not prove a system is secure, compliant, or recoverable. A `PASS` on a check is a statement about that one piece of evidence, not a guarantee. Second, when evidence is missing or unreadable, the honest answer is "not assessed" — not a hopeful "looks fine." Keep both rules in mind and your audit will be worth trusting.
 
@@ -76,7 +76,7 @@ If you manage Power through a Hardware Management Console, the HMC deserves its 
 
 ## Doing all of this in one honest pass: PTxray
 
-Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/aixray) was built to close.
+Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/ptxray/) was built to close.
 
 PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — in one read-only pass, and produces an HTML or JSON report you keep.
 

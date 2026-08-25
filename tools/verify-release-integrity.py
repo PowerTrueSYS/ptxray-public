@@ -8,16 +8,22 @@ import hashlib
 import json
 from pathlib import Path, PurePosixPath
 import re
+import shutil
+import subprocess
 import sys
 from typing import Any
 
 
 SCANNER_PATH = "ptxray-aix.sh"
 IBMI_SCANNER_PATH = "ptxray-ibmi.sh"
+DEFINITIONS_DOWNLOADER_PATH = "ptxray-defs.sh"
 SITE_SCANNER_PATH = "site/ptxray-aix.sh"
 REVIEW_HELPER_PATH = "ptxray-review-pack.sh"
 REVIEW_VALIDATOR_PATH = "ptxray-review-validate.awk"
 CHECKSUM_MANIFEST_PATH = "SHA256SUMS"
+CHECKSUM_SIGNATURE_PATH = "SHA256SUMS.sig"
+RELEASE_PUBLIC_KEY_PATH = "POWERTRUE-RELEASE-PUBLIC.pem"
+RELEASE_METADATA_PATH = "PTXRAY-RELEASE-METADATA.json"
 CURRENT_PAYLOAD_ARTIFACTS = (
     SCANNER_PATH,
     IBMI_SCANNER_PATH,
@@ -27,6 +33,26 @@ CURRENT_PAYLOAD_ARTIFACTS = (
 CURRENT_RELEASE_ARTIFACTS = (
     *CURRENT_PAYLOAD_ARTIFACTS,
     CHECKSUM_MANIFEST_PATH,
+)
+SIGNED_PAYLOAD_ARTIFACTS = (
+    SCANNER_PATH,
+    IBMI_SCANNER_PATH,
+    DEFINITIONS_DOWNLOADER_PATH,
+    REVIEW_HELPER_PATH,
+    REVIEW_VALIDATOR_PATH,
+)
+SIGNED_RELEASE_TREE_ARTIFACTS = (
+    *SIGNED_PAYLOAD_ARTIFACTS,
+    RELEASE_METADATA_PATH,
+    CHECKSUM_MANIFEST_PATH,
+    CHECKSUM_SIGNATURE_PATH,
+    RELEASE_PUBLIC_KEY_PATH,
+)
+SIGNED_RELEASE_ASSETS = (
+    *SIGNED_PAYLOAD_ARTIFACTS,
+    CHECKSUM_MANIFEST_PATH,
+    CHECKSUM_SIGNATURE_PATH,
+    RELEASE_PUBLIC_KEY_PATH,
 )
 LEGACY_RELEASE_ARTIFACTS = {
     "0.1.0": (SCANNER_PATH, REVIEW_HELPER_PATH),
@@ -50,8 +76,26 @@ def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def is_signed_release_version(version: str | None) -> bool:
+    if version is None:
+        return False
+    match = re.match(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?", version)
+    if match is None:
+        return False
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0)) >= (1, 5, 0)
+
+
 def release_artifacts_for_version(version: str | None) -> tuple[str, ...]:
+    if is_signed_release_version(version):
+        return SIGNED_RELEASE_TREE_ARTIFACTS
     return LEGACY_RELEASE_ARTIFACTS.get(version, CURRENT_RELEASE_ARTIFACTS)
+
+
+def release_assets_for_version(version: str | None) -> tuple[str, ...]:
+    if is_signed_release_version(version):
+        return SIGNED_RELEASE_ASSETS
+    return release_artifacts_for_version(version)
 
 
 def release_asset_aliases_for_version(version: str | None) -> dict[str, str]:
@@ -79,9 +123,11 @@ class Validator:
         self.failed_reads: set[str] = set()
         self.version = self._version_from_tag()
         self.release_artifacts = release_artifacts_for_version(self.version)
+        self.release_assets = release_assets_for_version(self.version)
         self.release_asset_aliases = release_asset_aliases_for_version(
             self.version
         )
+        self.observed_key_fingerprint: str | None = None
 
     def fail(self, message: str) -> None:
         self.errors.append(message)
@@ -181,6 +227,12 @@ class Validator:
     def validate_sha256sums(self, catalog: dict[str, Any] | None = None) -> None:
         if CHECKSUM_MANIFEST_PATH not in self.release_artifacts:
             return
+        if is_signed_release_version(self.version):
+            self.fail(
+                "PTxray 1.5 namespaced manifest validation is blocked until "
+                "the release metadata schema is frozen"
+            )
+            return
         content = self.read_tree_file(CHECKSUM_MANIFEST_PATH)
         if content is None:
             return
@@ -263,6 +315,97 @@ class Validator:
                     f"SHA256SUMS digest mismatch for {relative}: "
                     f"manifest sha256={expected} tagged sha256={actual}"
                 )
+
+    def validate_release_signature(self) -> None:
+        if not is_signed_release_version(self.version):
+            return
+        manifest = self.read_tree_file(CHECKSUM_MANIFEST_PATH)
+        signature = self.read_tree_file(CHECKSUM_SIGNATURE_PATH)
+        public_key = self.read_tree_file(RELEASE_PUBLIC_KEY_PATH)
+        if manifest is None or signature is None or public_key is None:
+            return
+
+        openssl = shutil.which("openssl")
+        if openssl is None:
+            self.fail("OpenSSL is required to verify the release signature")
+            return
+        manifest_path = self._tree_path(CHECKSUM_MANIFEST_PATH)
+        signature_path = self._tree_path(CHECKSUM_SIGNATURE_PATH)
+        public_key_path = self._tree_path(RELEASE_PUBLIC_KEY_PATH)
+        if (
+            manifest_path is None
+            or signature_path is None
+            or public_key_path is None
+        ):
+            return
+
+        key_details = subprocess.run(
+            [
+                openssl,
+                "pkey",
+                "-pubin",
+                "-in",
+                str(public_key_path),
+                "-text",
+                "-noout",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if key_details.returncode != 0:
+            self.fail(
+                "release public key is not a readable OpenSSL public key: "
+                + key_details.stderr.strip()
+            )
+            return
+        if re.search(r"Public-Key:\s*\(3072 bit\)", key_details.stdout) is None:
+            self.fail("release public key must be RSA-3072")
+            return
+
+        verification = subprocess.run(
+            [
+                openssl,
+                "dgst",
+                "-sha256",
+                "-verify",
+                str(public_key_path),
+                "-signature",
+                str(signature_path),
+                str(manifest_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        if verification.returncode != 0 or "Verified OK" not in verification.stdout:
+            detail = (verification.stdout + verification.stderr).strip()
+            self.fail(
+                "release signature verification failed"
+                + (f": {detail}" if detail else "")
+            )
+            return
+
+        fingerprint = subprocess.run(
+            [
+                openssl,
+                "pkey",
+                "-pubin",
+                "-in",
+                str(public_key_path),
+                "-outform",
+                "DER",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        if fingerprint.returncode != 0:
+            self.fail("cannot derive the release public key SPKI-DER fingerprint")
+            return
+        self.observed_key_fingerprint = sha256_bytes(fingerprint.stdout)
 
     def load_catalog(self) -> dict[str, Any] | None:
         content = self.read_tree_file(
@@ -426,7 +569,7 @@ class Validator:
 
         # The published surface is the SHA256SUMS-listed release artifacts plus
         # the byte-copy transition aliases, which carry no manifest line.
-        expected_names = set(self.release_artifacts) | set(
+        expected_names = set(self.release_assets) | set(
             self.release_asset_aliases
         )
         for missing in sorted(expected_names - entries.keys()):
@@ -434,7 +577,7 @@ class Validator:
         for unexpected in sorted(entries.keys() - expected_names):
             self.fail(f"unexpected release asset: {unexpected}")
 
-        for relative in self.release_artifacts:
+        for relative in self.release_assets:
             asset = entries.get(relative)
             tagged = self.read_tree_file(relative)
             if asset is None or tagged is None:
@@ -480,6 +623,7 @@ class Validator:
     def run(self) -> bool:
         self.validate_required_release_files()
         catalog = self.load_catalog()
+        self.validate_release_signature()
         self.validate_sha256sums(catalog)
         if catalog is not None:
             self.validate_catalog(catalog)
@@ -498,6 +642,13 @@ class Validator:
                 file=sys.stderr,
             )
             return
+
+        if self.observed_key_fingerprint is not None:
+            print(
+                "release-integrity: INFO: observed release public key "
+                "SPKI-DER SHA-256="
+                f"{self.observed_key_fingerprint}; compare independently"
+            )
 
         for relative in self.release_artifacts:
             content = self.contents[relative]

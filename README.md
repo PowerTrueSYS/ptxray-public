@@ -1,10 +1,10 @@
 # PTxray: read-only IBM AIX and IBM i health, risk, and security assessment
 
-PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. Version 1.4.0 runs as a single ksh88 file under AIX `/bin/sh` (and IBM i PASE ksh), reads system state, makes zero network calls during assessment execution, and reports findings without remediating the host.
+PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. Version 1.4.0 is delivered as inspectable ksh programs for AIX `/bin/sh` and IBM i PASE ksh. The assessment reads system state, changes no system configuration, makes no network calls, sends no assessment data or telemetry away from the host, and does not remediate findings.
 
-**Official page:** [powertruesystems.com/aixray](https://powertruesystems.com/aixray)
+**Official page:** [powertruesystems.com/ptxray](https://powertruesystems.com/ptxray/)
 
-**Download:** [powertruesystems.com/aixray/](https://powertruesystems.com/aixray/)
+**Download:** [powertruesystems.com/ptxray/](https://powertruesystems.com/ptxray/)
 
 **Guide:** [How to audit an IBM AIX system](docs/auditing-aix.md) — a complete, vendor-honest checklist of what to check, why it matters, and what "good" looks like.
 
@@ -25,16 +25,30 @@ PTxray is useful for:
 
 ## What is included?
 
-- [`ptxray-aix.sh`](ptxray-aix.sh) — the complete AIX v1 assessment, version 1.4.0. The public release also publishes this as [`aixray-aix.sh`](aixray-aix.sh), a byte-identical alias, so existing download links and run commands keep working.
+- [`ptxray-aix.sh`](ptxray-aix.sh) — the complete AIX v1 assessment, version 1.4.0. The public release also publishes [`aixray-aix.sh`](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/aixray-aix.sh) as a byte-identical compatibility asset so existing download links keep working.
 - [`ptxray-ibmi.sh`](ptxray-ibmi.sh) — the IBM i assessment, a single self-contained monolith graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. Download it straight from the release ([`ptxray-ibmi.sh`](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh)) and verify it against [`SHA256SUMS`](SHA256SUMS) before you run it.
 - [`ptxray-review-pack.sh`](ptxray-review-pack.sh) — the offline helper that creates a pseudonymized review copy and a separate local decoding key
 - [`checks/`](checks/) — 387 standalone ksh check tools, each paired with its `manifest.json`
 - [`catalog.json`](catalog.json) — the generated, sorted manifest catalog with SHA-256 hashes and the declared check count
 - [`SECURITY.md`](SECURITY.md) and [`docs/VERIFY.md`](docs/VERIFY.md) — the trust boundary, caveats, and repeatable public-repository verification commands
-- [`site/index.html`](site/index.html) — the public download page for `powertruesystems.com/aixray`
-- [`aixray.jsonld`](aixray.jsonld), [`llms.txt`](llms.txt), and [`robots.txt`](robots.txt) — machine and crawler discovery metadata
+- [`site/index.html`](site/index.html) — the public download page for `powertruesystems.com/ptxray/`
+- [`ptxray.jsonld`](ptxray.jsonld), [`llms.txt`](llms.txt), and [`robots.txt`](robots.txt) — machine and crawler discovery metadata
 
 The standalone tools are independently callable check modules. Their inventory count is not a numerical claim about every finding produced by the larger assembled assessment.
+
+## Unpublished 1.5 design
+
+This is a future design boundary, not a published release or a description of
+the current 1.4 inventory. In the 1.5 candidate, AIX and VIOS will require root
+and IBM i will require QSECOFR. Its separate downloader will attempt to
+acquire current signed definitions by default; neither assessment will invoke
+that downloader. Air-gapped assessment execution will remain supported by
+acquiring and verifying definitions on a connected administration system and
+transferring them to the target under the operator's normal controls.
+
+The 1.5 renderer is also expected to change generated report and review-copy
+names to the `ptxray-*` family. Do not expect those names from the published
+1.4 programs: their literal assignments still generate `aixray-*` names.
 
 ## Standards coverage
 
@@ -52,30 +66,30 @@ PTxray evaluates selected controls against observed system state. Coverage is pa
 | Claim | Proof |
 |---|---|
 | Read-only on system configuration | The assembled script declares its capture boundary at the top of [`ptxray-aix.sh`](ptxray-aix.sh). Every public manifest records `"read_only": true` and lists the commands its standalone tool may run. Requested reports and a protected temporary FLRTVC scratch directory are the documented local writes; the scratch directory is removed on exit. |
-| zero egress during the assessment | The shell artifacts contain the assessment logic and reference data locally. They do not fetch reference data or transmit results. Review the command surface in [`catalog.json`](catalog.json) and the executable source before running it. |
+| No network during the assessment | Assessment execution does not fetch definitions, open network connections, send telemetry, or transmit results. Review the command surface in [`catalog.json`](catalog.json) and the executable source before running it. |
 | single ksh88 file | The full scan is one inspectable [`ptxray-aix.sh`](ptxray-aix.sh) file. On AIX, `/bin/sh` provides the ksh88-compatible runtime used by the script; bash, Python, package installation, and GNU userland are not runtime requirements. |
 | No fabricated assessment result | `NOT_ASSESSED` is a first-class output state. Missing, unreadable, malformed, ambiguous, or unsupported evidence is reported as unavailable rather than silently converted to `PASS`. Search the assembled source for `NOT_ASSESSED` to inspect each branch. |
 | Declared standalone inventory | [`catalog.json`](catalog.json) records `check_count`; each entry resolves to one paired script and manifest under [`checks/`](checks/), and the public tests require all three counts to agree. |
 | Exact artifact identity | Each catalog entry carries the SHA-256 digest of its referenced standalone shell artifact. The catalog is sorted by check ID for deterministic review. |
 | v1 only | The assembled script and all standalone scripts declare version `1.4.0`. This repository does not contain a v2 implementation. |
 
-“Read-only” describes the tool’s effect on target system configuration. If you redirect output or request an export, PTxray writes the output path you selected. The optional offline FLRTVC mode also uses a private temporary directory and removes it on exit. “zero egress” describes assessment execution; obtaining the script is, of course, a separate download.
+“Read-only” describes the assessment’s effect on target system configuration. If you redirect output or request an export, PTxray writes the output path you selected. The optional offline FLRTVC mode also uses a private temporary directory and removes it on exit. The no-network boundary applies to assessment execution, not to the initial software download or an operator's transfer of local inputs.
 
 ## Prerequisites
 
 - IBM AIX 7.2 or 7.3, or VIOS; the IBM i assessment runs on IBM i 7.4 or 7.5 through PASE
 - AIX `/bin/sh` and standard AIX userland; bash, Python, GNU userland, and package installation are not required
-- Root is recommended for the broadest read access; an unprivileged or non-root run continues, unavailable evidence is explicitly identified, and depending on the check may be reported as `WARN` or `NOT_ASSESSED`
+- The published 1.4 AIX and VIOS assessment is best run as root. A non-root run is supported but degraded: root-only checks report `WARN` or `NOT_ASSESSED`.
 - Plan for several minutes; runtime varies by system size and optional locally supplied FLRTVC data
-- Nothing is installed, and the assessment makes no network calls
+- Nothing is installed. The assessment makes no network calls, and no assessment data or telemetry leaves the host; current 1.4 execution therefore supports an air-gapped target.
 
 ## How do I run PTxray?
 
-Download the scanner from the [download page](https://powertruesystems.com/aixray/), review it, copy it to the AIX host, then start with the easy HTML run:
+Download the scanner from the [download page](https://powertruesystems.com/ptxray/), review it, copy it to the AIX host, then start with the easy HTML run:
 
 ```sh
-chmod 700 aixray-aix.sh
-./aixray-aix.sh
+chmod 700 ptxray-aix.sh
+./ptxray-aix.sh
 ```
 
 The bare run writes `aixray-<hostname>-<date>.html` in the current directory and prints this completion message:
@@ -84,19 +98,19 @@ The bare run writes `aixray-<hostname>-<date>.html` in the current directory and
 Report ready: ./aixray-<hostname>-<date>.html — open it in your browser. To save a PDF: Print -> Save as PDF.
 ```
 
-Open the named report in a browser. Use **Print → Save as PDF** when you need a PDF copy. To write the named HTML report somewhere else, use `./aixray-aix.sh --out DIR`.
+Open the named report in a browser. Use **Print → Save as PDF** when you need a PDF copy. To write the named HTML report somewhere else, use `./ptxray-aix.sh --out DIR`.
 
 For advanced, explicit stdout output, redirect HTML or JSON yourself:
 
 ```sh
-./aixray-aix.sh --html > aixray-report.html
-./aixray-aix.sh --json > aixray-report.json
+./ptxray-aix.sh --html > aixray-report.html
+./ptxray-aix.sh --json > aixray-report.json
 ```
 
 For a supported compliance view on stdout:
 
 ```sh
-./aixray-aix.sh --compliance stig > aixray-stig.html
+./ptxray-aix.sh --compliance stig > aixray-stig.html
 ```
 
 On IBM i, run the IBM i assessment the same way with `ptxray-ibmi.sh` under PASE ksh.
@@ -167,7 +181,7 @@ version=$(jq -r '.tool_version' catalog.json)
 rg -n -F -e "VERSION=\"${version}\"" -e "AIXRAY_REVIEW_PACK_VERSION=\"${version}\"" -e "AIXRAY_STANDALONE_VERSION=\"${version}\"" ptxray-aix.sh ptxray-review-pack.sh checks --glob '*.ksh'
 rg -n 'NOT_ASSESSED' ptxray-aix.sh
 cmp ptxray-aix.sh site/ptxray-aix.sh
-set -- ptxray-aix.sh ptxray-review-pack.sh checks/*/*.ksh
+set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh checks/*/*.ksh
 [ ! -f ptxray-review-validate.awk ] || set -- "$@" ptxray-review-validate.awk
 sh tools/ci/egress-lint.sh "$@"
 python3 tools/check-no-ibm-redistribution.py

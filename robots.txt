@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
 
+# Canonical PTxray page: https://powertruesystems.com/ptxray/
 Sitemap: https://powertruesystems.com/sitemap-index.xml

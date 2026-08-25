@@ -1,24 +1,26 @@
 # Security and trust model
 
-PTxray is intended to be inspected before it is run. A full assessment normally
-runs as root on an AIX system, so the security boundary is the exact
-revision of the on-box scanner, not a brand claim or a download page.
+PTxray is intended to be inspected before it is run. The published 1.4 AIX and
+VIOS assessment is best run as root, but an unprivileged run continues with
+root-only checks degraded to `WARN` or `NOT_ASSESSED`. The security boundary is
+the exact revision of the program for the selected platform, not a brand claim
+or a download page.
 
-This document covers the assembled [`ptxray-aix.sh`](ptxray-aix.sh) scanner.
-The repository also contains explicitly off-box administration tools, including
-feed refreshers and a fleet runner, which may use declared network endpoints.
-Those tools are not invoked by the on-box scanner and are outside its
-zero-egress contract.
+This document covers the assembled [`ptxray-aix.sh`](ptxray-aix.sh) and
+[`ptxray-ibmi.sh`](ptxray-ibmi.sh) assessments. Current 1.4 assessment
+execution is self-contained with respect to the network; locally supplied
+inputs are transferred under the operator's normal controls.
 
-## On-box security contract
+## Assessment security contract
 
-For `ptxray-aix.sh`:
+For `ptxray-aix.sh` and `ptxray-ibmi.sh`:
 
 - **Read-only means no assessed-system mutation.** The scanner reads posture
   evidence and renders a report. It does not remediate findings.
-- **Zero network egress is a release requirement.** The scanner must not open an
-  outbound network connection, perform a live DNS lookup, fetch reference data, send
-  telemetry, or upload a report.
+- **Assessment execution has no network egress.** The assessment must not open
+  an outbound network connection, perform a live DNS lookup, fetch reference
+  data, send telemetry, upload a report, or send any assessment data away from
+  the host.
 - **Outputs remain local.** PTxray writes only the report or export path chosen
   by the operator and, for a locally supplied FLRTVC run, a private temporary
   scratch directory. It removes that directory on normal exit and handled
@@ -88,7 +90,7 @@ as `chdev`, `chsec`, `chuser`, `chmod`, and `installp` appear in finding
 remediation text because the report tells an administrator what they may choose
 to do later. That prose is data; it is not executed by the scan.
 
-## How zero egress is enforced
+## How the assessment network boundary is enforced
 
 The zero-egress requirement is backed by layered, reviewable gates in
 [`network-boundary.yml`](.github/workflows/network-boundary.yml), which runs on
@@ -143,16 +145,42 @@ See [`docs/VERIFY.md`](docs/VERIFY.md) for exact commands to inspect likely
 network and mutating primitives, run the egress and command-contract gates,
 reassemble the scanner, and compare SHA-256 digests.
 
-## Root and non-root runs
+## Published 1.4 platform and privilege scope
 
-Run as root for the intended assessment coverage. Several security, patch,
-dump, boot, account, audit, and service-policy reads require privilege. A
-non-root run is a supported degraded run, not an equivalent assessment:
-most unavailable evidence is disclosed as `NOT_ASSESSED` or an explicit
-need-root `WARN`, and the report remains incomplete. The known exception is
-`backup_job`: a failed non-root read of root's crontab omits that row instead of
-emitting `NOT_ASSESSED`; it does not emit `PASS`. Do not interpret a non-root
-result as proof that inaccessible or omitted controls are clean.
+- IBM AIX 7.2 and 7.3, including the VIOS assessment surface, are best run as
+  root for intended coverage.
+- A non-root AIX or VIOS run is supported but incomplete. Root-only reads
+  degrade to explicit `WARN` or `NOT_ASSESSED` results rather than causing a
+  privilege refusal.
+- For IBM i 7.4 and 7.5, inspect the exact artifact's signed-on and system-user
+  identity gate before running it; do not generalize that boundary to AIX.
+
+Required patch, dump, boot, account, audit, service, security, and platform
+evidence may be inaccessible in a non-root AIX or VIOS run. The report must
+retain those unavailable states rather than presenting them as clean evidence.
+
+## Unpublished 1.5 privilege and definitions design
+
+This is a candidate design, not a published release. In PTxray 1.5, AIX and
+VIOS will require root and IBM i will require QSECOFR. Its separate
+downloader will attempt to acquire current signed definitions by default;
+assessment execution will consume locally available, verified definitions and
+will not contact a definitions service. An air-gapped operator will be able to
+perform the download and verification on a connected administration system,
+then transfer the definitions bundle to the target.
+
+## Release-signing boundary
+
+Release signatures authenticate the exact `SHA256SUMS` bytes. The manifest
+then binds named release payloads to their SHA-256 digests. This does not make
+the release signing key self-authenticating: obtain its SPKI-DER SHA-256
+fingerprint through an independent PowerTrue Systems channel before trusting
+the downloaded public key.
+
+The PTxray 1.5 release, release public key, and authoritative fingerprint have
+not been published. No fingerprint is stated here until the release ceremony
+produces and independently publishes the real value. Candidate files are not a
+release and must not be treated as one.
 
 ## IBM FLRTVC delivery data
 
@@ -181,28 +209,37 @@ candidate-file audit that remains necessary, are documented in
 > key must not be sent with the review file. Creating either file performs no
 > upload or send; sharing remains a deliberate user action.
 
-The review-pack helper writes its output beside the input report through a
-private scratch directory. This optional local transformation does not broaden
+The current helper writes its `aixray-review-*.html`,
+`aixray-local-key-*.map`, and `aixray-local-removals-*.txt` outputs beside the
+input report through a private scratch directory. Keep the key and removals
+manifest local. This optional local transformation does not broaden
 the scanner's assessed-system read-only boundary or its zero-egress boundary.
 It is not proof that a review file is free of all identifying or sensitive
 information.
 
 ## Reporting a security issue
 
-Do not open a public issue for a suspected vulnerability. Email
-[`review@powertruesystems.com`](mailto:review@powertruesystems.com) with the
-subject **PTxray security report** and include:
+Do not open a public issue for a suspected vulnerability. Email the tested
+mailbox [`review@powertruesystems.com`](mailto:review@powertruesystems.com)
+with the subject **PTxray security report**. The intended private-advisory URL
+is
+[`https://github.com/PowerTrueSYS/ptxray-public/security/advisories/new`](https://github.com/PowerTrueSYS/ptxray-public/security/advisories/new),
+but private advisory reporting remains pending activation after the repository
+migration and settings review. Until activation is confirmed, use the mailbox,
+not that form. Include:
 
 - the exact Git commit or release tag;
-- AIX release and whether the run was root or non-root;
+- platform and release, effective user or profile, and any privilege warning
+  or refusal emitted by the assessment;
 - the invocation and the smallest reproduction that demonstrates the issue;
   and
 - the observed impact and any relevant lint or trace evidence.
 
-Do not attach a production scan, credentials, host identifiers, or other
+After safe triage is possible, PowerTrue Systems will acknowledge the report.
+There is no fixed response SLA. Do not attach a production scan, credentials,
+host identifiers, or other
 sensitive system data to a vulnerability report unless a secure transfer method
 has been agreed first. The generated report separately offers optional engineer
 review at the same mailbox; that offer is not permission to send an unsanitized
 production report. Sanitize it first, or email without the attachment to agree
-a transfer method. Use the repository's GitHub Issues page only for
-non-sensitive defects and documentation problems.
+a transfer method. Do not use a public GitHub issue for security reports.
