@@ -64,11 +64,10 @@ The candidate can write only the following local artifacts:
 - an HTML report under a directory explicitly selected with `--out` (the
   zero-argument convenience run selects the current directory), using a hidden
   same-directory temporary file before the final `mv`;
-- two inventory files under a directory explicitly selected with
-  `--flrt-export`. A private `umask` protects newly created files, but does not
-  repair permissions on pre-existing files, and shell redirection can follow a
-  pre-positioned symlink. Use a new, operator-owned, otherwise empty export
-  directory; and
+- two owner-only inventory files under a directory explicitly selected with
+  `--flrt-export`. PTxray resolves and validates the directory ancestry, writes
+  through exclusive owner-only temporary files, refuses existing destinations,
+  checks both capture return codes, and publishes with no-clobber hard links; and
 - when authorized FLRTVC inputs are supplied locally, private scratch files
   under `${TMPDIR:-/tmp}`. PTxray creates its scratch directory mode 700,
   restricts the input copies, and makes a best-effort removal on normal exit or
