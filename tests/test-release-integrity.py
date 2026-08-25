@@ -75,8 +75,8 @@ class ReleaseIntegrityTests(unittest.TestCase):
         (self.assets / "ptxray-ibmi.sh").write_bytes(ibmi)
         (self.assets / "ptxray-review-pack.sh").write_bytes(review)
         (self.assets / "ptxray-review-validate.awk").write_bytes(validator)
-        # aixray-aix.sh ships as an asset-only byte-copy alias of ptxray-aix.sh:
-        # no SHA256SUMS line, no tagged-tree entry, byte-identical to the scanner.
+        # Before 1.5, aixray-aix.sh is an asset-only byte-copy alias. The signed
+        # 1.5 contract also records the alias in the tagged tree and manifest.
         (self.assets / "aixray-aix.sh").write_bytes(scanner)
         self.write_catalog()
         self.write_sha256sums()
@@ -163,19 +163,34 @@ class ReleaseIntegrityTests(unittest.TestCase):
             f'AIXRAY_REVIEW_PACK_VERSION="{version}"\n'
             "exit 0\n"
         ).encode()
-        definitions = b"#!/bin/sh\n# signed definitions downloader fixture\nexit 0\n"
+        definitions = (
+            "#!/bin/sh\n"
+            f'PTXRAY_DEFS_VERSION="{version}"\n'
+            "# signed definitions downloader fixture\n"
+            "exit 0\n"
+        ).encode()
+        ibmi = (
+            "#!/bin/sh\n"
+            f"PTXRAY_VERSION={version}\n"
+            "exit 0\n"
+        ).encode()
         for directory in (self.tree, self.assets):
             (directory / "ptxray-aix.sh").write_bytes(scanner)
             (directory / "ptxray-review-pack.sh").write_bytes(review)
             (directory / "ptxray-defs.sh").write_bytes(definitions)
+            (directory / "ptxray-ibmi.sh").write_bytes(ibmi)
+            (directory / "aixray-aix.sh").write_bytes(scanner)
         (self.tree / "site" / "ptxray-aix.sh").write_bytes(scanner)
-        (self.assets / "aixray-aix.sh").write_bytes(scanner)
         self.write_catalog(version=version)
-        self.write_sha256sums()
-
-        (self.tree / "PTXRAY-RELEASE-METADATA.json").write_text(
-            '{"fixture_schema":"ptxray-release-metadata/1"}\n',
-            encoding="utf-8",
+        self.write_sha256sums(
+            artifacts=(
+                "aixray-aix.sh",
+                "ptxray-aix.sh",
+                "ptxray-defs.sh",
+                "ptxray-ibmi.sh",
+                "ptxray-review-pack.sh",
+                "ptxray-review-validate.awk",
+            )
         )
         private_key = self.base / "fixture-private.pem"
         key_generation = subprocess.run(
@@ -424,32 +439,35 @@ class ReleaseIntegrityTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
-    def test_v150_signed_surface_stops_at_unfrozen_metadata_schema(self) -> None:
+    def test_v150_exact_signed_surface_passes(self) -> None:
         self.configure_signed_v150_candidate()
 
         result = self.run_gate(tag="v1.5.0")
 
         combined = result.stdout + result.stderr
-        self.assertNotEqual(0, result.returncode, combined)
-        self.assertIn(
-            "PTxray 1.5 namespaced manifest validation is blocked until "
-            "the release metadata schema is frozen",
-            combined,
-        )
-        self.assertNotIn("required release artifact is missing", combined)
-        self.assertNotIn("required release asset is missing", combined)
-        self.assertNotIn("unexpected release asset", combined)
-        self.assertNotIn("release signature verification failed", combined)
+        self.assertEqual(0, result.returncode, combined)
+        self.assertIn("release-integrity: PASS: v1.5.0", result.stdout)
 
-        shutil.copy2(
-            self.tree / "PTXRAY-RELEASE-METADATA.json",
-            self.assets / "PTXRAY-RELEASE-METADATA.json",
+    @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
+    def test_v150_rejects_later_runtime_version_override(self) -> None:
+        self.configure_signed_v150_candidate()
+        scanner_path = self.tree / "ptxray-aix.sh"
+        scanner = scanner_path.read_text(encoding="utf-8")
+        scanner_path.write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
         )
-        with_metadata_asset = self.run_gate(tag="v1.5.0")
-        self.assertIn(
-            "unexpected release asset: PTXRAY-RELEASE-METADATA.json",
-            with_metadata_asset.stdout + with_metadata_asset.stderr,
+        (self.tree / "site" / "ptxray-aix.sh").write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
         )
+        (self.tree / "aixray-aix.sh").write_text(
+            scanner + "VERSION=9.9.9\n", encoding="utf-8"
+        )
+
+        result = self.run_gate(tag="v1.5.0")
+
+        combined = result.stdout + result.stderr
+        self.assertNotEqual(0, result.returncode, combined)
+        self.assertIn("version declaration missing or ambiguous", combined)
 
     @unittest.skipUnless(shutil.which("openssl"), "OpenSSL is required")
     def test_v150_rejects_a_tampered_manifest_signature(self) -> None:

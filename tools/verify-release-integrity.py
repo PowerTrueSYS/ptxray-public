@@ -23,7 +23,6 @@ REVIEW_VALIDATOR_PATH = "ptxray-review-validate.awk"
 CHECKSUM_MANIFEST_PATH = "SHA256SUMS"
 CHECKSUM_SIGNATURE_PATH = "SHA256SUMS.sig"
 RELEASE_PUBLIC_KEY_PATH = "POWERTRUE-RELEASE-PUBLIC.pem"
-RELEASE_METADATA_PATH = "PTXRAY-RELEASE-METADATA.json"
 CURRENT_PAYLOAD_ARTIFACTS = (
     SCANNER_PATH,
     IBMI_SCANNER_PATH,
@@ -35,6 +34,7 @@ CURRENT_RELEASE_ARTIFACTS = (
     CHECKSUM_MANIFEST_PATH,
 )
 SIGNED_PAYLOAD_ARTIFACTS = (
+    "aixray-aix.sh",
     SCANNER_PATH,
     IBMI_SCANNER_PATH,
     DEFINITIONS_DOWNLOADER_PATH,
@@ -43,7 +43,6 @@ SIGNED_PAYLOAD_ARTIFACTS = (
 )
 SIGNED_RELEASE_TREE_ARTIFACTS = (
     *SIGNED_PAYLOAD_ARTIFACTS,
-    RELEASE_METADATA_PATH,
     CHECKSUM_MANIFEST_PATH,
     CHECKSUM_SIGNATURE_PATH,
     RELEASE_PUBLIC_KEY_PATH,
@@ -57,18 +56,17 @@ SIGNED_RELEASE_ASSETS = (
 LEGACY_RELEASE_ARTIFACTS = {
     "0.1.0": (SCANNER_PATH, REVIEW_HELPER_PATH),
 }
-# Byte-copy transition aliases published as release assets only (rebrand R2).
-# An alias is NOT a SHA256SUMS payload and NOT a required tagged-tree file: it
-# carries no manifest line, so pre-rename download links keep resolving without
-# changing what SHA256SUMS proves. Each alias MUST be byte-identical to the
-# release payload it mirrors; validate_assets asserts that same-bytes invariant.
-# Mirrors tools/render-public-release.py RELEASE_ASSET_ALIASES. Retire at 2.0.
+# Byte-copy transition alias (rebrand R2). Before 1.5 it was asset-only; the
+# signed 1.5 contract also records it in SHA256SUMS and the tagged tree. In both
+# forms it MUST be byte-identical to the canonical payload. Retire at 2.0.
 CURRENT_RELEASE_ASSET_ALIASES = {
     "aixray-aix.sh": SCANNER_PATH,
 }
 VERSION_VARIABLES = {
-    SCANNER_PATH: "VERSION",
-    REVIEW_HELPER_PATH: "AIXRAY_REVIEW_PACK_VERSION",
+    SCANNER_PATH: ("VERSION", False),
+    DEFINITIONS_DOWNLOADER_PATH: ("PTXRAY_DEFS_VERSION", False),
+    IBMI_SCANNER_PATH: ("PTXRAY_VERSION", True),
+    REVIEW_HELPER_PATH: ("AIXRAY_REVIEW_PACK_VERSION", False),
 }
 
 
@@ -227,12 +225,6 @@ class Validator:
     def validate_sha256sums(self, catalog: dict[str, Any] | None = None) -> None:
         if CHECKSUM_MANIFEST_PATH not in self.release_artifacts:
             return
-        if is_signed_release_version(self.version):
-            self.fail(
-                "PTxray 1.5 namespaced manifest validation is blocked until "
-                "the release metadata schema is frozen"
-            )
-            return
         content = self.read_tree_file(CHECKSUM_MANIFEST_PATH)
         if content is None:
             return
@@ -257,7 +249,9 @@ class Validator:
                 continue
             entries[relative] = digest.lower()
 
-        if self.version == "0.1.0":
+        if is_signed_release_version(self.version):
+            expected_payloads = SIGNED_PAYLOAD_ARTIFACTS
+        elif self.version == "0.1.0":
             expected_payloads = CURRENT_PAYLOAD_ARTIFACTS
         else:
             if catalog is None:
@@ -527,7 +521,9 @@ class Validator:
     def validate_versions(self) -> None:
         if self.version is None:
             return
-        for relative, variable in VERSION_VARIABLES.items():
+        for relative, (variable, allow_unquoted) in VERSION_VARIABLES.items():
+            if relative not in self.release_artifacts:
+                continue
             content = self.read_tree_file(relative)
             if content is None:
                 continue
@@ -536,11 +532,24 @@ class Validator:
             except UnicodeDecodeError as exc:
                 self.fail(f"{relative} is not valid UTF-8: {exc}")
                 continue
-            pattern = re.compile(
-                rf"(?m)^{re.escape(variable)}=[\"']([^\"']+)[\"'][ \t]*$"
+            quoted = re.findall(
+                rf"(?m)^{re.escape(variable)}=[\"']([^\"']+)[\"'][ \t]*$",
+                source,
             )
-            declarations = pattern.findall(source)
-            if len(declarations) != 1:
+            unquoted = []
+            if allow_unquoted:
+                unquoted = re.findall(
+                    rf"(?m)^{re.escape(variable)}=([0-9][0-9A-Za-z.+-]*)[ \t]*$",
+                    source,
+                )
+            declarations = quoted + unquoted
+            assignments = re.findall(
+                rf"(?m)(?:^|;[ \t]*)(?:export[ \t]+|readonly[ \t]+|"
+                rf"typeset(?:[ \t]+-[A-Za-z]+)*[ \t]+)?"
+                rf"{re.escape(variable)}[ \t]*=",
+                source,
+            )
+            if len(declarations) != 1 or len(assignments) != 1:
                 self.fail(
                     f"version declaration missing or ambiguous in {relative}: "
                     f'expected exactly one {variable}="{self.version}"'
@@ -567,8 +576,8 @@ class Validator:
             self.fail(f"cannot list release asset directory: {exc}")
             return
 
-        # The published surface is the SHA256SUMS-listed release artifacts plus
-        # the byte-copy transition aliases, which carry no manifest line.
+        # The published surface is the release contract plus any transition
+        # alias used by a pre-1.5 asset-only release.
         expected_names = set(self.release_assets) | set(
             self.release_asset_aliases
         )
@@ -597,9 +606,8 @@ class Validator:
                     f"asset sha256={sha256_bytes(published)}"
                 )
 
-        # R2 same-bytes invariant: a transition alias is not on the manifest,
-        # so nothing else proves its bytes. It MUST be byte-identical to the
-        # payload it mirrors; a drifted alias is a release-integrity error.
+        # R2 same-bytes invariant applies whether the alias is asset-only
+        # (legacy) or also manifest-bound (1.5+).
         for alias_name, target in self.release_asset_aliases.items():
             asset = entries.get(alias_name)
             target_bytes = self.read_tree_file(target)
