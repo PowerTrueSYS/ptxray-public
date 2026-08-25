@@ -1,5 +1,5 @@
 #!/bin/sh
-# egress-lint.sh -- docs/aixray-spec-v2.md §3.3(c): the static grep-class lint.
+# egress-lint.sh -- the product no-assessment-network static grep-class lint.
 # Explicitly demoted to "a cheap, fast, PR-time tripwire" -- NOT the enforcement
 # mechanism. The syscall-trace CI in egress-trace.sh (and a real AIX truss lab
 # run) is the real enforcement mechanism (b).
