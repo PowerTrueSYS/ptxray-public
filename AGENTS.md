@@ -31,10 +31,10 @@ available from the published download channel.
 **No remediation.** PTxray reads and reports. Any change that mutates a host contradicts the
 product.
 
-## Unpublished 1.5 release candidate boundary
+## Published 1.5 release boundary
 
-The PTxray 1.5 release candidate is not a published release and must never be described as
-available from `releases/latest`. Its AIX runner requires root, and its IBM i runner
+PTxray 1.5.0 is the current published release and is available from `releases/latest` as an
+exact signed asset set. Its AIX runner requires root, and its IBM i runner
 requires QSECOFR. Before assessment probes begin, each runner verifies and invokes the separate,
 adjacent, same-release digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions
 update by default; `--offline` selects the signed cache, and `--definitions-bundle` imports a local
@@ -46,4 +46,4 @@ network calls, and send no assessment data away from the host. A report or expli
 export is still a local write. Keep this distinction intact on every customer-visible surface.
 
 The VIOS lane remains disabled pending live VIOS acceptance. Do not describe
-the unpublished 1.5 candidate or the published 1.4 artifact as VIOS-capable.
+the published 1.5 release as VIOS-capable.

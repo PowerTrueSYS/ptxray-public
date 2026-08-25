@@ -1,16 +1,19 @@
 # PTxray: read-only IBM AIX and IBM i health, risk, and security assessment
 
-PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. The unpublished PTxray 1.5 release candidate uses inspectable ksh runners for AIX `/bin/sh` and IBM i PASE ksh plus a separate signed-definitions downloader. Assessment probes read system state, change no system configuration, make no network calls, send no assessment data or telemetry away from the host, and do not remediate findings.
+PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. The published PTxray 1.5.0 release uses inspectable ksh runners for AIX `/bin/sh` and IBM i PASE ksh plus a separate signed-definitions downloader. Assessment probes read system state, change no system configuration, make no network calls, send no assessment data or telemetry away from the host, and do not remediate findings.
 
-> **Release status:** PTxray 1.5 is an unpublished release candidate. It is not
-> available from `releases/latest`, and candidate files are not a release. The
-> latest published release remains 1.4.0 until the complete 1.5 asset set,
-> checksums, signature, public key, and independently published key fingerprint
-> are released together.
+> **Release status:** The current published release is PTxray 1.5.0. Download
+> the complete asset set from `releases/latest`, verify the signed checksum
+> manifest, and confirm the release-key fingerprint through the independent
+> PowerTrue security channel before privileged execution.
 
 **Official page:** [powertruesystems.com/ptxray](https://powertruesystems.com/ptxray/)
 
 **Download:** [powertruesystems.com/ptxray/](https://powertruesystems.com/ptxray/)
+
+Version: 1.5.0
+
+**Direct release downloads:** [AIX runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh) · [IBM i runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh) · [signed checksums](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/SHA256SUMS)
 
 **Source:** [github.com/PowerTrueSYS/ptxray-public](https://github.com/PowerTrueSYS/ptxray-public)
 
@@ -46,9 +49,9 @@ PTxray is useful for:
 
 The standalone tools are independently callable check modules. Their inventory count is not a numerical claim about every finding produced by the larger assembled assessment.
 
-## Unpublished PTxray 1.5 release candidate
+## PTxray 1.5 release
 
-This candidate is not a published release. The AIX runner requires root, and
+PTxray 1.5.0 is the current published release. The AIX runner requires root, and
 the IBM i runner requires QSECOFR. Before assessment probes begin,
 the runner verifies and invokes the separate, adjacent, same-release
 digest-bound `ptxray-defs.sh`; a missing, replaced, or mismatched downloader is
@@ -94,7 +97,7 @@ PTxray evaluates selected controls against observed system state. Coverage is pa
 | No fabricated assessment result | `NOT_ASSESSED` is a first-class output state. Missing, unreadable, malformed, ambiguous, or unsupported evidence is reported as unavailable rather than silently converted to `PASS`. Search the assembled source for `NOT_ASSESSED` to inspect each branch. |
 | Declared standalone inventory | [`catalog.json`](catalog.json) records `check_count`; each entry resolves to one paired script and manifest under [`checks/`](checks/), and the public tests require all three counts to agree. |
 | Exact artifact identity | Each catalog entry carries the SHA-256 digest of its referenced standalone shell artifact. The catalog is sorted by check ID for deterministic review. |
-| Release candidate, not a release | Customer-facing candidate metadata identifies PTxray 1.5.0 and marks it unpublished. The published channel remains 1.4.0 until the renderer and signing ceremony produce the complete, verified 1.5 release. |
+| Signed published release | PTxray 1.5.0 publishes the exact nine-asset allowlist, including six payloads, `SHA256SUMS`, its detached signature, and the release public key. [`docs/VERIFY.md`](docs/VERIFY.md) gives the signature-first verification order and independently published key fingerprint. |
 
 “Read-only” describes the assessment probes' effect on target system
 configuration. PTxray still writes output explicitly requested by the operator,
@@ -116,7 +119,7 @@ of local inputs.
 
 ## How do I run PTxray?
 
-After the signed 1.5 release is published, download the complete asset set from
+Download the complete signed 1.5 release asset set from
 the [download page](https://powertruesystems.com/ptxray/), verify it, and keep
 `ptxray-aix.sh` and `ptxray-defs.sh` together. The bare run uses the interactive
 definitions menu when a terminal is available; otherwise it attempts a

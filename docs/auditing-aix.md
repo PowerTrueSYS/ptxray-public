@@ -78,7 +78,7 @@ If you manage Power through a Hardware Management Console, the HMC deserves its 
 
 Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/ptxray/) was built to close.
 
-PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — and produces an HTML or JSON report you keep. PTxray 1.5 is currently an unpublished release candidate; `releases/latest` remains the published 1.4 line until the signed 1.5 asset set is released.
+PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — and produces an HTML or JSON report you keep. PTxray 1.5.0 is the current published release at `releases/latest`.
 
 What makes it safe to run on a production system you care about:
 
@@ -89,10 +89,8 @@ What makes it safe to run on a production system you care about:
 
 Because it is open source, you do not have to take any of that on faith — the source, the per-check manifests, and the SHA-256 hashes are all public on [GitHub](https://github.com/PowerTrueSYS/ptxray-public), so a cautious admin can read exactly what runs before it runs.
 
-The commands below describe PTxray 1.5 after it is published. Until then,
-`releases/latest` remains 1.4, whose automatic report filename uses the legacy
-`aixray-` prefix; follow the documentation shipped with the exact release.
-After 1.5 is published, download it, review it, copy it to your AIX host, and
+The commands below describe the published PTxray 1.5 release. Download the
+complete signed asset set, verify it, review it, copy it to your AIX host, and
 run:
 
 ```sh

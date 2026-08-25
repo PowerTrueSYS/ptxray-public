@@ -49,7 +49,7 @@ RELEASE_ASSET_URL = (
 RELEASE_ASSET_URL_IBMI = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh"
 )
-PUBLISHED_VERSION = "1.4.0"
+PUBLISHED_VERSION = "1.5.0"
 SIGNED_PAYLOADS = (
     "aixray-aix.sh",
     "ptxray-aix.sh",
@@ -656,7 +656,7 @@ class PublicFunnelTests(unittest.TestCase):
             with self.subTest(surface=surface, contract="no legacy repo identity"):
                 self.assertNotIn("PowerTrueSYS/aixray-public", text)
 
-    def test_unpublished_15_candidate_boundary_is_precise(self) -> None:
+    def test_published_15_boundary_is_precise(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         security = SECURITY_POLICY.read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
@@ -669,50 +669,46 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertRegex(prerequisites, r"(?i)AIX[^\n.]{0,80}requires? root")
         self.assertRegex(prerequisites, r"(?i)IBM i[^\n.]{0,80}requires?[^\n.]{0,40}QSECOFR")
 
-        candidate_sections = []
+        release_sections = []
         for text, heading in (
-            (readme, "## Unpublished PTxray 1.5 release candidate"),
-            (security, "## Unpublished PTxray 1.5 release candidate boundary"),
-            (llms, "## Unpublished PTxray 1.5 release candidate"),
-            (agent_instructions, "## Unpublished 1.5 release candidate boundary"),
+            (readme, "## PTxray 1.5 release"),
+            (security, "## PTxray 1.5 release boundary"),
+            (llms, "## PTxray 1.5 release"),
+            (agent_instructions, "## Published 1.5 release boundary"),
         ):
             with self.subTest(heading=heading):
                 self.assertIn(heading, text)
                 if heading in text:
-                    candidate = text.split(heading, 1)[1].split("\n## ", 1)[0]
-                    candidate_normalized = " ".join(candidate.split())
-                    candidate_sections.append(candidate)
+                    release = text.split(heading, 1)[1].split("\n## ", 1)[0]
+                    release_normalized = " ".join(release.split())
+                    release_sections.append(release)
+                    self.assertRegex(release_normalized, r"(?i)published release")
                     self.assertRegex(
-                        candidate_normalized,
-                        r"(?i)not (?:a )?(?:published )?release",
-                    )
-                    self.assertRegex(
-                        candidate_normalized,
+                        release_normalized,
                         r"(?i)AIX[^.]{0,100}\brequires? root\b",
                     )
                     self.assertRegex(
-                        candidate_normalized,
+                        release_normalized,
                         r"(?i)IBM i[^.]{0,100}\brequires?[^.]{0,80}QSECOFR\b",
                     )
                     self.assertRegex(
-                        candidate_normalized,
+                        release_normalized,
                         r"(?i)runner[^.]{0,180}(?:invokes?|calls?)"
                         r"[^.]{0,120}(?:separate )?(?:adjacent )?"
                         r"`?ptxray-defs\.sh`?",
                     )
 
         self.assertIn(
-            'data-release-status="unpublished-1.5-release-candidate"',
+            'data-release-status="published-1.5"',
             site_html,
         )
-        site_candidate = site_html.split(
-            'data-release-status="unpublished-1.5-release-candidate"', 1
+        site_release = site_html.split(
+            'data-release-status="published-1.5"', 1
         )[1].split("</section>", 1)[0]
-        self.assertRegex(site_candidate, r"(?i)not (?:a )?(?:published )?release")
-        self.assertRegex(site_candidate, r"(?i)AIX[^<.]{0,100}\brequires? root\b")
-        self.assertRegex(site_candidate, r"(?i)IBM i[^<.]{0,100}\brequires? QSECOFR\b")
-        self.assertRegex(site_candidate, r"(?i)VIOS lane remains disabled")
-        self.assertIn("network-backed SYSTOOLS", site_html)
+        self.assertRegex(site_release, r"(?i)published release")
+        self.assertRegex(site_release, r"(?i)AIX[^<.]{0,100}\brequires? root\b")
+        self.assertRegex(site_release, r"(?i)IBM i[^<.]{0,100}\brequires? QSECOFR\b")
+        self.assertRegex(site_release, r"(?i)VIOS lane remains disabled")
         self.assertNotIn(
             "<li>No network calls or telemetry during the assessment</li>",
             site_html,
@@ -724,7 +720,7 @@ class PublicFunnelTests(unittest.TestCase):
                 self.assertNotIn("releaseStatus", metadata)
                 self.assertRegex(
                     str(metadata.get("description", "")),
-                    r"(?i)unpublished PTxray 1\.5 release candidate",
+                    r"(?i)PTxray 1\.5(?:\.0)? (?:published )?release",
                 )
                 requirements = str(metadata.get("softwareRequirements", ""))
                 self.assertRegex(requirements, r"AIX requires? root")
@@ -791,7 +787,7 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIn(advisory_url, security)
         self.assertRegex(
             lower,
-            r"(?:pending|after|once)[^\n.]{0,120}(?:activation|migration|enabled)",
+            r"github private vulnerability\s+reporting is enabled",
         )
         self.assertRegex(lower, r"do not (?:open|use)[^\n.]{0,80}public issue")
         self.assertRegex(
@@ -800,11 +796,12 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertRegex(lower, r"no (?:fixed |guaranteed )?(?:response )?sla")
 
-    def test_release_notes_mark_candidate_unpublished_and_redirects_active(self) -> None:
+    def test_release_notes_mark_15_published_and_redirects_active(self) -> None:
         notes = RELEASE_NOTES.read_text(encoding="utf-8")
         prefix = notes.split("## v1.4.0", 1)[0]
-        self.assertRegex(prefix, r"(?i)unpublished candidate")
-        self.assertRegex(prefix, r"(?is)latest published release.{0,80}1\.4\.0")
+        self.assertEqual(1, notes.count("<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->"))
+        self.assertIn("## v1.5.0", prefix)
+        self.assertRegex(prefix, r"(?is)1\.5\.0.{0,80}published release")
         self.assertIn("https://powertruesystems.com/ptxray/", prefix)
         self.assertIn("https://github.com/PowerTrueSYS/ptxray-public", prefix)
         self.assertIn("https://powertruesystems.com/aixray/", prefix)
@@ -817,23 +814,20 @@ class PublicFunnelTests(unittest.TestCase):
             prefix.casefold(),
             r"(?s)legacy (?:github )?repository.{0,180}(?:active|returns).{0,80}301",
         )
-        self.assertRegex(
-            prefix.casefold(),
-            r"(?s)(?:key|fingerprint|signature).{0,160}not\s+(?:yet\s+)?published",
+        self.assertIn(
+            "sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd",
+            prefix,
         )
 
-    def test_ibmi_candidate_and_published_download_are_distinguished(self) -> None:
-        # Candidate source is inspectable in-tree, but releases/latest still
-        # serves published 1.4. Do not turn the unpublished 1.5 file into a
-        # latest-release claim before the signed release exists.
+    def test_ibmi_15_published_download_is_named_and_verifiable(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
-        self.assertNotIn(RELEASE_ASSET_URL_IBMI, readme)
-        self.assertRegex(readme, r"(?is)1\.5.{0,100}unpublished release candidate")
+        self.assertIn(RELEASE_ASSET_URL_IBMI, readme)
+        self.assertRegex(readme, r"(?is)published release.{0,100}1\.5\.0")
         self.assertIn(RELEASE_ASSET_URL_IBMI, site_html)
         published_panel = site_html.split(
-            "Current published download: PTxray 1.4", 1
+            "Current published download: PTxray 1.5", 1
         )[1].split("</section>", 1)[0]
         self.assertIn(RELEASE_ASSET_URL_IBMI, published_panel)
         self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
@@ -842,8 +836,7 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertRegex(
             llms_ibmi_download,
-            r"(?i)releases/latest[^.]{0,100}published 1\.4[^.]{0,100}"
-            r"not the unpublished 1\.5 candidate",
+            r"(?i)releases/latest[^.]{0,120}published PTxray 1\.5",
         )
         for surface, text in (("README.md", readme), ("site/index.html", site_html)):
             with self.subTest(surface=surface, contract="ibmi hash verification"):
@@ -1175,21 +1168,20 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIsInstance(declared_version, str)
         if not isinstance(declared_version, str):
             return
-        candidate_version_claim = re.compile(
-            r"\bcandidate version(?:\s*:\s*|\s+)`?"
+        published_version_claim = re.compile(
+            r"\bpublished version(?:\s*:\s*|\s+)`?"
             r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
             r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
             re.IGNORECASE,
         )
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
-        self.assertEqual([declared_version], candidate_version_claim.findall(llms))
+        self.assertEqual([declared_version], published_version_claim.findall(llms))
 
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
         published_panel = site_html.split(
-            "Current published download: PTxray 1.4", 1
+            "Current published download: PTxray 1.5", 1
         )[1].split("</section>", 1)[0]
-        self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
-        self.assertNotIn(f"Version {declared_version}", published_panel)
+        self.assertIn(f"Version {declared_version}", published_panel)
 
         root_jsonld = json.loads(JSONLD.read_text())
         site_jsonld = inline_jsonld((SITE / "index.html").read_text(encoding="utf-8"))
@@ -1221,13 +1213,6 @@ class PublicFunnelTests(unittest.TestCase):
                 json.dumps(catalog, indent=2) + "\n",
                 encoding="utf-8",
             )
-            original_readme = (candidate / "README.md").read_text(encoding="utf-8")
-            original_published_panel = (candidate / "site/index.html").read_text(
-                encoding="utf-8"
-            ).split("Current published download: PTxray 1.4", 1)[1].split(
-                "</section>", 1
-            )[0]
-
             stale = self.run_release_shape_sync(candidate, check=True)
             self.assertNotEqual(0, stale.returncode, stale.stdout + stale.stderr)
             updated = self.run_release_shape_sync(candidate, check=False)
@@ -1235,8 +1220,8 @@ class PublicFunnelTests(unittest.TestCase):
             verified = self.run_release_shape_sync(candidate, check=True)
             self.assertEqual(0, verified.returncode, verified.stdout + verified.stderr)
 
-            candidate_version_claim = re.compile(
-                r"\bcandidate version(?:\s*:\s*|\s+)`?"
+            published_version_claim = re.compile(
+                r"\bpublished version(?:\s*:\s*|\s+)`?"
                 r"([0-9]+(?:\.[0-9A-Za-z-]+)+"
                 r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)`?",
                 re.IGNORECASE,
@@ -1244,19 +1229,18 @@ class PublicFunnelTests(unittest.TestCase):
             llms = (candidate / "llms.txt").read_text(encoding="utf-8")
             self.assertEqual(
                 [declared_version],
-                candidate_version_claim.findall(llms),
+                published_version_claim.findall(llms),
             )
-            self.assertEqual(
-                original_readme,
+            self.assertIn(
+                f"Version: {declared_version}",
                 (candidate / "README.md").read_text(encoding="utf-8"),
             )
             rendered_published_panel = (candidate / "site/index.html").read_text(
                 encoding="utf-8"
-            ).split("Current published download: PTxray 1.4", 1)[1].split(
+            ).split("Current published download: PTxray 1.5", 1)[1].split(
                 "</section>", 1
             )[0]
-            self.assertEqual(original_published_panel, rendered_published_panel)
-            self.assertIn(f"Version {PUBLISHED_VERSION}", rendered_published_panel)
+            self.assertIn(f"Version {declared_version}", rendered_published_panel)
 
             root_jsonld = json.loads(
                 (candidate / "ptxray.jsonld").read_text(encoding="utf-8")
@@ -2062,7 +2046,7 @@ START_HERE_ITEMS=""
             verify_guide,
         )
 
-    def test_verify_guide_prepares_signature_first_without_fake_fingerprint(self) -> None:
+    def test_verify_guide_prepares_signature_first_with_release_fingerprint(self) -> None:
         guide = VERIFY_GUIDE.read_text(encoding="utf-8")
         signature_heading = "## Verify the signed manifest first"
         self.assertIn(signature_heading, guide)
@@ -2092,10 +2076,12 @@ START_HERE_ITEMS=""
             signature_section,
         )
         self.assertRegex(signature_section, r"(?s)RSA-3072.*SHA-256.*PKCS#1 v1\.5")
-        self.assertRegex(signature_section.casefold(), r"not\s+(?:yet\s+)?published")
         self.assertIn("independent", signature_section.casefold())
         self.assertIn("fingerprint", signature_section.casefold())
-        self.assertNotRegex(signature_section, r"(?i)expected fingerprint\s*:")
+        self.assertIn(
+            "sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd",
+            signature_section,
+        )
 
     def test_scanner_has_no_egress_command_primitive(self) -> None:
         self.assertTrue(EGRESS_LINTER.is_file(), f"missing linter: {EGRESS_LINTER}")

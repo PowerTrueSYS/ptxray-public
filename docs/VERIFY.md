@@ -15,13 +15,9 @@ Do not run it first on a production AIX target.
 
 ## Verify the signed manifest first
 
-This is the verification order for the unpublished PTxray 1.5 release
-candidate. That release,
-its release public key, and its authoritative fingerprint are not yet
-published. Until the release ceremony publishes the real fingerprint through
-an independent PowerTrue Systems channel, stop here: candidate files are not a
-release, and a public key downloaded beside a payload cannot authenticate
-itself.
+This is the verification order for the published PTxray 1.5.0 release. Obtain
+the release-key fingerprint through the independently controlled PowerTrue
+security page before trusting a public key downloaded beside the payloads.
 
 The designed release asset set is exactly:
 
@@ -53,8 +49,11 @@ openssl pkey -pubin -in POWERTRUE-RELEASE-PUBLIC.pem -outform DER \
 
 Compare that value with the authoritative fingerprint obtained through the
 independent channel. Do not compare it only with another file or page from the
-same download location. No expected fingerprint is printed here because no
-authoritative 1.5 fingerprint exists yet.
+same download location. The expected fingerprint is:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
 
 Only after the independent fingerprint matches, verify the RSA-3072 / SHA-256
 / PKCS#1 v1.5 signature over the exact `SHA256SUMS` bytes:
@@ -93,11 +92,9 @@ candidate revision:
 python3 tools/verify-release-integrity.py --tag v1.5.0
 ```
 
-For `v1.0.0` through the current published 1.4 line, use that release's
-documented asset set. The 1.5 candidate uses the nine assets listed in the
-signature-first section above; the renderer, release public key, signed
-manifest, and signature ceremony must land before that candidate can pass the
-final gate.
+For `v1.0.0` through `v1.4.0`, use that release's documented asset set. The
+published 1.5 release uses the nine assets listed in the signature-first
+section above.
 The immutable `v0.1.0` release retains its historical two-asset contract
 (`ptxray-aix.sh` and `ptxray-review-pack.sh`):
 
@@ -108,10 +105,8 @@ python3 tools/verify-release-integrity.py --tag v0.1.0 \
 
 The gate checks the required tree paths, catalog digests, root/site scanner
 identity, artifact version declarations, the exact versioned release asset
-set, the signed checksum manifest, and asset bytes. The unpublished candidate
-cannot pass its final release check until the renderer produces the exact 1.5
-payloads and the signing ceremony signs their manifest. Any `FAIL` line blocks
-a release.
+set, the signed checksum manifest, and asset bytes. Any `FAIL` line blocks use
+of the release.
 
 ## Verify byte identity and catalog hashes
 

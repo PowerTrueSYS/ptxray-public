@@ -7,7 +7,7 @@ Source repository: https://github.com/PowerTrueSYS/ptxray-public
 Download: https://powertruesystems.com/ptxray/
 Audit guide: https://powertruesystems.com/ptxray/docs/auditing-aix (source: docs/auditing-aix.md)
 Catalog: https://github.com/PowerTrueSYS/ptxray-public/blob/master/catalog.json
-Candidate version: 1.5.0 (unpublished; `releases/latest` remains 1.4.0)
+Published version: 1.5.0 (`releases/latest`)
 License: Apache-2.0
 License text: https://www.apache.org/licenses/LICENSE-2.0
 
@@ -21,7 +21,7 @@ License text: https://www.apache.org/licenses/LICENSE-2.0
 
 ## Verifiable facts
 
-- The unpublished PTxray 1.5 candidate consists of the AIX and IBM i runners, the separate adjacent ptxray-defs.sh downloader, and offline review helpers. Candidate files are not a release. The VIOS lane remains disabled pending live acceptance.
+- The published PTxray 1.5 release consists of the AIX and IBM i runners, the separate adjacent ptxray-defs.sh downloader, and offline review helpers. The VIOS lane remains disabled pending live acceptance.
 - checks/ contains 387 standalone ksh tools. Every tool is paired with a manifest.json.
 - catalog.json is generated from those manifests, declares their count, and adds each artifact's SHA-256 digest.
 - Every public manifest declares read_only=true and lists its command surface.
@@ -30,9 +30,9 @@ License text: https://www.apache.org/licenses/LICENSE-2.0
 - Assessment execution makes no network calls and sends no assessment data or telemetry away from the host.
 - Missing, unreadable, malformed, ambiguous, or unsupported evidence can produce NOT_ASSESSED; it is not silently treated as PASS.
 
-## Unpublished PTxray 1.5 release candidate
+## PTxray 1.5 release
 
-This is not a published release. AIX requires root, and IBM i requires QSECOFR. The VIOS lane is disabled pending live acceptance. Before assessment probes begin, each runner verifies and invokes the separate, adjacent, release-bound and digest-bound ptxray-defs.sh. Connected mode attempts to download the current signed definitions by default. --offline uses only the signed cache. --definitions-bundle SIGNED_FILE imports a local signed bundle with its adjacent SIGNED_FILE.sig. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.
+PTxray 1.5.0 is the current published release. AIX requires root, and IBM i requires QSECOFR. The VIOS lane is disabled pending live acceptance. Before assessment probes begin, each runner verifies and invokes the separate, adjacent, release-bound and digest-bound ptxray-defs.sh. Connected mode attempts to download the current signed definitions by default. --offline uses only the signed cache. --definitions-bundle SIGNED_FILE imports a local signed bundle with its adjacent SIGNED_FILE.sig. The interactive menu presents update, cache, local-bundle, and continue-without-definitions choices. Old or stale definitions produce an explicit age warning.
 
 Only ptxray-defs.sh may use the network. Before a connected update it discloses two fixed public HTTPS GET requests, the cache destination, and observable DNS/TLS metadata; it sends no request body or assessment data. Verified generations are written under /var/ptxray/definitions. Assessment probes begin after selection, remain no-egress and read-only on system configuration, and perform no remediation. Air-gapped assessment execution uses --offline with a valid signed cache or --definitions-bundle with a transferred local signed bundle.
 
@@ -40,7 +40,7 @@ Only ptxray-defs.sh may use the network. Before a connected update it discloses 
 
 - DISA STIG for IBM AIX 7.x coverage is partial: 66 distinct rule V-IDs receive an engine verdict. This count is not a single-release coverage fraction. The count is the distinct V-IDs in the four live rule tables that the security pass evaluates. V-215399 covers the clean_partial_conns tunable verdict but not the rule's package-commit condition; deferred V-215429 is not counted.
 - PTxray has 260 CIS L1-aligned checks across NFS exports, password hashing, file ownership and permissions, and network tunables, plus login policy, auditing, cron and at, home directories, system accounts and the r-command services. They resolve to 209 distinct Level 1 control numbers of the 212 in CIS IBM AIX 7 Benchmark v1.2.0; 5.1.4, 5.1.5 and 7.1 have no mapping and are not claimed. This is a numeric alignment cross-check, not a completeness claim; unavailable evidence does not produce a numeric verdict, it produces NOT_ASSESSED.
-- The IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. On IBM i 7.5, 76 of 89 CIS Level 1 controls receive an automated verdict; on IBM i 7.4, 73 of 88. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed by the scanner rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i. The releases/latest link serves the published 1.4 self-contained IBM i monolith, not the unpublished 1.5 candidate: https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh. Verify published 1.4 against its SHA256SUMS and follow its release-specific documentation.
+- The IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. On IBM i 7.5, 76 of 89 CIS Level 1 controls receive an automated verdict; on IBM i 7.4, 73 of 88. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed by the scanner rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i. The releases/latest link serves the published PTxray 1.5 IBM i runner: https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh. Verify it against SHA256SUMS and its detached signature before privileged execution.
 
 ## Language guardrails
 

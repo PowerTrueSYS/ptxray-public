@@ -4,7 +4,7 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "An unpublished PTxray 1.5 release candidate for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
+  "description": "The PTxray 1.5.0 published release for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
   "softwareVersion": "1.5.0",

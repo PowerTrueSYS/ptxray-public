@@ -1,32 +1,40 @@
 # Release notes
 
-## Unpublished candidate status
+<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->
 
-The latest published release remains version 1.4.0. PTxray 1.5.0 is an
-unpublished release candidate, not a release. Its exact rendered programs,
-catalog, source registry, checksums, signature, public key, and independently
-published fingerprint must all come from the release renderer and signing
-ceremony before a versioned 1.5 release section can be added.
+## v1.5.0
 
-The candidate AIX runner requires root; the IBM i runner requires
+PTxray 1.5.0 is the current published release for IBM AIX and IBM i. It
+completes the AIXray-to-PTxray rename, separates signed-definition acquisition
+from assessment, and publishes an offline-signed nine-asset release set.
+
+The AIX runner requires root; the IBM i runner requires
 QSECOFR. Each runner authenticates and invokes the separate adjacent
 `ptxray-defs.sh` before assessment. Connected mode attempts a signed-definitions
 update by default, while `--offline` uses a signed cache and
 `--definitions-bundle` accepts a local signed bundle. Assessment probes remain
-no-egress, read-only on system configuration, and non-remediating. These facts
-do not make 1.5 available from `releases/latest`.
+no-egress, read-only on system configuration, and non-remediating.
+
+The release includes the AIX and IBM i runners, definitions downloader, review
+helper and validator, the byte-identical `aixray-aix.sh` compatibility alias,
+`SHA256SUMS`, its detached signature, and the release public key. The
+authoritative release-key fingerprint is:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
 
 The canonical site is `https://powertruesystems.com/ptxray/` and the canonical
 repository is `https://github.com/PowerTrueSYS/ptxray-public`. The legacy site
 URL `https://powertruesystems.com/aixray/` has an active HTTP 308 redirect to
 the canonical site, which returns HTTP 200. The legacy GitHub repository URL
 `https://github.com/PowerTrueSYS/aixray-public` has an active HTTP 301 redirect
-to the canonical repository, which returns HTTP 200. These redirect facts do
-not publish the 1.5 candidate. The release public key, fingerprint, and
-signature are not yet published.
+to the canonical repository, which returns HTTP 200. These redirect facts
+preserve old links while all current documentation and release assets use the
+PTxray name.
 
 The VIOS lane remains disabled pending live VIOS acceptance and is not claimed
-by this candidate.
+by this release.
 
 ## v1.4.0
 

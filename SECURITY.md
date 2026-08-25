@@ -1,15 +1,14 @@
 # Security and trust model
 
-PTxray is intended to be inspected before it is run. The unpublished PTxray 1.5
-release candidate requires root for AIX and QSECOFR for IBM i. The VIOS lane
+PTxray is intended to be inspected before it is run. The published PTxray 1.5.0
+release requires root for AIX and QSECOFR for IBM i. The VIOS lane
 remains disabled pending live VIOS acceptance. The
 security boundary is the exact, verified release asset set for the selected
-platform, not a brand claim or a download page. Candidate files are not a
-release, and PTxray 1.5 is not available from `releases/latest` yet.
+platform, not a brand claim or a download page.
 
 This document covers the `ptxray-aix.sh` and `ptxray-ibmi.sh` runners, the
 separate adjacent `ptxray-defs.sh` downloader, and the offline
-`ptxray-review-pack.sh` helper in the 1.5 candidate.
+`ptxray-review-pack.sh` helper in the 1.5 release.
 
 ## Assessment security contract
 
@@ -57,7 +56,7 @@ The public check inventory and command declarations are in
 
 ## What it writes
 
-The candidate can write only the following local artifacts:
+The release can write only the following local artifacts:
 
 - HTML, JSON, or compliance output sent to stdout or redirected by the
   operator;
@@ -121,9 +120,9 @@ See [`docs/VERIFY.md`](docs/VERIFY.md) for exact commands to inspect likely
 network and mutating primitives, run the public gates, and compare SHA-256
 digests.
 
-## Unpublished PTxray 1.5 release candidate boundary
+## PTxray 1.5 release boundary
 
-This candidate is not a published release. AIX requires root, and IBM
+PTxray 1.5.0 is the current published release. AIX requires root, and IBM
 i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`. The privilege
 gate runs before definitions selection, so an unprivileged invocation neither
 starts a scan nor reaches the network.
@@ -156,10 +155,14 @@ the release signing key self-authenticating: obtain its SPKI-DER SHA-256
 fingerprint through an independent PowerTrue Systems channel before trusting
 the downloaded public key.
 
-The PTxray 1.5 release, release public key, and authoritative fingerprint have
-not been published. No fingerprint is stated here until the release ceremony
-produces and independently publishes the real value. Candidate files are not a
-release and must not be treated as one.
+The authoritative release-key fingerprint is:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
+
+Confirm that value through the independently controlled PowerTrue security
+page before trusting the public key downloaded with a release.
 
 ## IBM FLRTVC delivery data
 
@@ -188,7 +191,7 @@ candidate-file audit that remains necessary, are documented in
 > key must not be sent with the review file. Creating either file performs no
 > upload or send; sharing remains a deliberate user action.
 
-The 1.5 candidate helper writes its `ptxray-review-*.html`,
+The 1.5 release helper writes its `ptxray-review-*.html`,
 `ptxray-local-key-*.map`, and `ptxray-local-removals-*.txt` outputs beside the
 input report through a private scratch directory. Keep the key and removals
 manifest local. This optional local transformation does not broaden
@@ -200,12 +203,10 @@ information.
 
 Do not open a public issue for a suspected vulnerability. Email the tested
 mailbox [`review@powertruesystems.com`](mailto:review@powertruesystems.com)
-with the subject **PTxray security report**. The intended private-advisory URL
-is
+with the subject **PTxray security report**. GitHub private vulnerability
+reporting is enabled at
 [`https://github.com/PowerTrueSYS/ptxray-public/security/advisories/new`](https://github.com/PowerTrueSYS/ptxray-public/security/advisories/new),
-but private advisory reporting remains pending activation after the repository
-migration and settings review. Until activation is confirmed, use the mailbox,
-not that form. Include:
+so use either private channel, never a public issue. Include:
 
 - the exact Git commit or release tag;
 - platform and release, effective user or profile, and any privilege warning

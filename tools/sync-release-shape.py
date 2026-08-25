@@ -23,9 +23,9 @@ COUNT_PROPERTY_TARGETS = {
     "site/index.html": 1,
 }
 PUBLISHED_VERSION_CLAIM_TARGETS = {
-    "README.md": 3,
-    "llms.txt": 3,
-    "site/index.html": 3,
+    "README.md": 1,
+    "llms.txt": 1,
+    "site/index.html": 1,
 }
 CANDIDATE_VERSION_CLAIM_TARGETS = {
     "README.md": 0,
