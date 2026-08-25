@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -388,28 +412,71 @@ function ipart { typeset v; v=${1%.*}; case "$v" in ''|*[!0-9-]*) v=0;; esac; ec
 
   # Veteran signal: idle high with low run queue = headroom; run queue > 2x logical CPUs =
   # threads waiting on CPU even if %busy looks OK. Point-in-time, not a trend.
-  set -- $(printf '%s\n' "$(aix vmstat_1_2 vmstat 1 2)" | \
-           awk '$1 ~ /^[0-9]+$/ && NF>=18 {r=$1; pi=$6; po=$7; id=$16; pc=$18} END{print r+0, pi+0, po+0, id+0, pc}')
-  R=${1:-0}; PI=${2:-0}; PO=${3:-0}; ID=${4:-0}; PC=${5:-}
-  LCPU=$(printf '%s\n' "$(aix lparstat_2_1 lparstat 2 1)" | \
-         awk '{for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1)print substr($i,6)}' | awk 'NR==1{print}')
-  case "$LCPU" in ''|*[!0-9]*) LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}');; esac
-  case "$LCPU" in ''|*[!0-9]*) LCPU=1;; esac
-  IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
-  if [ "$IDI" -lt 10 ]; then
+  VMSTAT=$(aix vmstat_1_2 vmstat 1 2); VMSTAT_RC=$?
+  LPS=$(aix lparstat_2_1 lparstat 2 1); LPS_RC=$?
+  VMSAMPLE=""
+  if [ "$VMSTAT_RC" -eq 0 ] && [ -n "$VMSTAT" ]; then
+    VMSAMPLE=$(printf '%s\n' "$VMSTAT" | awk '
+      $1 ~ /^[0-9]+$/ && NF>=18 {
+        r=$1; pi=$6; po=$7; id=$16; pc=$18; found=1
+      }
+      END{if(found)print r+0, pi+0, po+0, id+0, pc}')
+  fi
+  set -- $VMSAMPLE
+  R=${1:-}; PI=${2:-}; PO=${3:-}; ID=${4:-}; PC=${5:-}
+  LCPU=""
+  if [ "$LPS_RC" -eq 0 ] && [ -n "$LPS" ]; then
+    LCPU=$(printf '%s\n' "$LPS" | awk '
+      {for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1){print substr($i,6); exit}}')
+  fi
+  case "$LCPU" in
+    ''|*[!0-9]*)
+      if [ "$PRTCONF_RC" -eq 0 ] && [ -n "$PRTCONF" ]; then
+        LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}')
+      fi
+      ;;
+  esac
+  if [ "$VMSTAT_RC" -ne 0 ] || [ -z "$VMSTAT" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat probe failed (rc=$VMSTAT_RC out=${#VMSTAT})" \
+        "CPU headroom cannot be assessed because the vmstat sample was not captured." \
+        "run 'vmstat 1 2' manually and investigate why the probe failed." ""
+  elif [ -z "$VMSAMPLE" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat returned no usable sample" \
+        "CPU headroom cannot be assessed because vmstat output did not contain the expected numeric sample." \
+        "run 'vmstat 1 2' manually and verify its output format." ""
+  elif [ "$LPS_RC" -ne 0 ] && { [ "$PRTCONF_RC" -ne 0 ] || [ -z "$PRTCONF" ]; }; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — CPU-count probes failed (lparstat rc=$LPS_RC; prtconf rc=$PRTCONF_RC)" \
+        "CPU headroom cannot be assessed without a trustworthy logical-CPU count." \
+        "run 'lparstat 2 1' and 'prtconf' manually and investigate the failed probes." ""
+  else
+    case "$LCPU" in
+      ''|*[!0-9]*|0)
+        add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+            "not assessed — logical CPU count unreadable" \
+            "CPU headroom cannot be assessed because neither lparstat nor prtconf provided a usable CPU count." \
+            "run 'lparstat 2 1' and 'prtconf' manually and verify their output." ""
+        return
+        ;;
+    esac
+    IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
+    if [ "$IDI" -lt 10 ]; then
     add performance cpu_snapshot "CPU headroom (snapshot)" WARN med \
         "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
         "CPU is near saturation in this one sample — low idle with the run queue backing up. This is a point-in-time snapshot, not a trend." \
         "confirm with 'nmon'/'topas' over time; if sustained, chase the top consumers or review CPU sizing/entitlement." ""
-  elif [ "$R" -gt "$RQ" ]; then
+    elif [ "$R" -gt "$RQ" ]; then
     add performance cpu_snapshot "CPU headroom (snapshot)" WARN low \
         "run queue r=$R vs $LCPU logical CPUs, idle ${ID}%" \
         "The run queue is more than twice the logical-CPU count while idle is ${ID}% — threads are waiting to dispatch even though average CPU looks OK. Point-in-time snapshot." \
         "confirm with 'vmstat 2'/'nmon' over time; if sustained, look at SMT settings, thread affinity, or CPU sizing." ""
-  else
+    else
     add performance cpu_snapshot "CPU headroom (snapshot)" PASS low \
         "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
         "CPU has headroom in this sample: idle ${ID}% with a short run queue for $LCPU logical CPUs (point-in-time snapshot, not a trend)." "n/a"
+    fi
   fi
 }
 

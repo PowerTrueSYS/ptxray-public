@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -414,16 +438,22 @@ V-245565|/etc/inetd.conf|||0640
 # eval_fileperms — evaluate every R_FILEPERM row against ONE evidence capture and emit
 # one grouped finding plus the per-rule detail (F_RULES). A single wrapped command
 # (aix stig_fileperm_ls ls -ldn <all paths>) preserves the per-path association: a
-# missing path simply produces no line (NA), and ls's nonzero rc for missing paths is
-# expected. Owner/group are compared by numeric id (ls -n); mode by mask, not equality.
-function eval_fileperms {
-  typeset PATHS LS RAW SUM DETAIL CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+# The capture must succeed and return rows before any verdict consumes it. Owner/group are
+# compared by numeric id (ls -n); mode by mask, not equality.
+typeset PATHS LS LS_RC RAW SUM DETAIL CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
 
   PATHS=$(printf '%s\n' "$R_FILEPERM" | awk -F'|' 'NF>=5 && $1 !~ /^#/ && $2!="" && !seen[$2]++{printf "%s ", $2}')
   [ -z "$PATHS" ] && return 0
-  # ls -ldn on every distinct rule path in one shot. rc is ignored: missing paths are
-  # expected and simply yield no line (parsed as NA below).
-  LS=$(aix stig_fileperm_ls ls -ldn $PATHS)
+  # ls -ldn on every distinct rule path in one shot. A nonzero rc means the inventory is
+  # incomplete, so do not turn partial rows into a PASS.
+  LS=$(aix stig_fileperm_ls ls -ldn $PATHS); LS_RC=$?
+  if [ "$LS_RC" -ne 0 ] || [ -z "$LS" ]; then
+    CTLS=$(printf '%s\n' "$R_FILEPERM" | awk -F'|' \
+      'NF>=5 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_fileperms "STIG file permissions" WARN med "n/a" \
+      "Could not read the complete file-permission inventory (ls rc=$LS_RC); no STIG file-permission rule was assessed." \
+      "verify every required path is readable, then re-run PTxray." "$CTLS"
+  else
 
   # One awk pass: build path -> (mode,uid,gid) from the ls lines, then evaluate each rule.
   RAW=$({ printf '%s\n' "$R_FILEPERM"; echo "AIXRAY_LS"; printf '%s\n' "$LS"; } | awk '
@@ -508,10 +538,9 @@ function eval_fileperms {
   fi
   add security stig_fileperms "STIG file permissions" "$ST" "$SEV" "$OBS" "$MEAN" "$FIX" "$CTLS"
   F_RULES[$((NFIND-1))]="$DETAIL"
-}
+  fi
 
-  # stig_fileperms — data-driven STIG file permission/ownership rule engine (R_FILEPERM)
-  eval_fileperms
+# stig_fileperms — data-driven STIG file permission/ownership rule engine (R_FILEPERM)
 }
 
 function standalone_run {

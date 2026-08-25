@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -385,12 +409,19 @@ RES_DUMP_MARGIN_NUM=5    # dump device is "comfortable" only if size >= estimate
 RES_DUMP_MARGIN_DEN=4    # (1.25x); between 1.0x and 1.25x is adequate-but-tight
 
   # The dump estimate + primary device drive both dump_sizing and dump_copy_dir; read once.
-  SD=$(aix sysdumpdev_l sysdumpdev -l)
-  PRIM=$(printf '%s\n' "$SD" | awk '$1=="primary"{print $2; exit}')
-  DUMPLV=$(printf '%s\n' "$PRIM" | sed 's|^/dev/||')
+  SD=$(aix sysdumpdev_l sysdumpdev -l); SD_RC=$?
+  PRIM=""; DUMPLV=""
+  if [ "$SD_RC" -eq 0 ] && [ -n "$SD" ]; then
+    PRIM=$(printf '%s\n' "$SD" | awk '$1=="primary"{print $2; exit}')
+    DUMPLV=$(printf '%s\n' "$PRIM" | sed 's|^/dev/||')
+  fi
   # sysdumpdev -e -> "Estimated dump size in bytes: N"; take the trailing integer.
-  DEST=$(aix sysdumpdev_e sysdumpdev -e | awk '{for(i=NF;i>=1;i--) if($i ~ /^[0-9]+$/){print $i; exit}}')
-  : ${DEST:=0}
+  DEST_RAW=$(aix sysdumpdev_e sysdumpdev -e); DEST_RC=$?
+  DEST=""
+  if [ "$DEST_RC" -eq 0 ] && [ -n "$DEST_RAW" ]; then
+    DEST=$(printf '%s\n' "$DEST_RAW" | awk '{for(i=NF;i>=1;i--) if($i ~ /^[0-9]+$/){print $i; exit}}')
+  fi
+  case "$DEST" in ''|*[!0-9]*) DEST=0;; esac
   ESTMB=$(( DEST / 1048576 ))
   ESTGB=$(( (DEST + 536870912) / 1073741824 ))   # rounded GB, for plain-English text
 
@@ -400,13 +431,35 @@ RES_DUMP_MARGIN_DEN=4    # (1.25x); between 1.0x and 1.25x is adequate-but-tight
   # needed to root-cause the crash are gone. Read-only: 'sysdumpdev -e' estimate vs the dump
   # LV size (lslv PPs x PP SIZE). Only meaningful when a real device is configured — a
   # sysdumpnull/absent primary is already flagged under Errors -> System dump device.
-  if [ -n "$PRIM" ] && [ "$PRIM" != "/dev/sysdumpnull" ] && [ -n "$DUMPLV" ] && [ "$DEST" -gt 0 ]; then
-    LSDLV=$(aix dump_lslv lslv "$DUMPLV")
-    DPPS=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="PPs:"){print $(i+1); exit}}')
-    DPPMB=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="SIZE:"){print $(i+1); exit}}')
-    : ${DPPS:=0}; : ${DPPMB:=0}
-    DEVMB=$(( DPPS * DPPMB ))
-    if [ "$DEVMB" -gt 0 ]; then
+  if [ "$SD_RC" -ne 0 ] || [ -z "$SD" ]; then
+    add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+        "not assessed — sysdumpdev -l probe failed (rc=$SD_RC out=${#SD})" \
+        "Dump-device capacity cannot be assessed because the primary device configuration was not captured." \
+        "run 'sysdumpdev -l' manually and investigate why the probe failed." "ffiec:II.C.21"
+  elif [ "$DEST_RC" -ne 0 ] || [ -z "$DEST_RAW" ] || [ "$DEST" -le 0 ]; then
+    add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+        "not assessed — dump estimate unreadable (rc=$DEST_RC out=${#DEST_RAW})" \
+        "Dump-device capacity cannot be assessed because sysdumpdev did not provide a usable positive dump-size estimate." \
+        "run 'sysdumpdev -e' manually and investigate the failed or malformed estimate." "ffiec:II.C.21"
+  elif [ -n "$PRIM" ] && [ "$PRIM" != "/dev/sysdumpnull" ] && [ -n "$DUMPLV" ]; then
+    LSDLV=$(aix dump_lslv lslv "$DUMPLV"); LSDLV_RC=$?
+    if [ "$LSDLV_RC" -ne 0 ] || [ -z "$LSDLV" ]; then
+      add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+          "not assessed — lslv probe failed for $DUMPLV (rc=$LSDLV_RC out=${#LSDLV})" \
+          "Dump-device capacity cannot be assessed because the configured dump LV size was not captured." \
+          "run 'lslv $DUMPLV' manually and investigate why the probe failed." "ffiec:II.C.21"
+    else
+      DPPS=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="PPs:"){print $(i+1); exit}}')
+      DPPMB=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="SIZE:"){print $(i+1); exit}}')
+      case "$DPPS:$DPPMB" in
+        *[!0-9:]*|:*|*:|0:*|*:0)
+          add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+              "not assessed — lslv size fields unreadable for $DUMPLV" \
+              "Dump-device capacity cannot be assessed because lslv did not provide usable PP count and PP size fields." \
+              "run 'lslv $DUMPLV' manually and verify the PP count and PP SIZE fields." "ffiec:II.C.21"
+          ;;
+        *)
+          DEVMB=$(( DPPS * DPPMB ))
       if [ "$DEVMB" -lt "$ESTMB" ]; then
         add resilience dump_sizing "Dump device sizing" WARN high "device ${DEVMB} MB < estimated dump ${ESTMB} MB" \
             "The primary dump device ($DUMPLV, ${DEVMB} MB) is smaller than the estimated dump for this LPAR's memory (${ESTMB} MB). If the box panics the dump truncates when the device fills, and the forensics you need to root-cause the crash are lost with it. This is the landmine you only find AFTER the crash." \
@@ -419,6 +472,8 @@ RES_DUMP_MARGIN_DEN=4    # (1.25x); between 1.0x and 1.25x is adequate-but-tight
         add resilience dump_sizing "Dump device sizing" PASS low "device ${DEVMB} MB covers estimated dump ${ESTMB} MB" \
             "The primary dump device ($DUMPLV, ${DEVMB} MB) is comfortably larger than the estimated dump for this LPAR (${ESTMB} MB), so a panic can capture a complete image. Re-check 'sysdumpdev -e' after any memory increase — the estimate tracks RAM." "n/a"
       fi
+          ;;
+      esac
     fi
   fi
 }

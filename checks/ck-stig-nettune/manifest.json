@@ -14,7 +14,7 @@
   "tags": [
     "stig"
   ],
-  "blurb": "This check verifies the DISA STIG network-option tunables for IBM AIX 7.x: IP forwarding must be off (ipforwarding and ip6forwarding = 0), TCP half-open connection cleanup must be on (clean_partial_conns = 1), and broadcast ping must be off (bcastping = 0). Each tunable is read from 'no -a' and compared to its required value; a tunable left at the wrong value is a hardening gap an auditor will flag.",
+  "blurb": "This check verifies the DISA STIG network-option tunables for IBM AIX 7.x: IP forwarding must be off (ipforwarding and ip6forwarding = 0), TCP half-open connection cleanup must be on (clean_partial_conns = 1), and broadcast ping must be off (bcastping = 0). Each tunable is read from the no -a output and compared to its required value; a tunable left at the wrong value is a hardening gap an auditor will flag.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-stig-nettune/ck-stig-nettune.ksh"
 }

@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -425,51 +449,29 @@ V-215362|rctcp|rwhod
 V-215363|rctcp|timed
 "
 # eval_svcoff — evaluate every R_SVCOFF row and emit one grouped finding (stig_svcoff) plus
-# per-rule detail (F_RULES). Three captures: the uncommented /etc/inetd.conf service lines
-# (type inetd: the service token must NOT appear enabled), the uncommented start commands in
-# /etc/rc.tcpip (type rctcp: the daemon must not start at boot), and 'lssrc -a' (type lssrc:
-# the SRC subsystem must be inoperative, not active). All are non-root reads. For a
-# disable-service rule the STIG treats "service enabled/running" as the finding, so a token or
-# start command that is absent/commented (inetd/rctcp), or a subsystem that is inoperative/
-# undefined (lssrc), is compliant = PASS, not NA. Guard: if lssrc -a yields no subsystem rows
-# at all, lssrc-type rules are NA (can't assess) rather than a hollow PASS. This is the broad
+# per-rule detail (F_RULES). Two captures read the uncommented /etc/inetd.conf service lines
+# (type inetd: the service token must NOT appear enabled) and uncommented start commands in
+# /etc/rc.tcpip (type rctcp: the daemon must not start at boot). For a disable-service rule,
+# an absent/commented token or start command is compliant = PASS, not NA. This is the broad
 # per-V-ID STIG service list; it does NOT duplicate the inetd_cleartext check (which flags
 # cleartext-LOGIN daemons enabled).
-function eval_svcoff {
-  typeset TYPES CAP INE LSS RCT RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+typeset CAP INE INE_RC INE_CAP RCT RCT_RC RCT_CAP
+typeset RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
 
-  [ -z "$R_SVCOFF" ] && return 0
-  # space-separated (not newline): the `case " $TYPES "` tests below match on
-  # spaces, so with >1 type a newline-joined list would match none of them.
-  TYPES=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' 'NF>=3 && $1 !~ /^#/{print $2}' | sort -u | tr '\n' ' ')
-  [ -z "$TYPES" ] && return 0
-
-  # Build the evidence: enabled inetd tokens and SRC subsystem states.
-  CAP=$(
-    case " $TYPES " in
-      (*" inetd "*)
-        INE=$(aix stig_inetd_active grep -v '^#' /etc/inetd.conf)
-        printf '%s\n' "$INE" | awk 'NF>=1 && $1 !~ /^#/{print "inetd|" $1 "|on"}'
-        ;;
-    esac
-    case " $TYPES " in
-      (*" lssrc "*)
-        LSS=$(aix stig_lssrc_a lssrc -a)
-        printf '%s\n' "$LSS" | awk 'NR>1 && NF>=2 && $1!="Subsystem"{print "lssrc|" $1 "|" $NF}'
-        ;;
-    esac
-    case " $TYPES " in
-      (*" rctcp "*)
-        # uncommented "start /path/daemon ..." lines in /etc/rc.tcpip = the daemon boots.
-        # A commented rule (#start ...) does not match the anchored grep.
-        RCT=$(aix stig_rctcp grep -E '^[	 ]*start ' /etc/rc.tcpip)
-        printf '%s\n' "$RCT" | awk '$1=="start" && $2!=""{n=split($2,a,"/"); print "rctcp|" a[n] "|on"}'
-        ;;
-    esac
-  )
+# The current table has only inetd and rc.tcpip rules, so execute those two reads
+# explicitly. grep rc=1 with empty output is complete evidence that no line matched.
+INE=$(aix stig_inetd_active grep -v '^#' /etc/inetd.conf); INE_RC=$?
+RCT=$(aix stig_rctcp grep -E '^[	 ]*start ' /etc/rc.tcpip); RCT_RC=$?
+if { [ "$INE_RC" -eq 0 ] && [ -n "$INE" ]; } ||
+   { [ "$INE_RC" -eq 1 ] && [ -z "$INE" ]; }; then
+  if { [ "$RCT_RC" -eq 0 ] && [ -n "$RCT" ]; } ||
+     { [ "$RCT_RC" -eq 1 ] && [ -z "$RCT" ]; }; then
+    INE_CAP=$(printf '%s\n' "$INE" | awk 'NF>=1 && $1 !~ /^#/{print "inetd|" $1 "|on"}')
+    RCT_CAP=$(printf '%s\n' "$RCT" | awk '$1=="start" && $2!=""{n=split($2,a,"/"); print "rctcp|" a[n] "|on"}')
+    CAP=$(printf 'complete|inetd|\n%s\ncomplete|rctcp|\n%s\n' "$INE_CAP" "$RCT_CAP")
 
   RAW=$({ printf '%s\n' "$R_SVCOFF"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
-    BEGIN{ phase=0; nr=0; nlssrc=0 }
+    BEGIN{ phase=0; nr=0 }
     $0=="AIXRAY_CAP"{ phase=1; next }
     phase==0{
       if($0 ~ /^#/ || $0=="" || NF<3) next
@@ -478,8 +480,8 @@ function eval_svcoff {
     }
     phase==1{
       if(NF<3) next
-      if($1=="inetd"){ enabled[$2]=1 }
-      else if($1=="lssrc"){ state[$2]=$3; nlssrc++ }
+      if($1=="complete"){ complete[$2]=1 }
+      else if($1=="inetd"){ enabled[$2]=1 }
       else if($1=="rctcp"){ rctcp_on[$2]=1; nrctcp++ }
       next
     }
@@ -487,17 +489,10 @@ function eval_svcoff {
       npass=0; nfail=0; nna=0; nf=0
       for(i=1;i<=nr;i++){
         t=R_type[i]; n=R_name[i]
-        if(t=="inetd"){
+        if((t=="inetd" || t=="rctcp") && !(t in complete)){ st="NA"; obs=n" ("t" evidence incomplete)"; nna++ }
+        else if(t=="inetd"){
           if(n in enabled){ st="FAIL"; obs=n" enabled in inetd.conf"; nfail++; nf++; fl[nf]=R_id[i]" "n }
           else { st="PASS"; obs=n" not enabled in inetd.conf"; npass++ }
-        }
-        else if(t=="lssrc"){
-          if(nlssrc==0){ st="NA"; obs=n" (lssrc unreadable)"; nna++ }
-          else if(n in state){
-            if(state[n]=="active"){ st="FAIL"; obs=n" active"; nfail++; nf++; fl[nf]=R_id[i]" "n }
-            else { st="PASS"; obs=n" "state[n]; npass++ }
-          }
-          else { st="PASS"; obs=n" not defined"; npass++ }
         }
         else if(t=="rctcp"){
           if(n in rctcp_on){ st="FAIL"; obs=n" starts at boot in /etc/rc.tcpip"; nfail++; nf++; fl[nf]=R_id[i]" "n }
@@ -524,13 +519,18 @@ function eval_svcoff {
   if [ "$NAPPLIC" -eq 0 ]; then
     ST=WARN; SEV=med
     OBS="n/a"
-    MEAN="Could not read the service inventory (/etc/inetd.conf, /etc/rc.tcpip, and lssrc -a); no STIG disabled-service rule could be assessed on this run."
-    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable and the SRC is running; or inspect 'lssrc -a' manually."
+    MEAN="Could not read the service inventory (/etc/inetd.conf and /etc/rc.tcpip); no STIG disabled-service rule could be assessed on this run."
+    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable, then re-run PTxray."
   elif [ "$NFAIL" -gt 0 ]; then
     ST=FAIL; SEV=high
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more legacy network services the DISA STIG for IBM AIX 7.x requires disabled are still enabled or running — each is an unneeded, often unauthenticated, network-facing daemon an auditor will flag."
-    FIX="comment the service out of /etc/inetd.conf and 'refresh -s inetd' (inetd services), use 'chrctcp -d <daemon>' (/etc/rc.tcpip daemons), or 'stopsrc -s <subsystem>' and disable it at boot (SRC subsystems); the compliance report lists every rule and its evidence."
+    FIX="comment the service out of /etc/inetd.conf and 'refresh -s inetd' (inetd services), or use 'chrctcp -d <daemon>' for /etc/rc.tcpip daemons; the compliance report lists every rule and its evidence."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more service inventories were unavailable; the readable rules passed, but the full STIG disabled-service group could not be assessed."
+    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable, then re-run PTxray."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"
@@ -539,9 +539,21 @@ function eval_svcoff {
   fi
   add security stig_svcoff "STIG disabled services" "$ST" "$SEV" "$OBS" "$MEAN" "$FIX" "$CTLS"
   F_RULES[$((NFIND-1))]="$DETAIL"
-}
-  # stig_svcoff — data-driven STIG disabled-service rule engine (R_SVCOFF)
-  eval_svcoff
+  else
+    CTLS=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' \
+      'NF>=3 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_svcoff "STIG disabled services" WARN med "n/a" \
+      "Could not read the complete /etc/rc.tcpip service inventory (grep rc=$RCT_RC); no STIG disabled-service rule was assessed." \
+      "verify /etc/rc.tcpip is readable, then re-run PTxray." "$CTLS"
+  fi
+else
+  CTLS=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' \
+    'NF>=3 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+  add security stig_svcoff "STIG disabled services" WARN med "n/a" \
+    "Could not read the complete /etc/inetd.conf service inventory (grep rc=$INE_RC); no STIG disabled-service rule was assessed." \
+    "verify /etc/inetd.conf is readable, then re-run PTxray." "$CTLS"
+fi
+# stig_svcoff — data-driven STIG disabled-service rule engine (R_SVCOFF)
 }
 
 function standalone_run {

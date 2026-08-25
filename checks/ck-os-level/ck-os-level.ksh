@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -434,7 +458,10 @@ function checks_lifecycle {
   # On a VIOS the underlying AIX release is a SECONDARY signal: a VIOS admin patches with
   # 'updateios'/viosupgrade, not update_all/smitty. Say so wherever we hand out AIX-level
   # remediation, and point back to vios_level as the primary currency signal.
-  [ "$IS_VIOS" -eq 1 ] && PATHSUF="$PATHSUF On a VIOS this AIX level is secondary — patch the VIOS with 'updateios' (or viosupgrade), not update_all; the VIOS level (vios_level, above) is the primary currency signal."
+  if [ "$VIOS_MARKER_RC" -eq 0 ] && [ -n "$VIOS_MARKER" ] &&
+     [ "$VIOS_MARKER_MATCH" -eq 1 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 1 ]; then
+    PATHSUF="$PATHSUF On a VIOS this AIX level is secondary — patch the VIOS with 'updateios' (or viosupgrade), not update_all; the VIOS level (vios_level, above) is the primary currency signal."
+  fi
 
   # os_level — is this AIX release still supported at all?
   if [ -z "$OSLEVEL" ]; then

@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -384,8 +408,8 @@ _AIXRAY_SESSION_KEYS=""
   # rhosts
   # The probe always emits a completion marker after checking both paths. That
   # makes a clean result positive evidence instead of inferring absence from an
-  # empty/nonzero compound ls. Legacy real captures with one exact present path
-  # and rc 1/2 remain strong adverse evidence for the #76 partial-presence case.
+  # empty/nonzero compound ls. A nonzero wrapper status always refuses: partial
+  # output from an incomplete probe cannot safely establish the final state.
   RH=$(aix ls_rhosts sh -c '
     for path in /.rhosts /etc/hosts.equiv; do
       if [ -f "$path" ] || [ -L "$path" ]; then
@@ -399,13 +423,7 @@ _AIXRAY_SESSION_KEYS=""
   RHBAD=$(printf '%s\n' "$RH" | awk 'NF && $0!="/.rhosts" && $0!="/etc/hosts.equiv" && $0!="__AIXRAY_RHOSTS_PROBE_COMPLETE__"{n++} END{print n+0}')
   RHCOUNT=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{n++} END{print n+0}')
   RHUNIQ=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{seen[$0]=1} END{for(k in seen)n++; print n+0}')
-  if [ -n "$RHPRESENT" ] && [ "$RHBAD" -eq 0 ] && [ "$RHCOMP" -eq 0 ] &&
-     [ "$RHCOUNT" -eq "$RHUNIQ" ] &&
-     { [ "$RHRC" -eq 0 ] || [ "$RHRC" -eq 1 ] || [ "$RHRC" -eq 2 ]; }; then
-    add security rhosts "Trust files (.rhosts)" FAIL high "present: $RHPRESENT" \
-        "Host-trust files allow passwordless login from named hosts — a classic lateral-movement path." \
-        "remove /.rhosts and /etc/hosts.equiv; rely on key-based ssh instead." "stig:V-215432" # network-lint: allow -- remediation-advice prose, not a network call
-  elif [ "$RHRC" -ne 0 ]; then
+  if [ "$RHRC" -ne 0 ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe failed (rc=$RHRC)" \
         "The trust-file probe did not complete, so absence of .rhosts/hosts.equiv cannot be asserted." \
         "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"

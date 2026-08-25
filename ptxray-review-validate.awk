@@ -4283,7 +4283,7 @@ function canonical_copy(copy_id,    finding_id) {
   if (copy_id == "review-disclosure-v1") \
     return "PSEUDONYMIZED REVIEW COPY — NOT ANONYMIZED Automated independent validation passed, but no discovery-based tool can guarantee it found every identifier. REVIEW REQUIRED: inspect this file and the local removals manifest before sharing. Never send the local decode key or local manifest."
   if (copy_id == "native:kev-not-supplied-v1") \
-    return "No dated KEV feed was supplied to this native report path; zero is not assumed."
+    return "No valid selected signed KEV feed was available; zero is not assumed."
   if (copy_id == "native:cvss-uncompleted-v1") \
     return "No zero counts are inferred from an uncompleted run."
   if (copy_id == "native:cvss-currency-label-v1") \

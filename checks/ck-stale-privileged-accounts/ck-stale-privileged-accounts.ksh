@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -385,6 +409,7 @@ _AIXRAY_SESSION_KEYS=""
 # NEVER logged in and whose password never expires (maxage=0) — is the forgotten door a
 # breach persists through. Privileged = root (uid 0) plus any non-system account with
 # admin=true. Last-login age from time_last_login (unix epoch) vs the frozen "today".
+typeset STALE_DETAIL
 LSP=$(aix lsuser_priv lsuser -a admin maxage account_locked time_last_login ALL); RC=$?
 if [ "$RC" -ne 0 ]; then
   nr_warn security stale_privileged_accounts "Stale privileged accounts" "per-user privilege and last-login data" "lsuser -a admin maxage account_locked time_last_login ALL" "cis-l1 ffiec:II.C.7"
@@ -413,8 +438,16 @@ else
   STL=$(printf '%s' "$STALE" | awk -F'\t' '{print $4}')
   NPRIV=$(printf '%s' "$STALE" | awk -F'\t' '{print $5+0}')
   if [ "$NST" -gt 0 ] || [ "$NNEV" -gt 0 ]; then
+    STALE_DETAIL=""
+    if [ "$NST" -gt 0 ]; then
+      STALE_DETAIL="stale(>90d): $STL"
+    fi
+    if [ "$NNEV" -gt 0 ]; then
+      [ -n "$STALE_DETAIL" ] && STALE_DETAIL="$STALE_DETAIL; "
+      STALE_DETAIL="${STALE_DETAIL}never-used non-expiring: $NEVL"
+    fi
     add security stale_privileged_accounts "Stale privileged accounts" WARN med \
-        "$([ "$NST" -gt 0 ] && echo "stale(>90d): $STL")$([ "$NST" -gt 0 ] && [ "$NNEV" -gt 0 ] && echo "; ")$([ "$NNEV" -gt 0 ] && echo "never-used non-expiring: $NEVL")" \
+        "$STALE_DETAIL" \
         "One or more privileged accounts (root or an admin account) have not been used in over 90 days, or have never logged in and never expire (maxage=0). A dormant account with standing privilege is a prime target — nobody would notice it being used, and a non-expiring password outlives the person who set it." \
         "confirm each is still needed; lock or remove the unused ones ('chuser account_locked=true <user>' or 'rmuser'), and set aging on any that stay ('chuser maxage=13 <user>')." "cis-l1 ffiec:II.C.7"
   else

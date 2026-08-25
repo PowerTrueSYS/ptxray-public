@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -383,30 +407,44 @@ function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   typeset VMVRC PBUF PSBUF BUFTOT
 
-  # vmv <ere> — leading numeric value of the first vmstat -v line matching <ere> (0 if none).
-  function vmv { printf '%s\n' "$VMV" | awk -v re="$1" '$0 ~ re {print $1+0; exit}'; }
-
   VMV=$(aix vmstat_v vmstat -v); VMVRC=$?
 
   # Veteran signal: non-zero pbuf = LVM ran out of physical-buffer headers (disk I/O delayed);
   # non-zero psbuf = the pager itself was starved (worse — stalls under paging).
-  PBUF=$(vmv 'pending disk I/Os blocked with no pbuf$')
-  PSBUF=$(vmv 'paging space I/Os blocked with no psbuf$')
-  BUFTOT=$(( PBUF + PSBUF ))
-  if [ "$PSBUF" -gt 0 ]; then
+  if [ "$VMVRC" -ne 0 ] || [ -z "$VMV" ]; then
+    add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" NOT_ASSESSED med \
+        "not assessed — vmstat -v probe failed or empty (rc=$VMVRC)" \
+        "Buffer-starvation counters cannot be assessed because vmstat evidence was unavailable." \
+        "run 'vmstat -v' manually and investigate the failed probe." ""
+  else
+    PBUF=$(printf '%s\n' "$VMV" | awk '$1 ~ /^[0-9]+$/ && /pending disk I\/Os blocked with no pbuf$/ {print $1; exit}')
+    PSBUF=$(printf '%s\n' "$VMV" | awk '$1 ~ /^[0-9]+$/ && /paging space I\/Os blocked with no psbuf$/ {print $1; exit}')
+    case "$PBUF:$PSBUF" in
+      *[!0-9:]*|:*|*:)
+        add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" NOT_ASSESSED med \
+            "not assessed — pbuf/psbuf counters unreadable" \
+            "Buffer-starvation counters cannot be assessed because vmstat omitted or malformed one or both required rows." \
+            "run 'vmstat -v' manually and verify both pbuf and psbuf counter rows." ""
+        ;;
+      *)
+        BUFTOT=$(( PBUF + PSBUF ))
+        if [ "$PSBUF" -gt 0 ]; then
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" WARN med \
         "pbuf $PBUF, psbuf $PSBUF (blocked since boot)" \
         "Paging-space I/O has been blocked with no psbuf $PSBUF time(s) since boot — the pager ran out of buffers while paging, which stalls processes system-wide. That it happened at all means the box was under real memory pressure. (LVM pbuf blocks: $PBUF.)" \
         "relieve the memory pressure driving paging (see the memory and paging-activity checks); psbuf blocking is a symptom of paging, not a value you tune away." ""
-  elif [ "$PBUF" -gt 0 ]; then
+        elif [ "$PBUF" -gt 0 ]; then
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" WARN med \
         "pbuf $PBUF, psbuf 0 (blocked since boot)" \
         "LVM disk I/O has been blocked with no pbuf $PBUF time(s) since boot — the per-volume-group LVM physical-buffer pool was exhausted under load, delaying disk I/O. Cumulative since boot." \
         "check the current count with 'lvmo -v <vg> -a'; if still climbing, raise it per VG with 'lvmo -v <vg> -o pv_pbuf_count=<n>'. A static non-zero count from a past burst is usually benign." ""
-  else
+        else
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" PASS low \
         "0 pbuf and 0 psbuf blocks" \
         "No LVM pbuf or paging psbuf starvation since boot — buffer pools have kept up with disk and paging I/O." "n/a"
+        fi
+        ;;
+    esac
   fi
 }
 

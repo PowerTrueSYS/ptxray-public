@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -382,11 +406,20 @@ AIXRAY_TOOL=ck-ntp
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   # ntp — daemon running and at least one server configured
-  typeset XN STAT NTPS
-  XN=$(aix lssrc_xntpd lssrc -s xntpd)
+  typeset XN XNRC STAT NTPCONF NTPCONFRC NTPS
+  XN=$(aix lssrc_xntpd lssrc -s xntpd); XNRC=$?
   STAT=$(printf '%s\n' "$XN" | awk '$1=="xntpd"{print $NF; exit}')
-  NTPS=$(aix ntp_conf grep '^server' /etc/ntp.conf | awk 'NF{n++} END{print n+0}')
-  if [ "$STAT" = "active" ] && [ "${NTPS:-0}" -ge 1 ]; then
+  NTPCONF=$(aix ntp_conf grep '^server' /etc/ntp.conf); NTPCONFRC=$?
+  NTPS=$(printf '%s\n' "$NTPCONF" | awk 'NF{n++} END{print n+0}')
+  if [ "$XNRC" -ne 0 ] || [ -z "$XN" ] || [ -z "$STAT" ] ||
+     [ "$NTPCONFRC" -gt 1 ] ||
+     { [ "$NTPCONFRC" -eq 0 ] && [ -z "$NTPCONF" ]; } ||
+     { [ "$NTPCONFRC" -eq 1 ] && [ -n "$NTPCONF" ]; }; then
+    add config ntp "Time synchronization (NTP)" NOT_ASSESSED med \
+        "not assessed — NTP probe incomplete (lssrc rc=$XNRC, ntp.conf rc=$NTPCONFRC)" \
+        "The NTP daemon/configuration probes failed or returned contradictory evidence." \
+        "run 'lssrc -s xntpd' and inspect /etc/ntp.conf, then rerun PTxray." "stig:V-215208 cis-l1"
+  elif [ "$STAT" = "active" ] && [ "${NTPS:-0}" -ge 1 ]; then
     add config ntp "Time synchronization (NTP)" PASS med "xntpd active, $NTPS server(s)" \
         "The clock is disciplined by NTP — log correlation, Kerberos and TLS all depend on it." "n/a" "stig:V-215208 cis-l1"
   else

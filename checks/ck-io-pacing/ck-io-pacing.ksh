@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -385,23 +409,46 @@ _AIXRAY_SESSION_KEYS=""
   # starve interactive I/O; set (e.g. 8193/4096) caps any one file's pending writes.
   function ipart { typeset v; v=${1%.*}; case "$v" in ''|*[!0-9-]*) v=0;; esac; echo "$v"; }
 
-  typeset MAXPOUT MINPOUT MAXPI2
-  SYS0=$(aix lsattr_sys0 lsattr -El sys0)
-  MAXPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="maxpout"{print $2; exit}')
-  MINPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="minpout"{print $2; exit}')
-  MAXPI2=$(ipart "$MAXPOUT")
-  if [ -z "$MAXPOUT" ]; then
-    add performance io_pacing "I/O pacing (maxpout/minpout)" WARN low "unreadable" \
-        "Could not read maxpout/minpout from lsattr -El sys0." "check 'lsattr -El sys0 -a maxpout -a minpout' manually."
-  elif [ "$MAXPI2" -eq 0 ]; then
-    add performance io_pacing "I/O pacing (maxpout/minpout)" WARN med \
-        "maxpout=$MAXPOUT, minpout=$MINPOUT (unpaced)" \
-        "I/O pacing is disabled (maxpout=0) — a single process doing a large sequential write can fill the disk write queue and starve interactive processes' I/O, so the box feels frozen under a backup or big copy." \
-        "enable pacing: 'chdev -l sys0 -a maxpout=8193 -a minpout=4096' (the AIX 7.x default; takes effect immediately)." ""
+  typeset MAXPOUT MINPOUT MAXPI2 MAXPOUT_VALID
+  SYS0=$(aix lsattr_sys0 lsattr -El sys0); SYS0_RC=$?
+  MAXPOUT=""; MINPOUT=""
+  if [ "$SYS0_RC" -eq 0 ] && [ -n "$SYS0" ]; then
+    MAXPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="maxpout"{print $2; exit}')
+    MINPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="minpout"{print $2; exit}')
+  fi
+  if [ "$SYS0_RC" -ne 0 ] || [ -z "$SYS0" ]; then
+    add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+        "not assessed — lsattr probe failed (rc=$SYS0_RC out=${#SYS0})" \
+        "I/O pacing cannot be assessed because the sys0 attributes were not captured." \
+        "run 'lsattr -El sys0 -a maxpout -a minpout' manually and investigate the failed probe." ""
+  elif [ -z "$MAXPOUT" ] || [ -z "$MINPOUT" ]; then
+    add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+        "not assessed — maxpout/minpout fields unreadable" \
+        "I/O pacing cannot be assessed because lsattr omitted one or both pacing attributes." \
+        "run 'lsattr -El sys0 -a maxpout -a minpout' manually and verify both values." ""
   else
-    add performance io_pacing "I/O pacing (maxpout/minpout)" PASS low \
-        "maxpout=$MAXPOUT, minpout=$MINPOUT (paced)" \
-        "System-wide I/O pacing is configured, so a runaway writer cannot monopolize a disk and starve interactive I/O." "n/a"
+    case "$MAXPOUT:$MINPOUT" in
+      *[!0-9:]*|:*|*:) MAXPOUT_VALID=0;;
+      *) MAXPOUT_VALID=1;;
+    esac
+    if [ "$MAXPOUT_VALID" -ne 1 ]; then
+      add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+          "not assessed — maxpout/minpout values are malformed" \
+          "I/O pacing cannot be assessed because lsattr returned non-numeric pacing values." \
+          "run 'lsattr -El sys0 -a maxpout -a minpout' manually and verify both values." ""
+    else
+      MAXPI2=$(ipart "$MAXPOUT")
+      if [ "$MAXPI2" -eq 0 ]; then
+        add performance io_pacing "I/O pacing (maxpout/minpout)" WARN med \
+            "maxpout=$MAXPOUT, minpout=$MINPOUT (unpaced)" \
+            "I/O pacing is disabled (maxpout=0) — a single process doing a large sequential write can fill the disk write queue and starve interactive processes' I/O, so the box feels frozen under a backup or big copy." \
+            "enable pacing: 'chdev -l sys0 -a maxpout=8193 -a minpout=4096' (the AIX 7.x default; takes effect immediately)." ""
+      else
+        add performance io_pacing "I/O pacing (maxpout/minpout)" PASS low \
+            "maxpout=$MAXPOUT, minpout=$MINPOUT (paced)" \
+            "System-wide I/O pacing is configured, so a runaway writer cannot monopolize a disk and starve interactive I/O." "n/a"
+      fi
+    fi
   fi
 }
 

@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -416,18 +440,31 @@ if [ "$PRTCONF_RC" -ne 0 ]; then PRTCONF=""; fi
     UAKGEN=$(printf '%s\n' "$HW_GEN" | awk -F'|' -v tm="$UAKGEN_TM" 'NF>=3 {p=$1; gsub(/\./,"\\.",p); gsub(/\*/,".*",p); if (tm ~ "^"p"$") {print $2; exit}}')
   fi
   # hw_gen — is the hardware generation still supported?
-  MODEL=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/^System Model/{print $2; exit}')
+  MODEL=""
+  if [ "$PRTCONF_RC" -eq 0 ] && [ -n "$PRTCONF" ]; then
+    MODEL=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/^System Model/{print $2; exit}')
+  fi
   TM=${MODEL#IBM,}
   UC_MODEL="$TM"
   # fully-virtual LPAR detection: a physical I/O adapter is one whose lsdev
   # description names a physical bus ("PCI"/"PCIe"). Virtual adapters ("Virtual …")
   # and pseudo-devices (hdcrypt, pkcs11) do not — so no PCI line (or no adapters
   # at all) means this LPAR has no physical hardware of its own to maintain.
-  LSADPH=$(aix lsdev_adapter lsdev -c adapter)
-  PHYSADP=$(printf '%s\n' "$LSADPH" | awk 'NF && /PCI/{n++} END{print n+0}')
-  if [ -z "$TM" ]; then
-    add lifecycle hw_gen "Hardware generation" WARN low "unknown" \
-        "Could not read the machine type/model from prtconf." "check 'prtconf | grep Model' or the HMC." "ffiec:II.C.11"
+  LSADPH=$(aix lsdev_adapter lsdev -c adapter); LSADPH_RC=$?
+  PHYSADP=""
+  if [ "$LSADPH_RC" -eq 0 ] && [ -n "$LSADPH" ]; then
+    PHYSADP=$(printf '%s\n' "$LSADPH" | awk 'NF && /PCI/{n++} END{print n+0}')
+  fi
+  if [ "$PRTCONF_RC" -ne 0 ] || [ -z "$PRTCONF" ] || [ -z "$TM" ]; then
+    add lifecycle hw_gen "Hardware generation" NOT_ASSESSED med \
+        "not assessed — prtconf model evidence unreadable (rc=$PRTCONF_RC out=${#PRTCONF})" \
+        "Hardware support cannot be assessed because the machine type/model was not captured." \
+        "run 'prtconf | grep Model' manually or inspect the partition on the HMC." "ffiec:II.C.11"
+  elif [ "$LSADPH_RC" -ne 0 ] || [ -z "$LSADPH" ] || [ -z "$PHYSADP" ]; then
+    add lifecycle hw_gen "Hardware generation" NOT_ASSESSED med \
+        "not assessed — adapter inventory unreadable (rc=$LSADPH_RC out=${#LSADPH})" \
+        "Hardware support cannot be graded safely because physical-versus-virtual adapter ownership was not established." \
+        "run 'lsdev -c adapter' manually and verify whether this LPAR owns physical PCI adapters." "ffiec:II.C.11"
   else
     ROW=$(printf '%s\n' "$HW_GEN" | awk -F'|' -v tm="$TM" 'NF>=3 {p=$1; gsub(/\./,"\\.",p); gsub(/\*/,".*",p); if (tm ~ "^"p"$") {print; exit}}')
     GEN=$(printf '%s' "$ROW" | awk -F'|' '{print $2}')

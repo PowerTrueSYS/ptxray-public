@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -382,8 +406,13 @@ AIXRAY_TOOL=ck-world-writable
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   # world_writable (scope bounded to /etc and /usr/local/bin on purpose)
-  WW=$(aix find_ww find /etc /usr/local/bin -xdev -type f -perm -002)
-  if [ -n "$WW" ]; then
+  WW=$(aix find_ww find /etc /usr/local/bin -xdev -type f -perm -002 -print); WWRC=$?
+  if [ "$WWRC" -ne 0 ]; then
+    add security world_writable "World-writable files" NOT_ASSESSED high \
+        "not assessed — bounded world-writable scan failed (rc=$WWRC)" \
+        "The bounded find probe failed, so an empty result cannot establish that no world-writable files exist." \
+        "run the bounded find manually, resolve the error, then rerun PTxray." "cis-l1"
+  elif [ -n "$WW" ]; then
     WWN=$(printf '%s\n' "$WW" | awk 'NR<=3{printf "%s%s",(NR>1?", ":""),$0} END{if(NR>3)printf " +%d more",NR-3}')
     add security world_writable "World-writable files" WARN high "$WWN" \
         "World-writable files in /etc and /usr/local/bin (scope bounded to those on purpose) let any user alter system content." \

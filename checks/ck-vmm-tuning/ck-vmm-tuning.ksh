@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -382,41 +406,41 @@ AIXRAY_TOOL=ck-vmm-tuning
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   typeset MINRAW MAXRAW MAXCRAW NUMPRAW MINP MAXP MAXC NUMP MINPI MAXPI MAXCI NUMPI VMVRC
-
-function valid_pct_decimal {
-    printf '%s\n' "$1" | awk -v max="$2" '
-      NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {
-        if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1
-      }
-      END{exit ok?0:1}'
-  }
+  typeset MINRAW_VALID MAXRAW_VALID MAXCRAW_VALID NUMPRAW_VALID
 
   PERF_MINPERM_DEF=3; PERF_MAXPERM_DEF=90; PERF_MAXCLIENT_DEF=90
-
-function vmv { printf '%s\n' "$VMV" | awk -v re="$1" '$0 ~ re {print $1+0; exit}'; }
-function vmvraw { printf '%s\n' "$VMV" | awk -v re="$1" '$0 ~ re {print $1; exit}'; }
-function ipart { typeset v; v=${1%.*}; case "$v" in ''|*[!0-9-]*) v=0;; esac; echo "$v"; }
 
   VMV=$(aix vmstat_v vmstat -v); VMVRC=$?
 
   # Veteran signal: maxperm very low starves file cache (disk re-reads); numperm pinned at
   # maxperm evicts computational pages; off-default values should be intentional.
-  MINRAW=$(vmvraw 'minperm percentage'); MAXRAW=$(vmvraw 'maxperm percentage')
-  MAXCRAW=$(vmvraw 'maxclient percentage'); NUMPRAW=$(vmvraw 'numperm percentage')
+  MINRAW=$(printf '%s\n' "$VMV" | awk '/minperm percentage/ {print $1; exit}')
+  MAXRAW=$(printf '%s\n' "$VMV" | awk '/maxperm percentage/ {print $1; exit}')
+  MAXCRAW=$(printf '%s\n' "$VMV" | awk '/maxclient percentage/ {print $1; exit}')
+  NUMPRAW=$(printf '%s\n' "$VMV" | awk '/numperm percentage/ {print $1; exit}')
+  MINRAW_VALID=$(printf '%s\n' "$MINRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  MAXRAW_VALID=$(printf '%s\n' "$MAXRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  MAXCRAW_VALID=$(printf '%s\n' "$MAXCRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  NUMPRAW_VALID=$(printf '%s\n' "$NUMPRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
   if [ "$VMVRC" -ne 0 ] ||
-     ! valid_pct_decimal "$MINRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$MAXRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$MAXCRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$NUMPRAW" "$STOR_FACT_MAX_USED_PCT"; then
+     [ "$MINRAW_VALID" -ne 1 ] ||
+     [ "$MAXRAW_VALID" -ne 1 ] ||
+     [ "$MAXCRAW_VALID" -ne 1 ] ||
+     [ "$NUMPRAW_VALID" -ne 1 ]; then
     add performance vmm_tuning "VMM cache tuning" WARN low "unreadable" \
         "VMM cache tuning not assessed — vmstat -v returned a failed capture or an unreadable/implausible minperm, maxperm, maxclient, or numperm percentage." \
         "check 'vmstat -v' and 'vmo -a' manually before relying on the cache-tuning result."
   else
     # Preserve the existing normalized prose after the raw tokens pass the
     # percentage evidence gate; vmv's numeric rendering drops cosmetic .0.
-    MINP=$(vmv 'minperm percentage'); MAXP=$(vmv 'maxperm percentage')
-    MAXC=$(vmv 'maxclient percentage'); NUMP=$(vmv 'numperm percentage')
-    MINPI=$(ipart "$MINP"); MAXPI=$(ipart "$MAXP"); MAXCI=$(ipart "$MAXC"); NUMPI=$(ipart "$NUMP")
+    MINP=$(printf '%s\n' "$VMV" | awk '/minperm percentage/ {print $1+0; exit}')
+    MAXP=$(printf '%s\n' "$VMV" | awk '/maxperm percentage/ {print $1+0; exit}')
+    MAXC=$(printf '%s\n' "$VMV" | awk '/maxclient percentage/ {print $1+0; exit}')
+    NUMP=$(printf '%s\n' "$VMV" | awk '/numperm percentage/ {print $1+0; exit}')
+    MINPI=${MINP%.*}
+    MAXPI=${MAXP%.*}
+    MAXCI=${MAXC%.*}
+    NUMPI=${NUMP%.*}
     if [ "${MAXPI:-0}" -le 0 ]; then
       add performance vmm_tuning "VMM cache tuning" WARN low "unreadable" \
           "VMM cache tuning not assessed — maxperm from vmstat -v is not a usable positive ceiling." \

@@ -1806,16 +1806,15 @@ V-215430|no|bcastping|eq|0
 # R_SVCOFF — static service-shutdown rules (Family 4, WP-H3).
 #   V-ID|type|name   (type inetd = the inetd.conf service token 'name' must NOT appear enabled/
 #   uncommented in /etc/inetd.conf; type rctcp = an uncommented start command for daemon 'name'
-#   must NOT appear in /etc/rc.tcpip; type lssrc = SRC subsystem 'name' must be inoperative per
-#   'lssrc -a'). For a disable-service rule the STIG treats "service enabled/running" as the
-#   finding, so a token/start command that is absent/commented (or a subsystem inoperative/
-#   undefined) is compliant = PASS, not NA. All captures are non-root reads. This is the broad
+#   must NOT appear in /etc/rc.tcpip). For a disable-service rule the STIG treats "service
+#   enabled/running" as the finding, so an absent/commented token or start command is compliant
+#   = PASS, not NA. All captures are non-root reads. This is the broad
 #   per-V-ID STIG service list; it does NOT duplicate the inetd_cleartext check (which flags
 #   cleartext-LOGIN daemons enabled). Every row transcribed from the DISA STIG Check/Fix text via
 #   the cyber.trackr.live structured API (verbatim XCCDF). HONEST count: 30 inetd.conf disable
 # network-lint: allow-next=5 -- STIG explanatory prose, not network command invocations
 #   rules plus 7 /etc/rc.tcpip boot-daemon rules; the AIX 7.x STIG V3R3 has ZERO pure
-#   lssrc-subsystem disable rules (the engine still supports the lssrc type for completeness).
+#   lssrc-subsystem disable rules, so the grouped check performs no lssrc probe.
 #   The inetd first-field TOKEN is used, not the daemon name (rexec's token is 'exec', rsh's is
 #   'shell', rlogin's is 'login'). NOTES:
 #   V-215334 (high) and V-215386 (med) are two distinct real V-IDs with the same 'tftp' token —
@@ -1936,8 +1935,8 @@ function aix {
 
 # aix_capture_missing <key> — fixture-replay helper: true (rc=0) iff no capture
 # exists for <key> at all, i.e. the rc a probe just received was the "no
-# capture" default and not a genuine command status. aix()/aixv()/aixv_confirmed()
-# return 127 for BOTH a missing capture and a genuinely absent command, so a
+# capture" default and not a genuine command status. aix()/aixv() return 127
+# for BOTH a missing capture and a genuinely absent command, so a
 # module that wants to claim "the command is not installed" must first rule out
 # "nobody captured it". Live mode and capture mode return false (rc=1): a real
 # box has no concept of a missing fixture, and rc=127 there genuinely means the
@@ -1965,7 +1964,7 @@ function aix_capture_missing {
 # command-substitution variable.
 function count_nonempty_lines {
   {
-    "$@"
+    "$@" 2>&1
     printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
   } | awk '
     /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
@@ -2024,56 +2023,6 @@ function aixv {
     else
       rm -f "$AIXRAY_CAPTURE_DIR/$key.rc"
     fi
-    cat "$AIXRAY_CAPTURE_DIR/$key.out"
-    cat "$AIXRAY_CAPTURE_DIR/$key.err"
-    return $rc
-  fi
-  "$@" 2>&1
-}
-
-# aixv_confirmed <key> <command> [args...] — like aixv() above, but for a caller that must
-# tell a GENUINELY CONFIRMED rc=0 (an explicit <key>.rc file was actually present and read)
-# apart from an ASSUMED rc=0 (no <key>.rc file existed at all -- aixv()'s own documented
-# default, indistinguishable from a real rc=0 to every existing caller). Only matters in
-# fixture-replay mode: a LIVE command invocation always returns ITS OWN real exit code, so
-# this function behaves IDENTICALLY to aixv() on the live path -- 126 is a fixture-replay-
-# only sentinel meaning "no completion signal was recorded for this capture at all," never
-# something a live command itself returns for this reason (adversarial confirming review,
-# 2026-07-14, HIGH: 'rc=0 + empty output' is genuinely, unavoidably ambiguous between a
-# real clean result and a wholesale capture-session failure that left BOTH a primary
-# command AND its own corroborating cross-check equally empty with no recorded rc --
-# no purely-textual signal from either capture's OWN content can ever tell these apart;
-# only a distinct sentinel for "we were never told" closes this, and ONLY for callers that
-# opt into it). Existing 'aix()'/'aixv()' callers are completely untouched -- this is a
-# new, additive function, not a change to either's documented default behavior (which the
-# vast majority of this repo's fixtures rely on implicitly and would otherwise all need a
-# newly-required .rc file, a disproportionate blast-radius change out of scope here).
-function aixv_confirmed {
-  typeset key rc
-  key=$1; shift
-  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
-    if [ -r "$AIXRAY_FIXTURES/$key.out" ] || [ -r "$AIXRAY_FIXTURES/$key.err" ]; then
-      [ -r "$AIXRAY_FIXTURES/$key.out" ] && cat "$AIXRAY_FIXTURES/$key.out"
-      [ -r "$AIXRAY_FIXTURES/$key.err" ] && cat "$AIXRAY_FIXTURES/$key.err"
-      if [ -r "$AIXRAY_FIXTURES/$key.rc" ]; then
-        read rc < "$AIXRAY_FIXTURES/$key.rc"
-      else
-        rc=126
-      fi
-      return $rc
-    fi
-    return 127
-  fi
-  # Capture mode — same gap as aixv(), but the .rc rule is DIFFERENT and the
-  # difference is the whole point of this wrapper. aix()/aixv() omit .rc on
-  # success as a space optimisation, and their replay defaults a missing .rc to
-  # rc=0. This function deliberately treats a missing .rc as 126 ("no completion
-  # signal was ever recorded"), so borrowing that optimisation would make every
-  # successful capture replay as an unconfirmed one. Always write .rc here.
-  if [ -n "${AIXRAY_CAPTURE_DIR:-}" ]; then
-    "$@" > "$AIXRAY_CAPTURE_DIR/$key.out" 2> "$AIXRAY_CAPTURE_DIR/$key.err"
-    rc=$?
-    echo "$rc" > "$AIXRAY_CAPTURE_DIR/$key.rc"
     cat "$AIXRAY_CAPTURE_DIR/$key.out"
     cat "$AIXRAY_CAPTURE_DIR/$key.err"
     return $rc
@@ -3751,8 +3700,9 @@ FACT_PARTITION_NAME=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/^LPAR Info:/{s=$2
 
 function checks_lifecycle {
   typeset EOS EOSJ LATEST CURTL LTL BEHIND EOSPS ST MEAN FW MODEL TM ROW GEN HWEOS IOSL RC
-  typeset UPTEXT PATHSUF FWFAM FWMT FWROW CURFAM CURN BOXN SEV FIX OBS LSADPH PHYSADP
+  typeset UPTEXT PATHSUF FWFAM FWMT FWROW CURFAM CURN BOXN SEV FIX OBS LSADPH LSADPHRC PHYSADP
   typeset RELEASE_OUT RELEASE_NEEDS_UPGRADE TLFIX EOSPS_OUT EOSPS_NEAR
+  typeset AIXUAK_Y AIXUAK_MD AIXUAK_M AIXUAK_D
 
   RELEASE_OUT=0
   RELEASE_NEEDS_UPGRADE=0
@@ -3765,7 +3715,10 @@ function checks_lifecycle {
   # On a VIOS the underlying AIX release is a SECONDARY signal: a VIOS admin patches with
   # 'updateios'/viosupgrade, not update_all/smitty. Say so wherever we hand out AIX-level
   # remediation, and point back to vios_level as the primary currency signal.
-  [ "$IS_VIOS" -eq 1 ] && PATHSUF="$PATHSUF On a VIOS this AIX level is secondary — patch the VIOS with 'updateios' (or viosupgrade), not update_all; the VIOS level (vios_level, above) is the primary currency signal."
+  if [ "$VIOS_MARKER_RC" -eq 0 ] && [ -n "$VIOS_MARKER" ] &&
+     [ "$VIOS_MARKER_MATCH" -eq 1 ] && [ "$VIOS_MARKER_NONEMPTY" -eq 1 ]; then
+    PATHSUF="$PATHSUF On a VIOS this AIX level is secondary — patch the VIOS with 'updateios' (or viosupgrade), not update_all; the VIOS level (vios_level, above) is the primary currency signal."
+  fi
 
   # os_level — is this AIX release still supported at all?
   if [ -z "$OSLEVEL" ]; then
@@ -4062,7 +4015,13 @@ function checks_lifecycle {
   fi
   AIXUAKISO=""
   case "$AIXUAKRAW" in
-    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) AIXUAKISO=$(yyyymmdd2iso "$AIXUAKRAW");;
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+      AIXUAK_Y=${AIXUAKRAW%????}
+      AIXUAK_MD=${AIXUAKRAW#????}
+      AIXUAK_M=${AIXUAK_MD%??}
+      AIXUAK_D=${AIXUAKRAW#??????}
+      AIXUAKISO="${AIXUAK_Y}-${AIXUAK_M}-${AIXUAK_D}"
+      ;;
   esac
   if [ -n "$AIXUAKISO" ] && [ "$(valid_ymd "$AIXUAKISO")" -eq 1 ]; then
     FACT_AIX_UAK_EXPIRY="$AIXUAKISO"
@@ -4154,18 +4113,31 @@ function checks_lifecycle {
   F_EVIDENCE_COMMANDS[$((NFIND-1))]="$FACT_AIX_UAK_COMMANDS"
 
   # hw_gen — is the hardware generation still supported?
-  MODEL=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/^System Model/{print $2; exit}')
+  MODEL=""
+  if [ "$PRTCONF_RC" -eq 0 ] && [ -n "$PRTCONF" ]; then
+    MODEL=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/^System Model/{print $2; exit}')
+  fi
   TM=${MODEL#IBM,}
   UC_MODEL="$TM"
   # fully-virtual LPAR detection: a physical I/O adapter is one whose lsdev
   # description names a physical bus ("PCI"/"PCIe"). Virtual adapters ("Virtual …")
   # and pseudo-devices (hdcrypt, pkcs11) do not — so no PCI line (or no adapters
   # at all) means this LPAR has no physical hardware of its own to maintain.
-  LSADPH=$(aix lsdev_adapter lsdev -c adapter)
-  PHYSADP=$(printf '%s\n' "$LSADPH" | awk 'NF && /PCI/{n++} END{print n+0}')
-  if [ -z "$TM" ]; then
-    add lifecycle hw_gen "Hardware generation" WARN low "unknown" \
-        "Could not read the machine type/model from prtconf." "check 'prtconf | grep Model' or the HMC." "ffiec:II.C.11"
+  LSADPH=$(aix lsdev_adapter lsdev -c adapter); LSADPHRC=$?
+  PHYSADP=""
+  if [ "$LSADPHRC" -eq 0 ] && [ -n "$LSADPH" ]; then
+    PHYSADP=$(printf '%s\n' "$LSADPH" | awk 'NF && /PCI/{n++} END{print n+0}')
+  fi
+  if [ "$PRTCONF_RC" -ne 0 ] || [ -z "$PRTCONF" ] || [ -z "$TM" ]; then
+    add lifecycle hw_gen "Hardware generation" NOT_ASSESSED med \
+        "not assessed — prtconf model evidence unreadable (rc=$PRTCONF_RC out=${#PRTCONF})" \
+        "Hardware support cannot be assessed because the machine type/model was not captured." \
+        "run 'prtconf | grep Model' manually or inspect the partition on the HMC." "ffiec:II.C.11"
+  elif [ "$LSADPHRC" -ne 0 ] || [ -z "$LSADPH" ] || [ -z "$PHYSADP" ]; then
+    add lifecycle hw_gen "Hardware generation" NOT_ASSESSED med \
+        "not assessed — adapter inventory unreadable (rc=$LSADPHRC out=${#LSADPH})" \
+        "Hardware support cannot be graded safely because physical-versus-virtual adapter ownership was not established." \
+        "run 'lsdev -c adapter' manually and verify whether this LPAR owns physical PCI adapters." "ffiec:II.C.11"
   else
     ROW=$(printf '%s\n' "$HW_GEN" | awk -F'|' -v tm="$TM" 'NF>=3 {p=$1; gsub(/\./,"\\.",p); gsub(/\*/,".*",p); if (tm ~ "^"p"$") {print; exit}}')
     GEN=$(printf '%s' "$ROW" | awk -F'|' '{print $2}')
@@ -4344,6 +4316,7 @@ function checks_patch {
   typeset T W BJ AGE AGEMO TOTALFS BROKEN BLIST EOUT RC N LABELS NAPP MISS APAR PREF CVE TITLE IOUT LSSL SSHV SSLV
   typeset JAVALP HAS7 HAS8 V7 V8 RESULT NEXP APPLIC NAMES DVJ DVAGE
   typeset completion_disclosure completion_state COMPLETION_NOTE
+  typeset LPPCHKOUT LPPCHK_RC LPPCHKCOUNT LPPCHKCOUNT_RC LPPCHKM3COUNT LPPCHKM3_RC
 
   # patch_age — how old is the installed build?
   if [ -n "$BWEEK" ]; then
@@ -4374,7 +4347,7 @@ function checks_patch {
   # 1=package 2=fileset 3=level 6=state (C=Committed, A=Applied, B=BROKEN, O=Obsolete).
   # A colon inside the later Description field (8) cannot shift fields 1-6, so -F: is
   # stable. Grounded live on a lab LPAR (lslpp -qcL bos.rte -> field 6 = state).
-  LSLPPQ=$(aixv_confirmed lslpp_qcL lslpp -qcL); LSLPPQ_RC=$?   # colon form drives the fileset-state parse; the
+  LSLPPQ=$(aixv lslpp_qcL lslpp -qcL); LSLPPQ_RC=$?   # colon form drives the fileset-state parse; the
   # exit status is kept because the FLRTVC invoke path below must refuse to run against a FAILED
   # inventory capture — an empty/garbled -l input reads to flrtvc.ksh as "nothing installed", which
   # an exit-0 clean report would then convert into a false PASS (adversarial review round 5, item 2).
@@ -4413,42 +4386,34 @@ function checks_patch {
   # call spelled '2>&1' but 'aix()' had already redirected the real command's stderr to
   # /dev/null internally before that '2>&1' ever ran, so an rc=0 stderr-only diagnostic was
   # laundered into a false clean PASS -- see 'aixv's own header comment).
-  LPPCHKOUT=$(aixv_confirmed lppchk_v lppchk -v); LPPCHK_RC=$?
+  LPPCHKOUT=$(aixv lppchk_v lppchk -v); LPPCHK_RC=$?
   # rc 127 means "command/fixture absent" (this codebase's established convention, e.g. the
   # 'ifixes' check above) -- a MISSING result must degrade to WARN "not assessed," never a
   # confident FAIL. Caught live during this check's own test-suite run (round 1 self-review):
   # every fixture set that has no 'lppchk_v.out' fixture file initially reported a false FAIL
   # "inconsistent (rc=127)" instead of the honest "could not run" -- exactly the NOT_ASSESSED-
   # laundered-into-a-verdict defect class this repo's own discipline exists to catch before
-  # shipping, not after. Uses 'aixv_confirmed' (not the plain 'aixv') so an rc=0 that was only
-  # EVER assumed (no <key>.rc file recorded at all) can never be treated identically to a
-  # GENUINELY confirmed rc=0 -- see 'aixv_confirmed's own header comment (adversarial confirming
-  # review, 2026-07-14, HIGH: 'rc=0 + empty output' is genuinely ambiguous between a real
-  # clean result and a wholesale capture-session failure, and no purely-textual corroboration
-  # -- however many independent-looking signals -- can rule out a failure mode that empties
-  # ALL of them identically; only a genuine, distinctly-recorded completion signal closes
-  # this, on the CAPTURE THIS CHECK ITSELF DEPENDS ON, not merely a related one).
+  # shipping, not after. A clean-looking empty capture is corroborated below with
+  # count_nonempty_lines, whose numeric stdout is a positive completion signal recorded by the
+  # ordinary read-only capture spine; no check-local capture writer is needed.
   if [ "$LPPCHK_RC" -eq 127 ]; then
     add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" WARN low "unreadable" \
         "Could not run 'lppchk -v' on this box." "check 'lppchk -v' manually."
   elif [ "$LPPCHK_RC" -eq 0 ] && [ -z "$LPPCHKOUT" ]; then
-    # rc=0 here is a GENUINELY CONFIRMED reading (aixv_confirmed's 126 sentinel, meaning "no
-    # completion signal was ever recorded," would already have failed this exact equality
-    # test) -- "rc=0, no output" is lppchk -v's own documented clean-success shape, and this
-    # is now a real completion signal for THIS capture, not an assumption. A second,
-    # independent invocation ('lppchk -m3 -v', the documented escalation), ALSO required to
-    # be genuinely confirmed rc=0 with empty output (not merely assumed), plus the box's own
-    # fileset inventory clearing a small floor, corroborate further -- raising the bar over
-    # trusting a single confirmed reading alone, though not a mathematical completeness proof
-    # (disclosed honestly, same as this codebase's own FLRT apar_scan floor gate discloses
-    # its own floor is "not a completeness proof").
-    LPPCHKM3=$(aixv_confirmed lppchk_m3v lppchk -m3 -v); LPPCHKM3_RC=$?
-    if [ "$LPPCHKM3_RC" -eq 0 ] && [ -z "$LPPCHKM3" ] && [ "${LSLPPQ_RC:-1}" -eq 0 ] && [ "${TOTALFS:-0}" -ge 5 ]; then
+    # "rc=0, no output" is lppchk -v's documented clean-success shape. Re-run that
+    # exact probe and the independent '-m3 -v' escalation through count_nonempty_lines:
+    # each must emit the positive literal count 0 and return rc=0. Unlike an empty raw
+    # capture, the recorded numeric count cannot be confused with a missing capture.
+    LPPCHKCOUNT=$(aix lppchk_v_count count_nonempty_lines lppchk -v); LPPCHKCOUNT_RC=$?
+    LPPCHKM3COUNT=$(aix lppchk_m3v_count count_nonempty_lines lppchk -m3 -v); LPPCHKM3_RC=$?
+    if [ "$LPPCHKCOUNT_RC" -eq 0 ] && [ -n "$LPPCHKCOUNT" ] && [ "$LPPCHKCOUNT" = 0 ] &&
+       [ "$LPPCHKM3_RC" -eq 0 ] && [ -n "$LPPCHKM3COUNT" ] && [ "$LPPCHKM3COUNT" = 0 ] &&
+       [ "${LSLPPQ_RC:-1}" -eq 0 ] && [ "${TOTALFS:-0}" -ge 5 ]; then
       add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" PASS low "consistent" \
           "'lppchk -v' AND the independent 'lppchk -m3 -v' escalation both returned a genuinely confirmed clean result (rc=0, stdout and stderr both empty), and the fileset inventory itself ($TOTALFS filesets) is a real, populated AIX system, not an empty/truncated capture." "n/a"
     else
       add patch lppchk_consistency "Fileset dependency consistency (lppchk -v)" WARN low "not assessed — capture empty or unconfirmed" \
-          "'lppchk -v' reported no output, which is its documented clean-success shape -- but this cannot be credited as a clean scan without independent corroboration: the 'lppchk -m3 -v' cross-check returned rc=$LPPCHKM3_RC${LPPCHKM3:+ with output}, and/or the fileset inventory ('lslpp -qcL', confirmed rc=${LSLPPQ_RC:-unknown}, ${TOTALFS:-0} structurally valid row(s)) is empty, failed, token-shaped, unconfirmed, or implausibly small. Neither signal alone proves 'lppchk -v' itself actually completed; disagreement or an unconfirmed/implausible inventory means this cannot be assumed a genuine clean result." \
+          "'lppchk -v' reported no output, which is its documented clean-success shape -- but this cannot be credited as a clean scan without independent corroboration: its positive completion count was '${LPPCHKCOUNT:-missing}' (rc=$LPPCHKCOUNT_RC), the 'lppchk -m3 -v' cross-check count was '${LPPCHKM3COUNT:-missing}' (rc=$LPPCHKM3_RC), and/or the fileset inventory ('lslpp -qcL', rc=${LSLPPQ_RC:-unknown}, ${TOTALFS:-0} structurally valid row(s)) is empty, failed, token-shaped, unconfirmed, or implausibly small. Neither signal alone proves 'lppchk -v' itself actually completed; disagreement or an unconfirmed/implausible inventory means this cannot be assumed a genuine clean result." \
           "run 'lppchk -v 2>&1' and 'lppchk -m3 -v 2>&1' manually as root, and confirm 'lslpp -qcL' returns the full fileset inventory, before treating this as a clean scan."
     fi
   else
@@ -4623,12 +4588,19 @@ SEC_APARS_EOF
 
   # ssl_ssh — crypto stack filesets. Colon-delimited 'lslpp -qcL' (field 2=fileset,
   # 3=level) parses cleanly where the columnar Description column can wrap.
-  LSSL=$(aix lslpp_ssh_ssl lslpp -qcL openssh.base.server openssl.base)
+  LSSL=$(aix lslpp_ssh_ssl lslpp -qcL openssh.base.server openssl.base); LSSLRC=$?
   SSHV=$(printf '%s\n' "$LSSL" | awk -F: '$2=="openssh.base.server"{print $3; exit}')
   SSLV=$(printf '%s\n' "$LSSL" | awk -F: '$2=="openssl.base"{print $3; exit}')
-  if [ -z "$SSHV$SSLV" ]; then
-    add patch ssl_ssh "OpenSSH / OpenSSL levels" WARN med "not readable" \
-        "Could not read openssh.base.server / openssl.base levels." "inspect 'lslpp -L openssh.base.server openssl.base'."
+  if [ "$LSSLRC" -ne 0 ] || [ -z "$LSSL" ]; then
+    add patch ssl_ssh "OpenSSH / OpenSSL levels" NOT_ASSESSED med \
+        "not assessed — fileset probe failed or empty (rc=$LSSLRC)" \
+        "Could not establish openssh.base.server / openssl.base levels." \
+        "inspect 'lslpp -L openssh.base.server openssl.base', then rerun PTxray."
+  elif [ -z "$SSHV" ] || [ -z "$SSLV" ]; then
+    add patch ssl_ssh "OpenSSH / OpenSSL levels" NOT_ASSESSED med \
+        "not assessed — fileset evidence was not parseable" \
+        "The fileset probe completed but did not contain recognizable levels for both OpenSSH and OpenSSL." \
+        "inspect 'lslpp -L openssh.base.server openssl.base', then rerun PTxray."
   else
     case "${SSLV:-unknown}" in
       3.*) add patch ssl_ssh "OpenSSH / OpenSSL levels" PASS low "openssh ${SSHV:-n/a}, openssl $SSLV" \
@@ -9783,7 +9755,7 @@ function mon2num {
 function checks_resilience {
   typeset R31 R91 R31RC R91RC RC MIRRLINE NPV MIRR BL ND HAF CL STATE NIMNOTE RVGO QUOR VGL VG VGD CV RVGMISS RVGSTALE
   typeset ROOTP ROOTL ROOTPRC ROOTLRC HAFRC CLRC
-  typeset SD PRIM DUMPLV DEST ESTMB ESTGB LSDLV DPPS DPPMB DEVMB COPYDIR DFG CDFREE MARGIN
+  typeset SD SD_RC PRIM DUMPLV DEST DEST_RAW DEST_RC ESTMB ESTGB LSDLV LSDLV_RC DPPS DPPMB DEVMB COPYDIR DFG CDFREE MARGIN
   typeset NIMI NIMMASTER NIMNAME NIMCONF NIMPROBERC WB BMON BDAY BMM BYEAR BJUL KINST KMM KDD KYY KJUL
 
   # NIM awareness — a NIM-managed box may hold mksysb resources on the master
@@ -9975,12 +9947,19 @@ function checks_resilience {
   # high. See docs/DEPTH-STANDARD.md.
 
   # The dump estimate + primary device drive both dump_sizing and dump_copy_dir; read once.
-  SD=$(aix sysdumpdev_l sysdumpdev -l)
-  PRIM=$(printf '%s\n' "$SD" | awk '$1=="primary"{print $2; exit}')
-  DUMPLV=$(printf '%s\n' "$PRIM" | sed 's|^/dev/||')
+  SD=$(aix sysdumpdev_l sysdumpdev -l); SD_RC=$?
+  PRIM=""; DUMPLV=""
+  if [ "$SD_RC" -eq 0 ] && [ -n "$SD" ]; then
+    PRIM=$(printf '%s\n' "$SD" | awk '$1=="primary"{print $2; exit}')
+    DUMPLV=$(printf '%s\n' "$PRIM" | sed 's|^/dev/||')
+  fi
   # sysdumpdev -e -> "Estimated dump size in bytes: N"; take the trailing integer.
-  DEST=$(aix sysdumpdev_e sysdumpdev -e | awk '{for(i=NF;i>=1;i--) if($i ~ /^[0-9]+$/){print $i; exit}}')
-  : ${DEST:=0}
+  DEST_RAW=$(aix sysdumpdev_e sysdumpdev -e); DEST_RC=$?
+  DEST=""
+  if [ "$DEST_RC" -eq 0 ] && [ -n "$DEST_RAW" ]; then
+    DEST=$(printf '%s\n' "$DEST_RAW" | awk '{for(i=NF;i>=1;i--) if($i ~ /^[0-9]+$/){print $i; exit}}')
+  fi
+  case "$DEST" in ''|*[!0-9]*) DEST=0;; esac
   ESTMB=$(( DEST / 1048576 ))
   ESTGB=$(( (DEST + 536870912) / 1073741824 ))   # rounded GB, for plain-English text
 
@@ -9990,13 +9969,35 @@ function checks_resilience {
   # needed to root-cause the crash are gone. Read-only: 'sysdumpdev -e' estimate vs the dump
   # LV size (lslv PPs x PP SIZE). Only meaningful when a real device is configured — a
   # sysdumpnull/absent primary is already flagged under Errors -> System dump device.
-  if [ -n "$PRIM" ] && [ "$PRIM" != "/dev/sysdumpnull" ] && [ -n "$DUMPLV" ] && [ "$DEST" -gt 0 ]; then
-    LSDLV=$(aix dump_lslv lslv "$DUMPLV")
-    DPPS=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="PPs:"){print $(i+1); exit}}')
-    DPPMB=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="SIZE:"){print $(i+1); exit}}')
-    : ${DPPS:=0}; : ${DPPMB:=0}
-    DEVMB=$(( DPPS * DPPMB ))
-    if [ "$DEVMB" -gt 0 ]; then
+  if [ "$SD_RC" -ne 0 ] || [ -z "$SD" ]; then
+    add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+        "not assessed — sysdumpdev -l probe failed (rc=$SD_RC out=${#SD})" \
+        "Dump-device capacity cannot be assessed because the primary device configuration was not captured." \
+        "run 'sysdumpdev -l' manually and investigate why the probe failed." "ffiec:II.C.21"
+  elif [ "$DEST_RC" -ne 0 ] || [ -z "$DEST_RAW" ] || [ "$DEST" -le 0 ]; then
+    add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+        "not assessed — dump estimate unreadable (rc=$DEST_RC out=${#DEST_RAW})" \
+        "Dump-device capacity cannot be assessed because sysdumpdev did not provide a usable positive dump-size estimate." \
+        "run 'sysdumpdev -e' manually and investigate the failed or malformed estimate." "ffiec:II.C.21"
+  elif [ -n "$PRIM" ] && [ "$PRIM" != "/dev/sysdumpnull" ] && [ -n "$DUMPLV" ]; then
+    LSDLV=$(aix dump_lslv lslv "$DUMPLV"); LSDLV_RC=$?
+    if [ "$LSDLV_RC" -ne 0 ] || [ -z "$LSDLV" ]; then
+      add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+          "not assessed — lslv probe failed for $DUMPLV (rc=$LSDLV_RC out=${#LSDLV})" \
+          "Dump-device capacity cannot be assessed because the configured dump LV size was not captured." \
+          "run 'lslv $DUMPLV' manually and investigate why the probe failed." "ffiec:II.C.21"
+    else
+      DPPS=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="PPs:"){print $(i+1); exit}}')
+      DPPMB=$(printf '%s\n' "$LSDLV" | awk '{for(i=1;i<=NF;i++) if($i=="SIZE:"){print $(i+1); exit}}')
+      case "$DPPS:$DPPMB" in
+        *[!0-9:]*|:*|*:|0:*|*:0)
+          add resilience dump_sizing "Dump device sizing" NOT_ASSESSED high \
+              "not assessed — lslv size fields unreadable for $DUMPLV" \
+              "Dump-device capacity cannot be assessed because lslv did not provide usable PP count and PP size fields." \
+              "run 'lslv $DUMPLV' manually and verify the PP count and PP SIZE fields." "ffiec:II.C.21"
+          ;;
+        *)
+          DEVMB=$(( DPPS * DPPMB ))
       if [ "$DEVMB" -lt "$ESTMB" ]; then
         add resilience dump_sizing "Dump device sizing" WARN high "device ${DEVMB} MB < estimated dump ${ESTMB} MB" \
             "The primary dump device ($DUMPLV, ${DEVMB} MB) is smaller than the estimated dump for this LPAR's memory (${ESTMB} MB). If the box panics the dump truncates when the device fills, and the forensics you need to root-cause the crash are lost with it. This is the landmine you only find AFTER the crash." \
@@ -10009,6 +10010,8 @@ function checks_resilience {
         add resilience dump_sizing "Dump device sizing" PASS low "device ${DEVMB} MB covers estimated dump ${ESTMB} MB" \
             "The primary dump device ($DUMPLV, ${DEVMB} MB) is comfortably larger than the estimated dump for this LPAR (${ESTMB} MB), so a panic can capture a complete image. Re-check 'sysdumpdev -e' after any memory increase — the estimate tracks RAM." "n/a"
       fi
+          ;;
+      esac
     fi
 
     # dump_copy_dir — the copy directory must have room for a dump of the estimated size.
@@ -10075,27 +10078,40 @@ function checks_resilience {
   # boot as a proxy and says so. Veteran signal: if the kernel fileset is NEWER than the last
   # boot, the running kernel is the pre-update one and a reboot is pending — confirm a bosboot
   # was run so the boot image carries the patched kernel before that reboot.
-  KINST=$(aix lslpp_h_kernel lslpp -h bos.mp64 | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-1][0-9]\/[0-3][0-9]\/[0-9][0-9]$/){print $i; exit}}')
-  WB=$(aix who_b who -b)
-  BMON=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+1); exit}}')
-  BDAY=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+2); exit}}')
-  BMM=$(mon2num "${BMON:-}")
-  if [ -n "$KINST" ] && [ -n "$BMM" ] && [ -n "$BDAY" ]; then
-    KMM=$(printf '%s' "$KINST" | cut -d/ -f1)
-    KDD=$(printf '%s' "$KINST" | cut -d/ -f2)
-    KYY=$(printf '%s' "$KINST" | cut -d/ -f3)
-    KJUL=$(d2j "20$KYY-$KMM-$KDD")
-    BYEAR=${TODAY%%-*}
-    BJUL=$(d2j "$BYEAR-$BMM-$BDAY")
-    # who -b has no year; if the inferred date lands in the future it must be last year.
-    [ "$BJUL" -gt $(( TODAY_J + 2 )) ] && BJUL=$(d2j "$(( BYEAR - 1 ))-$BMM-$BDAY")
-    if [ "$KJUL" -gt "$BJUL" ]; then
-      add resilience bosboot_currency "Boot image currency" WARN med "kernel bos.mp64 installed $KINST, after last boot $BMON $BDAY" \
-          "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (PTxray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
-          "confirm a bosboot was applied for the new kernel ('bosboot -av' if unsure — it rebuilds the hd5 boot image) and schedule the pending reboot; verify the boot device with 'bootlist -m normal -o'." "ffiec:II.C.21"
+  KRAW=$(aix lslpp_h_kernel lslpp -h bos.mp64); KRAW_RC=$?
+  WB=$(aix who_b who -b); WB_RC=$?
+  if [ "$KRAW_RC" -ne 0 ] || [ "$WB_RC" -ne 0 ]; then
+    add resilience bosboot_currency "Boot image currency" NOT_ASSESSED med \
+        "kernel-history rc=$KRAW_RC, last-boot rc=$WB_RC" \
+        "PTxray could not obtain both read-only inputs needed to compare the installed kernel date with the last boot, so boot-image currency was not assessed." \
+        "make 'lslpp -h bos.mp64' and 'who -b' readable, then rerun PTxray." "ffiec:II.C.21"
+  else
+    KINST=$(printf '%s\n' "$KRAW" | awk '{for(i=1;i<=NF;i++) if($i ~ /^[0-1][0-9]\/[0-3][0-9]\/[0-9][0-9]$/){print $i; exit}}')
+    BMON=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+1); exit}}')
+    BDAY=$(printf '%s\n' "$WB" | awk '{for(i=1;i<=NF;i++) if($i=="boot"){print $(i+2); exit}}')
+    BMM=$(mon2num "${BMON:-}")
+    if [ -z "$KINST" ] || [ -z "$BMM" ] || [ -z "$BDAY" ]; then
+      add resilience bosboot_currency "Boot image currency" NOT_ASSESSED med \
+          "kernel install date or last-boot date was missing or unparseable" \
+          "PTxray obtained the read-only command output but could not parse both dates needed to compare the installed kernel with the last boot, so boot-image currency was not assessed." \
+          "review 'lslpp -h bos.mp64' and 'who -b' output, correct the evidence problem, then rerun PTxray." "ffiec:II.C.21"
     else
-      add resilience bosboot_currency "Boot image currency" PASS low "booted $BMON $BDAY, after kernel bos.mp64 install $KINST" \
-          "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (PTxray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
+      KMM=$(printf '%s' "$KINST" | cut -d/ -f1)
+      KDD=$(printf '%s' "$KINST" | cut -d/ -f2)
+      KYY=$(printf '%s' "$KINST" | cut -d/ -f3)
+      KJUL=$(d2j "20$KYY-$KMM-$KDD")
+      BYEAR=${TODAY%%-*}
+      BJUL=$(d2j "$BYEAR-$BMM-$BDAY")
+      # who -b has no year; if the inferred date lands in the future it must be last year.
+      [ "$BJUL" -gt $(( TODAY_J + 2 )) ] && BJUL=$(d2j "$(( BYEAR - 1 ))-$BMM-$BDAY")
+      if [ "$KJUL" -gt "$BJUL" ]; then
+        add resilience bosboot_currency "Boot image currency" WARN med "kernel bos.mp64 installed $KINST, after last boot $BMON $BDAY" \
+            "The kernel fileset (bos.mp64) was installed AFTER the system last booted ($BMON $BDAY), so the box is still running the pre-update kernel and a reboot is pending. If a bosboot was not run as part of that update the boot image on hd5 is stale — the box could boot the old kernel or, worse, fail to boot the patched one. (PTxray is read-only and cannot inspect the boot image itself; this compares install date to last boot as a proxy — see below.)" \
+            "confirm a bosboot was applied for the new kernel ('bosboot -av' if unsure — it rebuilds the hd5 boot image) and schedule the pending reboot; verify the boot device with 'bootlist -m normal -o'." "ffiec:II.C.21"
+      else
+        add resilience bosboot_currency "Boot image currency" PASS low "booted $BMON $BDAY, after kernel bos.mp64 install $KINST" \
+            "The system last booted AFTER the running kernel (bos.mp64) was installed, so the running kernel matches what is on disk and no kernel-update reboot is outstanding. (PTxray is read-only: it cannot inspect the hd5 boot image directly, so this compares the kernel install date to the last boot as a proxy for boot-image currency.)" "n/a"
+      fi
     fi
   fi
 }
@@ -10126,11 +10142,12 @@ function lpif { printf '%s\n' "$LPI" | awk -v k="$1" 'index($0,k)==1 && index($0
 function checks_performance {
   typeset TYPE MODE ENT OVP WEIGHT SMT IDLE PHYSC ENTC ENTI ENTCI IDLEI
   typeset SIZE INUSE FREE PIN VIRT AVAIL NUMPERM AVAILPCT SIZEI AVAILI PINI INUSEI NUMPI
-  typeset LPS LPSRC SVMON SVMONRC COMPRAW NUMRAW COMPFACT NUMFACT VMVRC LPIRC
+  typeset LPS LPSRC LPS_SAMPLE SVMON SVMONRC COMPRAW NUMRAW COMPFACT NUMFACT VMVRC LPIRC
   typeset MINP MAXP MAXC NUMP MINRAW MAXRAW MAXCRAW NUMPRAW MINPI MAXPI MAXCI
+  typeset MINRAW_VALID MAXRAW_VALID MAXCRAW_VALID NUMPRAW_VALID
   typeset FSB CFSB EPFSB FSTOT PBUF PSBUF BUFTOT
-  typeset MAXPOUT MINPOUT MAXPI2
-  typeset R PI PO US SY ID PC LCPU IDI RQ
+  typeset SYS0 SYS0RC MAXPOUT MINPOUT MAXPI2 MAXPOUT_VALID
+  typeset VMSTAT VMSTATRC VMSAMPLE R PI PO US SY ID PC LCPU IDI RQ
   typeset IFL IF ESTAT AERR TOTERR SPEED MS DR NETSUM ADOWN NADAP
   typeset MAXU PSU TOPUSER TOPN RATIO
 
@@ -10138,24 +10155,30 @@ function checks_performance {
   VMV=$(aix vmstat_v vmstat -v); VMVRC=$?
   LPI=$(aix lparstat_i lparstat -i); LPIRC=$?
   if [ "$LPIRC" -eq 0 ] && [ -n "$LPI" ]; then FACT_CPU_LPI_READ=1; fi
-  SYS0=$(aix lsattr_sys0 lsattr -El sys0)
+  SYS0=$(aix lsattr_sys0 lsattr -El sys0); SYS0RC=$?
 
   # entitlement — shared-vs-dedicated efficiency, not just "CPU busy".
   # Veteran signal: shared consuming <25% of a >=1-core entitlement = paying for idle
   # cores; pinned near 100% entc with no idle = throttled/under-entitled; dedicated idle = fine.
-  TYPE=$(lpif "Type"); MODE=$(lpif "Mode"); ENT=$(lpif "Entitled Capacity")
-  OVP=$(lpif "Online Virtual CPUs"); WEIGHT=$(lpif "Variable Capacity Weight")
   LPS=$(aix lparstat_2_1 lparstat 2 1); LPSRC=$?
-  set -- $(printf '%s\n' "$LPS" | awk '
-    $1 ~ /^[0-9]+\.[0-9]+$/ && $4 ~ /^[0-9]+\.[0-9]+$/ &&
-      $5 ~ /^[0-9]+\.[0-9]+$/ && $6 ~ /^[0-9]+\.[0-9]+$/ && NF>=6 {
-        i=$4; p=$5; e=$6; found=1
-      }
-    END{if(found)print i+0, p+0, e+0}')
-  IDLE=${1:-}; PHYSC=${2:-}; ENTC=${3:-}
+  TYPE=""; MODE=""; ENT=""; OVP=""; WEIGHT=""
+  IDLE=""; PHYSC=""; ENTC=""
+  if [ "$LPIRC" -eq 0 ] && [ -n "$LPI" ] &&
+     [ "$LPSRC" -eq 0 ] && [ -n "$LPS" ]; then
+    TYPE=$(lpif "Type"); MODE=$(lpif "Mode"); ENT=$(lpif "Entitled Capacity")
+    OVP=$(lpif "Online Virtual CPUs"); WEIGHT=$(lpif "Variable Capacity Weight")
+    LPS_SAMPLE=$(printf '%s\n' "$LPS" | awk '
+      $1 ~ /^[0-9]+\.[0-9]+$/ && $4 ~ /^[0-9]+\.[0-9]+$/ &&
+        $5 ~ /^[0-9]+\.[0-9]+$/ && $6 ~ /^[0-9]+\.[0-9]+$/ && NF>=6 {
+          i=$4; p=$5; e=$6; found=1
+        }
+      END{if(found)print i+0, p+0, e+0}')
+    set -- $LPS_SAMPLE
+    IDLE=${1:-}; PHYSC=${2:-}; ENTC=${3:-}
+  fi
   if [ "$LPSRC" -eq 0 ] && [ -n "$LPS" ]; then FACT_CPU_SAMPLE_READ=1; fi
   SMT=$(printf '%s\n' "$TYPE" | awk -F- '{print $NF}'); case "$SMT" in ''|*[!0-9]*) SMT="?";; esac
-  if [ "$LPIRC" -eq 0 ]; then
+  if [ "$LPIRC" -eq 0 ] && [ -n "$LPI" ]; then
     case "$TYPE" in *Shared*) FACT_CPU_MODE=shared;; *Dedicated*) FACT_CPU_MODE=dedicated;; esac
     case "$MODE" in Capped) FACT_CPU_CAPPED=true;; Uncapped) FACT_CPU_CAPPED=false;; esac
     if valid_json_number "$ENT"; then FACT_CPU_ENT="$ENT"; fi
@@ -10163,19 +10186,37 @@ function checks_performance {
     if valid_json_number "$WEIGHT"; then FACT_CPU_WEIGHT="$WEIGHT"; fi
     if valid_json_number "$SMT"; then FACT_CPU_SMT="$SMT"; fi
   fi
-  if [ "$LPSRC" -eq 0 ]; then
+  if [ "$LPSRC" -eq 0 ] && [ -n "$LPS" ]; then
     if valid_json_number "$PHYSC"; then FACT_CPU_PHYSC="$PHYSC"; fi
     if valid_json_number "$ENTC"; then FACT_CPU_ENTC="$ENTC"; fi
     if valid_json_number "$IDLE"; then FACT_CPU_IDLE="$IDLE"; fi
   fi
-  ENTI=$(ipart "$ENT"); ENTCI=$(ipart "$ENTC"); IDLEI=$(ipart "$IDLE")
-  case "$TYPE" in
+  if [ "$LPIRC" -ne 0 ] || [ -z "$LPI" ] ||
+     [ "$LPSRC" -ne 0 ] || [ -z "$LPS" ]; then
+    add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+        "not assessed — lparstat probe failed (info rc=$LPIRC out=${#LPI}; sample rc=$LPSRC out=${#LPS})" \
+        "CPU entitlement cannot be assessed because the partition configuration or utilization sample was not captured." \
+        "run 'lparstat -i' and 'lparstat 2 1' manually and investigate the failed probe." ""
+  elif [ -z "$TYPE" ] || [ -z "$OVP" ] || [ -z "$IDLE" ] ||
+       [ -z "$PHYSC" ] || [ -z "$ENTC" ]; then
+    add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+        "not assessed — lparstat output did not contain the required fields" \
+        "CPU entitlement cannot be assessed because the partition type, CPU count, or utilization fields were incomplete." \
+        "run 'lparstat -i' and 'lparstat 2 1' manually and verify their output formats." ""
+  else
+    ENTI=$(ipart "$ENT"); ENTCI=$(ipart "$ENTC"); IDLEI=$(ipart "$IDLE")
+    case "$TYPE" in
     *Dedicated*)
       add performance entitlement "LPAR CPU entitlement" PASS low \
           "dedicated, $OVP VP(s), SMT-$SMT, idle ${IDLE}% (snapshot)" \
           "This is a dedicated-processor LPAR — it owns its cores. Idle here is fine; there is no shared-pool entitlement to right-size." "n/a";;
     *Shared*)
-      if [ "$ENTCI" -ge 90 ] && [ "$IDLEI" -lt 10 ]; then
+      if [ -z "$MODE" ] || [ -z "$ENT" ]; then
+        add performance entitlement "LPAR CPU entitlement" NOT_ASSESSED med \
+            "not assessed — shared-partition entitlement fields unreadable" \
+            "CPU entitlement cannot be assessed because lparstat omitted the shared mode or entitled capacity." \
+            "run 'lparstat -i' manually and verify Mode and Entitled Capacity." ""
+      elif [ "$ENTCI" -ge 90 ] && [ "$IDLEI" -lt 10 ]; then
         add performance entitlement "LPAR CPU entitlement" WARN med \
             "shared $MODE, ent $ENT, physc $PHYSC (${ENTC}% entc), idle ${IDLE}%" \
             "The LPAR is pinned near 100% of its entitled capacity with almost no idle — it is under-entitled and being throttled to its guarantee (uncapped can borrow only when the pool has spare cycles)." \
@@ -10194,7 +10235,8 @@ function checks_performance {
       add performance entitlement "LPAR CPU entitlement" WARN low "type ${TYPE:-unknown}" \
           "Could not classify the LPAR as shared or dedicated from lparstat -i." \
           "check 'lparstat -i' (Type/Mode/Entitled Capacity) manually.";;
-  esac
+    esac
+  fi
 
   # memory_decomposition — decompose "used" into computational vs file vs pinned.
   # Veteran signal: high computational% + low numperm (file cache at its floor) = genuine
@@ -10257,22 +10299,33 @@ function checks_performance {
   # vmm_tuning — the minperm/maxperm/maxclient/numperm triad.
   # Veteran signal: maxperm very low starves file cache (disk re-reads); numperm pinned at
   # maxperm evicts computational pages; off-default values should be intentional.
-  MINRAW=$(vmvraw 'minperm percentage'); MAXRAW=$(vmvraw 'maxperm percentage')
-  MAXCRAW=$(vmvraw 'maxclient percentage'); NUMPRAW=$(vmvraw 'numperm percentage')
+  MINRAW=$(printf '%s\n' "$VMV" | awk '/minperm percentage/ {print $1; exit}')
+  MAXRAW=$(printf '%s\n' "$VMV" | awk '/maxperm percentage/ {print $1; exit}')
+  MAXCRAW=$(printf '%s\n' "$VMV" | awk '/maxclient percentage/ {print $1; exit}')
+  NUMPRAW=$(printf '%s\n' "$VMV" | awk '/numperm percentage/ {print $1; exit}')
+  MINRAW_VALID=$(printf '%s\n' "$MINRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  MAXRAW_VALID=$(printf '%s\n' "$MAXRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  MAXCRAW_VALID=$(printf '%s\n' "$MAXCRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
+  NUMPRAW_VALID=$(printf '%s\n' "$NUMPRAW" | awk -v max="$STOR_FACT_MAX_USED_PCT" 'NR==1 && $0 ~ /^-?[0-9]+([.][0-9]+)?$/ {if(substr($0,1,1)!="-" && $0+0<=max+0) ok=1} END{print ok?1:0}')
   if [ "$VMVRC" -ne 0 ] ||
-     ! valid_pct_decimal "$MINRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$MAXRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$MAXCRAW" "$STOR_FACT_MAX_USED_PCT" ||
-     ! valid_pct_decimal "$NUMPRAW" "$STOR_FACT_MAX_USED_PCT"; then
+     [ "$MINRAW_VALID" -ne 1 ] ||
+     [ "$MAXRAW_VALID" -ne 1 ] ||
+     [ "$MAXCRAW_VALID" -ne 1 ] ||
+     [ "$NUMPRAW_VALID" -ne 1 ]; then
     add performance vmm_tuning "VMM cache tuning" WARN low "unreadable" \
         "VMM cache tuning not assessed — vmstat -v returned a failed capture or an unreadable/implausible minperm, maxperm, maxclient, or numperm percentage." \
         "check 'vmstat -v' and 'vmo -a' manually before relying on the cache-tuning result."
   else
     # Preserve the existing normalized prose after the raw tokens pass the
     # percentage evidence gate; vmv's numeric rendering drops cosmetic .0.
-    MINP=$(vmv 'minperm percentage'); MAXP=$(vmv 'maxperm percentage')
-    MAXC=$(vmv 'maxclient percentage'); NUMP=$(vmv 'numperm percentage')
-    MINPI=$(ipart "$MINP"); MAXPI=$(ipart "$MAXP"); MAXCI=$(ipart "$MAXC"); NUMPI=$(ipart "$NUMP")
+    MINP=$(printf '%s\n' "$VMV" | awk '/minperm percentage/ {print $1+0; exit}')
+    MAXP=$(printf '%s\n' "$VMV" | awk '/maxperm percentage/ {print $1+0; exit}')
+    MAXC=$(printf '%s\n' "$VMV" | awk '/maxclient percentage/ {print $1+0; exit}')
+    NUMP=$(printf '%s\n' "$VMV" | awk '/numperm percentage/ {print $1+0; exit}')
+    MINPI=${MINP%.*}
+    MAXPI=${MAXP%.*}
+    MAXCI=${MAXC%.*}
+    NUMPI=${NUMP%.*}
     if [ "${MAXPI:-0}" -le 0 ]; then
       add performance vmm_tuning "VMM cache tuning" WARN low "unreadable" \
           "VMM cache tuning not assessed — maxperm from vmstat -v is not a usable positive ceiling." \
@@ -10320,70 +10373,153 @@ function checks_performance {
   # pbuf_psbuf_blocking (LEVEL 3) — LVM pbuf / paging psbuf starvation from vmstat -v.
   # Veteran signal: non-zero pbuf = LVM ran out of physical-buffer headers (disk I/O delayed);
   # non-zero psbuf = the pager itself was starved (worse — stalls under paging).
-  PBUF=$(vmv 'pending disk I/Os blocked with no pbuf$')
-  PSBUF=$(vmv 'paging space I/Os blocked with no psbuf$')
-  BUFTOT=$(( PBUF + PSBUF ))
-  if [ "$PSBUF" -gt 0 ]; then
+  if [ "$VMVRC" -ne 0 ] || [ -z "$VMV" ]; then
+    add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" NOT_ASSESSED med \
+        "not assessed — vmstat -v probe failed or empty (rc=$VMVRC)" \
+        "Buffer-starvation counters cannot be assessed because vmstat evidence was unavailable." \
+        "run 'vmstat -v' manually and investigate the failed probe." ""
+  else
+    PBUF=$(printf '%s\n' "$VMV" | awk '$1 ~ /^[0-9]+$/ && /pending disk I\/Os blocked with no pbuf$/ {print $1; exit}')
+    PSBUF=$(printf '%s\n' "$VMV" | awk '$1 ~ /^[0-9]+$/ && /paging space I\/Os blocked with no psbuf$/ {print $1; exit}')
+    case "$PBUF:$PSBUF" in
+      *[!0-9:]*|:*|*:)
+        add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" NOT_ASSESSED med \
+            "not assessed — pbuf/psbuf counters unreadable" \
+            "Buffer-starvation counters cannot be assessed because vmstat omitted or malformed one or both required rows." \
+            "run 'vmstat -v' manually and verify both pbuf and psbuf counter rows." ""
+        ;;
+      *)
+        BUFTOT=$(( PBUF + PSBUF ))
+        if [ "$PSBUF" -gt 0 ]; then
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" WARN med \
         "pbuf $PBUF, psbuf $PSBUF (blocked since boot)" \
         "Paging-space I/O has been blocked with no psbuf $PSBUF time(s) since boot — the pager ran out of buffers while paging, which stalls processes system-wide. That it happened at all means the box was under real memory pressure. (LVM pbuf blocks: $PBUF.)" \
         "relieve the memory pressure driving paging (see the memory and paging-activity checks); psbuf blocking is a symptom of paging, not a value you tune away." ""
-  elif [ "$PBUF" -gt 0 ]; then
+        elif [ "$PBUF" -gt 0 ]; then
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" WARN med \
         "pbuf $PBUF, psbuf 0 (blocked since boot)" \
         "LVM disk I/O has been blocked with no pbuf $PBUF time(s) since boot — the per-volume-group LVM physical-buffer pool was exhausted under load, delaying disk I/O. Cumulative since boot." \
         "check the current count with 'lvmo -v <vg> -a'; if still climbing, raise it per VG with 'lvmo -v <vg> -o pv_pbuf_count=<n>'. A static non-zero count from a past burst is usually benign." ""
-  else
+        else
     add performance pbuf_psbuf_blocking "LVM/paging buffer blocking" PASS low \
         "0 pbuf and 0 psbuf blocks" \
         "No LVM pbuf or paging psbuf starvation since boot — buffer pools have kept up with disk and paging I/O." "n/a"
+        fi
+        ;;
+    esac
   fi
 
   # io_pacing — sys0 maxpout/minpout high/low water marks.
   # Veteran signal: 0/0 = unpaced, a single large sequential writer can fill the queue and
   # starve interactive I/O; set (e.g. 8193/4096) caps any one file's pending writes.
-  MAXPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="maxpout"{print $2; exit}')
-  MINPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="minpout"{print $2; exit}')
-  MAXPI2=$(ipart "$MAXPOUT")
-  if [ -z "$MAXPOUT" ]; then
-    add performance io_pacing "I/O pacing (maxpout/minpout)" WARN low "unreadable" \
-        "Could not read maxpout/minpout from lsattr -El sys0." "check 'lsattr -El sys0 -a maxpout -a minpout' manually."
-  elif [ "$MAXPI2" -eq 0 ]; then
-    add performance io_pacing "I/O pacing (maxpout/minpout)" WARN med \
-        "maxpout=$MAXPOUT, minpout=$MINPOUT (unpaced)" \
-        "I/O pacing is disabled (maxpout=0) — a single process doing a large sequential write can fill the disk write queue and starve interactive processes' I/O, so the box feels frozen under a backup or big copy." \
-        "enable pacing: 'chdev -l sys0 -a maxpout=8193 -a minpout=4096' (the AIX 7.x default; takes effect immediately)." ""
+  MAXPOUT=""; MINPOUT=""
+  if [ "$SYS0RC" -eq 0 ] && [ -n "$SYS0" ]; then
+    MAXPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="maxpout"{print $2; exit}')
+    MINPOUT=$(printf '%s\n' "$SYS0" | awk '$1=="minpout"{print $2; exit}')
+  fi
+  if [ "$SYS0RC" -ne 0 ] || [ -z "$SYS0" ]; then
+    add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+        "not assessed — lsattr probe failed (rc=$SYS0RC out=${#SYS0})" \
+        "I/O pacing cannot be assessed because the sys0 attributes were not captured." \
+        "run 'lsattr -El sys0 -a maxpout -a minpout' manually and investigate the failed probe." ""
+  elif [ -z "$MAXPOUT" ] || [ -z "$MINPOUT" ]; then
+    add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+        "not assessed — maxpout/minpout fields unreadable" \
+        "I/O pacing cannot be assessed because lsattr omitted one or both pacing attributes." \
+        "run 'lsattr -El sys0 -a maxpout -a minpout' manually and verify both values." ""
   else
-    add performance io_pacing "I/O pacing (maxpout/minpout)" PASS low \
-        "maxpout=$MAXPOUT, minpout=$MINPOUT (paced)" \
-        "System-wide I/O pacing is configured, so a runaway writer cannot monopolize a disk and starve interactive I/O." "n/a"
+    case "$MAXPOUT:$MINPOUT" in
+      *[!0-9:]*|:*|*:) MAXPOUT_VALID=0;;
+      *) MAXPOUT_VALID=1;;
+    esac
+    if [ "$MAXPOUT_VALID" -ne 1 ]; then
+      add performance io_pacing "I/O pacing (maxpout/minpout)" NOT_ASSESSED med \
+          "not assessed — maxpout/minpout values are malformed" \
+          "I/O pacing cannot be assessed because lsattr returned non-numeric pacing values." \
+          "run 'lsattr -El sys0 -a maxpout -a minpout' manually and verify both values." ""
+    else
+      MAXPI2=$(ipart "$MAXPOUT")
+      if [ "$MAXPI2" -eq 0 ]; then
+        add performance io_pacing "I/O pacing (maxpout/minpout)" WARN med \
+            "maxpout=$MAXPOUT, minpout=$MINPOUT (unpaced)" \
+            "I/O pacing is disabled (maxpout=0) — a single process doing a large sequential write can fill the disk write queue and starve interactive processes' I/O, so the box feels frozen under a backup or big copy." \
+            "enable pacing: 'chdev -l sys0 -a maxpout=8193 -a minpout=4096' (the AIX 7.x default; takes effect immediately)." ""
+      else
+        add performance io_pacing "I/O pacing (maxpout/minpout)" PASS low \
+            "maxpout=$MAXPOUT, minpout=$MINPOUT (paced)" \
+            "System-wide I/O pacing is configured, so a runaway writer cannot monopolize a disk and starve interactive I/O." "n/a"
+      fi
+    fi
   fi
 
   # cpu_snapshot — idle + physc + run queue vs logical CPUs (one vmstat sample).
   # Veteran signal: idle high with low run queue = headroom; run queue > 2x logical CPUs =
   # threads waiting on CPU even if %busy looks OK. Point-in-time, not a trend.
-  set -- $(printf '%s\n' "$(aix vmstat_1_2 vmstat 1 2)" | \
-           awk '$1 ~ /^[0-9]+$/ && NF>=18 {r=$1; pi=$6; po=$7; id=$16; pc=$18} END{print r+0, pi+0, po+0, id+0, pc}')
-  R=${1:-0}; PI=${2:-0}; PO=${3:-0}; ID=${4:-0}; PC=${5:-}
-  LCPU=$(printf '%s\n' "$(aix lparstat_2_1 lparstat 2 1)" | \
-         awk '{for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1)print substr($i,6)}' | awk 'NR==1{print}')
-  case "$LCPU" in ''|*[!0-9]*) LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}');; esac
-  case "$LCPU" in ''|*[!0-9]*) LCPU=1;; esac
-  IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
-  if [ "$IDI" -lt 10 ]; then
-    add performance cpu_snapshot "CPU headroom (snapshot)" WARN med \
-        "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
-        "CPU is near saturation in this one sample — low idle with the run queue backing up. This is a point-in-time snapshot, not a trend." \
-        "confirm with 'nmon'/'topas' over time; if sustained, chase the top consumers or review CPU sizing/entitlement." ""
-  elif [ "$R" -gt "$RQ" ]; then
-    add performance cpu_snapshot "CPU headroom (snapshot)" WARN low \
-        "run queue r=$R vs $LCPU logical CPUs, idle ${ID}%" \
-        "The run queue is more than twice the logical-CPU count while idle is ${ID}% — threads are waiting to dispatch even though average CPU looks OK. Point-in-time snapshot." \
-        "confirm with 'vmstat 2'/'nmon' over time; if sustained, look at SMT settings, thread affinity, or CPU sizing." ""
+  VMSTAT=$(aix vmstat_1_2 vmstat 1 2); VMSTATRC=$?
+  VMSAMPLE=""
+  if [ "$VMSTATRC" -eq 0 ] && [ -n "$VMSTAT" ]; then
+    VMSAMPLE=$(printf '%s\n' "$VMSTAT" | awk '
+      $1 ~ /^[0-9]+$/ && NF>=18 {
+        r=$1; pi=$6; po=$7; id=$16; pc=$18; found=1
+      }
+      END{if(found)print r+0, pi+0, po+0, id+0, pc}')
+  fi
+  set -- $VMSAMPLE
+  R=${1:-}; PI=${2:-0}; PO=${3:-0}; ID=${4:-}; PC=${5:-}
+  LCPU=""
+  if [ "$LPSRC" -eq 0 ] && [ -n "$LPS" ]; then
+    LCPU=$(printf '%s\n' "$LPS" | awk '
+      {for(i=1;i<=NF;i++)if(index($i,"lcpu=")==1){print substr($i,6); exit}}')
+  fi
+  case "$LCPU" in
+    ''|*[!0-9]*)
+      if [ "$PRTCONF_RC" -eq 0 ] && [ -n "$PRTCONF" ]; then
+        LCPU=$(printf '%s\n' "$PRTCONF" | awk -F': *' '/Number Of Processors/{print $2; exit}')
+      fi
+      ;;
+  esac
+  if [ "$VMSTATRC" -ne 0 ] || [ -z "$VMSTAT" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat probe failed (rc=$VMSTATRC out=${#VMSTAT})" \
+        "CPU headroom cannot be assessed because the vmstat sample was not captured." \
+        "run 'vmstat 1 2' manually and investigate why the probe failed." ""
+  elif [ -z "$VMSAMPLE" ]; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — vmstat returned no usable sample" \
+        "CPU headroom cannot be assessed because vmstat output did not contain the expected numeric sample." \
+        "run 'vmstat 1 2' manually and verify its output format." ""
+  elif [ "$LPSRC" -ne 0 ] && { [ "$PRTCONF_RC" -ne 0 ] || [ -z "$PRTCONF" ]; }; then
+    add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+        "not assessed — CPU-count probes failed (lparstat rc=$LPSRC; prtconf rc=$PRTCONF_RC)" \
+        "CPU headroom cannot be assessed without a trustworthy logical-CPU count." \
+        "run 'lparstat 2 1' and 'prtconf' manually and investigate the failed probes." ""
   else
-    add performance cpu_snapshot "CPU headroom (snapshot)" PASS low \
-        "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
-        "CPU has headroom in this sample: idle ${ID}% with a short run queue for $LCPU logical CPUs (point-in-time snapshot, not a trend)." "n/a"
+    case "$LCPU" in
+      ''|*[!0-9]*|0)
+        add performance cpu_snapshot "CPU headroom (snapshot)" NOT_ASSESSED med \
+            "not assessed — logical CPU count unreadable" \
+            "CPU headroom cannot be assessed because neither lparstat nor prtconf provided a usable CPU count." \
+            "run 'lparstat 2 1' and 'prtconf' manually and verify their output." ""
+        ;;
+      *)
+        IDI=$(ipart "$ID"); RQ=$(( 2 * LCPU ))
+        if [ "$IDI" -lt 10 ]; then
+          add performance cpu_snapshot "CPU headroom (snapshot)" WARN med \
+              "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
+              "CPU is near saturation in this one sample — low idle with the run queue backing up. This is a point-in-time snapshot, not a trend." \
+              "confirm with 'nmon'/'topas' over time; if sustained, chase the top consumers or review CPU sizing/entitlement." ""
+        elif [ "$R" -gt "$RQ" ]; then
+          add performance cpu_snapshot "CPU headroom (snapshot)" WARN low \
+              "run queue r=$R vs $LCPU logical CPUs, idle ${ID}%" \
+              "The run queue is more than twice the logical-CPU count while idle is ${ID}% — threads are waiting to dispatch even though average CPU looks OK. Point-in-time snapshot." \
+              "confirm with 'vmstat 2'/'nmon' over time; if sustained, look at SMT settings, thread affinity, or CPU sizing." ""
+        else
+          add performance cpu_snapshot "CPU headroom (snapshot)" PASS low \
+              "idle ${ID}%, physc ${PC:-n/a}, run queue r=$R vs $LCPU logical CPUs" \
+              "CPU has headroom in this sample: idle ${ID}% with a short run queue for $LCPU logical CPUs (point-in-time snapshot, not a trend)." "n/a"
+        fi
+        ;;
+    esac
   fi
 
   # paging_activity — vmstat pi/po: actual page-in/out RATE, distinct from paging-space %used.
@@ -10471,7 +10607,7 @@ function checks_performance {
 function checks_security {
   typeset SSHT SSHT_RC RC CIPH WEAK PRL LSU MA MI LR HS DEV UID0 XTRA N INE SVCS RH RHRC RHPRESENT RHCOMP RHBAD RHCOUNT RHUNIQ WW WWN SNMP AUD TE HERALD HV
   typeset LSUA NEVERLIST NNEVER NEVER5 LOCKED SUID SUID_RC SUID3 NSL NL
-  typeset PRIV PRLI PSUG PADM BAD LSP STALE NNEV NST NEVL STL NPRIV
+  typeset PRIV PRLI PSUG PADM BAD LSP STALE NNEV NST NEVL STL NPRIV STALE_DETAIL
   typeset SUDOPKG SUDORC SUDOPKGOK SUDOABSENT SUDOLS SUDOLSRC SUDOFILES SUDOFILESRC SUDOFILECOUNT SUR SURRC SUDOPARSE SUDOPARSERC SUDOWHY NOPW ALLALL RBAC ASSIGNED IPSEC FILTON EXT NEXT PORTS PSHOW
 
   # sshd effective config drives two checks (root-gated on AIX)
@@ -10939,7 +11075,7 @@ _AIXRAY_SESSION_KEYS=""
 
   # pw_policy — default password rules (root-gated)
   LSU=$(aix lssec_user_default lssec -f /etc/security/user -s default -a maxage -a minlen -a loginretries -a histsize); RC=$?
-  if [ "$RC" -ne 0 ]; then
+  if [ "$RC" -ne 0 ] || [ -z "$LSU" ]; then
     nr_warn security pw_policy "Default password policy" "the default password rules" "lssec -f /etc/security/user -s default" "cis-l1 ffiec:II.C.15"
   else
     MA=$(printf '%s\n' "$LSU" | awk '{for(i=1;i<=NF;i++)if(index($i,"maxage=")==1)print substr($i,8)}')
@@ -10947,10 +11083,10 @@ _AIXRAY_SESSION_KEYS=""
     LR=$(printf '%s\n' "$LSU" | awk '{for(i=1;i<=NF;i++)if(index($i,"loginretries=")==1)print substr($i,14)}')
     HS=$(printf '%s\n' "$LSU" | awk '{for(i=1;i<=NF;i++)if(index($i,"histsize=")==1)print substr($i,10)}')
     DEV=""
-    case "$MA" in ''|*[!0-9]*) ;; *) { [ "$MA" -eq 0 ] || [ "$MA" -gt 13 ]; } && DEV="$DEV maxage=$MA";; esac
-    case "$MI" in ''|*[!0-9]*) ;; *) [ "$MI" -lt 8 ] && DEV="$DEV minlen=$MI";; esac
-    case "$LR" in ''|*[!0-9]*) ;; *) [ "$LR" -eq 0 ] && DEV="$DEV loginretries=$LR";; esac
-    case "$HS" in ''|*[!0-9]*) ;; *) [ "$HS" -eq 0 ] && DEV="$DEV histsize=$HS";; esac
+    case "$MA" in '') DEV="$DEV maxage=" ;; *[!0-9]*) DEV="$DEV maxage=$MA" ;; *) { [ "$MA" -eq 0 ] || [ "$MA" -gt 13 ]; } && DEV="$DEV maxage=$MA";; esac
+    case "$MI" in '') DEV="$DEV minlen=" ;; *[!0-9]*) DEV="$DEV minlen=$MI" ;; *) [ "$MI" -lt 8 ] && DEV="$DEV minlen=$MI";; esac
+    case "$LR" in '') DEV="$DEV loginretries=" ;; *[!0-9]*) DEV="$DEV loginretries=$LR" ;; *) [ "$LR" -eq 0 ] && DEV="$DEV loginretries=$LR";; esac
+    case "$HS" in '') DEV="$DEV histsize=" ;; *[!0-9]*) DEV="$DEV histsize=$HS" ;; *) [ "$HS" -eq 0 ] && DEV="$DEV histsize=$HS";; esac
     if [ -n "$DEV" ]; then
       add security pw_policy "Default password policy" WARN high "weak:$DEV" \
           "The default password rules are weaker than any standard requires — every new account inherits them." \
@@ -13569,9 +13705,14 @@ _AIXRAY_SESSION_KEYS=""
       "$CA_OBSERVED" "$CA_MEANING" "$CA_FIX" "cis-l1"
 
   # uid0_accounts
-  UID0=$(aix passwd_uid0 awk -F: '$3==0 {print $1}' /etc/passwd)
+  UID0=$(aix passwd_uid0 awk -F: '$3==0 {print $1}' /etc/passwd); UID0RC=$?
   XTRA=$(printf '%s\n' "$UID0" | awk 'NF && $1!="root"{printf "%s%s",(n++?", ":""),$1}')
-  if [ -n "$XTRA" ]; then
+  if [ "$UID0RC" -ne 0 ] || [ -z "$UID0" ]; then
+    add security uid0_accounts "UID 0 accounts" NOT_ASSESSED high \
+        "not assessed — UID 0 account probe failed or empty (rc=$UID0RC)" \
+        "The /etc/passwd probe did not establish which accounts have UID 0." \
+        "inspect UID 0 entries in /etc/passwd, then rerun PTxray." "cis-l1 ffiec:II.C.7"
+  elif [ -n "$XTRA" ]; then
     add security uid0_accounts "UID 0 accounts" FAIL high "extra: $XTRA" \
         "More than one account has UID 0 — each one is effectively root, multiplying the attack surface." \
         "give each admin a unique non-zero UID and use su/sudo; remove or re-UID the extra accounts." "cis-l1 ffiec:II.C.7"
@@ -19499,8 +19640,8 @@ _AIXRAY_SESSION_KEYS=""
   # rhosts
   # The probe always emits a completion marker after checking both paths. That
   # makes a clean result positive evidence instead of inferring absence from an
-  # empty/nonzero compound ls. Legacy real captures with one exact present path
-  # and rc 1/2 remain strong adverse evidence for the #76 partial-presence case.
+  # empty/nonzero compound ls. A nonzero wrapper status always refuses: partial
+  # output from an incomplete probe cannot safely establish the final state.
   RH=$(aix ls_rhosts sh -c '
     for path in /.rhosts /etc/hosts.equiv; do
       if [ -f "$path" ] || [ -L "$path" ]; then
@@ -19514,13 +19655,7 @@ _AIXRAY_SESSION_KEYS=""
   RHBAD=$(printf '%s\n' "$RH" | awk 'NF && $0!="/.rhosts" && $0!="/etc/hosts.equiv" && $0!="__AIXRAY_RHOSTS_PROBE_COMPLETE__"{n++} END{print n+0}')
   RHCOUNT=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{n++} END{print n+0}')
   RHUNIQ=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{seen[$0]=1} END{for(k in seen)n++; print n+0}')
-  if [ -n "$RHPRESENT" ] && [ "$RHBAD" -eq 0 ] && [ "$RHCOMP" -eq 0 ] &&
-     [ "$RHCOUNT" -eq "$RHUNIQ" ] &&
-     { [ "$RHRC" -eq 0 ] || [ "$RHRC" -eq 1 ] || [ "$RHRC" -eq 2 ]; }; then
-    add security rhosts "Trust files (.rhosts)" FAIL high "present: $RHPRESENT" \
-        "Host-trust files allow passwordless login from named hosts — a classic lateral-movement path." \
-        "remove /.rhosts and /etc/hosts.equiv; rely on key-based ssh instead." "stig:V-215432" # network-lint: allow -- remediation-advice prose, not a network call
-  elif [ "$RHRC" -ne 0 ]; then
+  if [ "$RHRC" -ne 0 ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe failed (rc=$RHRC)" \
         "The trust-file probe did not complete, so absence of .rhosts/hosts.equiv cannot be asserted." \
         "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"
@@ -20088,8 +20223,13 @@ _AIXRAY_SESSION_KEYS=""
   fi
 
   # world_writable (scope bounded to /etc and /usr/local/bin on purpose)
-  WW=$(aix find_ww find /etc /usr/local/bin -xdev -type f -perm -002)
-  if [ -n "$WW" ]; then
+  WW=$(aix find_ww find /etc /usr/local/bin -xdev -type f -perm -002 -print); WWRC=$?
+  if [ "$WWRC" -ne 0 ]; then
+    add security world_writable "World-writable files" NOT_ASSESSED high \
+        "not assessed — bounded world-writable scan failed (rc=$WWRC)" \
+        "The bounded find probe failed, so an empty result cannot establish that no world-writable files exist." \
+        "run the bounded find manually, resolve the error, then rerun PTxray." "cis-l1"
+  elif [ -n "$WW" ]; then
     WWN=$(printf '%s\n' "$WW" | awk 'NR<=3{printf "%s%s",(NR>1?", ":""),$0} END{if(NR>3)printf " +%d more",NR-3}')
     add security world_writable "World-writable files" WARN high "$WWN" \
         "World-writable files in /etc and /usr/local/bin (scope bounded to those on purpose) let any user alter system content." \
@@ -20776,8 +20916,16 @@ _AIXRAY_SESSION_KEYS=""
     STL=$(printf '%s' "$STALE" | awk -F'\t' '{print $4}')
     NPRIV=$(printf '%s' "$STALE" | awk -F'\t' '{print $5+0}')
     if [ "$NST" -gt 0 ] || [ "$NNEV" -gt 0 ]; then
+      STALE_DETAIL=""
+      if [ "$NST" -gt 0 ]; then
+        STALE_DETAIL="stale(>90d): $STL"
+      fi
+      if [ "$NNEV" -gt 0 ]; then
+        [ -n "$STALE_DETAIL" ] && STALE_DETAIL="$STALE_DETAIL; "
+        STALE_DETAIL="${STALE_DETAIL}never-used non-expiring: $NEVL"
+      fi
       add security stale_privileged_accounts "Stale privileged accounts" WARN med \
-          "$([ "$NST" -gt 0 ] && echo "stale(>90d): $STL")$([ "$NST" -gt 0 ] && [ "$NNEV" -gt 0 ] && echo "; ")$([ "$NNEV" -gt 0 ] && echo "never-used non-expiring: $NEVL")" \
+          "$STALE_DETAIL" \
           "One or more privileged accounts (root or an admin account) have not been used in over 90 days, or have never logged in and never expire (maxage=0). A dormant account with standing privilege is a prime target — nobody would notice it being used, and a non-expiring password outlives the person who set it." \
           "confirm each is still needed; lock or remove the unused ones ('chuser account_locked=true <user>' or 'rmuser'), and set aging on any that stay ('chuser maxage=13 <user>')." "cis-l1 ffiec:II.C.7"
     else
@@ -30359,16 +30507,24 @@ _AIXRAY_SESSION_KEYS=""
 # eval_fileperms — evaluate every R_FILEPERM row against ONE evidence capture and emit
 # one grouped finding plus the per-rule detail (F_RULES). A single wrapped command
 # (aix stig_fileperm_ls ls -ldn <all paths>) preserves the per-path association: a
-# missing path simply produces no line (NA), and ls's nonzero rc for missing paths is
-# expected. Owner/group are compared by numeric id (ls -n); mode by mask, not equality.
+# The capture must succeed and return rows before any verdict consumes it. Owner/group are
+# compared by numeric id (ls -n); mode by mask, not equality.
 function eval_fileperms {
-  typeset PATHS LS RAW SUM DETAIL CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+  typeset PATHS LS LS_RC RAW SUM DETAIL CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
 
   PATHS=$(printf '%s\n' "$R_FILEPERM" | awk -F'|' 'NF>=5 && $1 !~ /^#/ && $2!="" && !seen[$2]++{printf "%s ", $2}')
   [ -z "$PATHS" ] && return 0
-  # ls -ldn on every distinct rule path in one shot. rc is ignored: missing paths are
-  # expected and simply yield no line (parsed as NA below).
-  LS=$(aix stig_fileperm_ls ls -ldn $PATHS)
+  # ls -ldn on every distinct rule path in one shot. A nonzero rc means the inventory is
+  # incomplete, so do not turn partial rows into a PASS.
+  LS=$(aix stig_fileperm_ls ls -ldn $PATHS); LS_RC=$?
+  if [ "$LS_RC" -ne 0 ] || [ -z "$LS" ]; then
+    CTLS=$(printf '%s\n' "$R_FILEPERM" | awk -F'|' \
+      'NF>=5 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_fileperms "STIG file permissions" WARN med "n/a" \
+      "Could not read the complete file-permission inventory (ls rc=$LS_RC); no STIG file-permission rule was assessed." \
+      "verify every required path is readable, then re-run PTxray." "$CTLS"
+    return 0
+  fi
 
   # One awk pass: build path -> (mode,uid,gid) from the ls lines, then evaluate each rule.
   RAW=$({ printf '%s\n' "$R_FILEPERM"; echo "AIXRAY_LS"; printf '%s\n' "$LS"; } | awk '
@@ -30464,25 +30620,37 @@ function eval_fileperms {
 # disabled/unlimited on AIX). If nothing was readable at all (NAPPLIC=0) the finding is a
 # root-gated WARN rather than a hollow PASS.
 function eval_secattr {
-  typeset PAIRS CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+  typeset CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+  typeset SA_USER_RAW SA_USER_RC SA_USER_CAP SA_LOGIN_RAW SA_LOGIN_RC SA_LOGIN_CAP
 
-  # distinct file|stanza pairs in first-seen (deterministic) order
-  PAIRS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' 'NF>=6 && $1 !~ /^#/ && $2!="" && !seen[$2 FS $3]++{print $2"|"$3}')
-  [ -z "$PAIRS" ] && return 0
-
-  # one lssec per stanza; parse "stanza attr=val attr=val" into "file|stanza|attr|value"
-  # lines. An unreadable stanza (rc!=0 or empty) emits nothing -> its rules fall to NA.
-  # KEEP the per-stanza attribute lists in tools/capture-fixtures.sh in sync with R_SECATTR.
-  CAP=$(printf '%s\n' "$PAIRS" | while IFS='|' read SA_F SA_S; do
-    [ -z "$SA_F" ] && continue
-    SA_ATTRS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' -v f="$SA_F" -v s="$SA_S" '$2==f && $3==s{printf " -a %s", $4}')
-    SA_SLUG=$(printf '%s' "$SA_F" | sed 's|.*/||; s|\.cfg$||')_$SA_S
-    SA_RAW=$(aix "stig_secattr_$SA_SLUG" lssec -f "$SA_F" -s "$SA_S" $SA_ATTRS)
-    if [ $? -eq 0 ] && [ -n "$SA_RAW" ]; then
-      printf '%s\n' "$SA_RAW" | awk -v f="$SA_F" -v s="$SA_S" \
-        '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print f "|" s "|" substr($i,1,e-1) "|" substr($i,e+1)}}'
-    fi
-  done)
+  # Keep both reads static and exactly aligned with manifest.json. If either complete stanza
+  # capture is unavailable, do not turn the other stanza's partial evidence into a PASS.
+  SA_USER_RAW=$(aix stig_secattr_user_default lssec -f /etc/security/user -s default \
+    -a loginretries -a maxulogs -a minupperalpha -a minloweralpha -a mindigit \
+    -a mindiff -a minage -a maxage -a minlen -a minspecialchar -a maxrepeats); SA_USER_RC=$?
+  if [ "$SA_USER_RC" -ne 0 ] || [ -z "$SA_USER_RAW" ]; then
+    CTLS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' \
+      'NF>=6 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_secattr "STIG account policy" WARN med "n/a" \
+      "Could not read the complete /etc/security account-policy evidence; no STIG account-policy rule was assessed." \
+      "re-run PTxray as root and verify both required lssec stanzas are readable." "$CTLS"
+    return 0
+  fi
+  SA_LOGIN_RAW=$(aix stig_secattr_login_default lssec -f /etc/security/login.cfg \
+    -s default -a logindelay); SA_LOGIN_RC=$?
+  if [ "$SA_LOGIN_RC" -ne 0 ] || [ -z "$SA_LOGIN_RAW" ]; then
+    CTLS=$(printf '%s\n' "$R_SECATTR" | awk -F'|' \
+      'NF>=6 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_secattr "STIG account policy" WARN med "n/a" \
+      "Could not read the complete /etc/security account-policy evidence; no STIG account-policy rule was assessed." \
+      "re-run PTxray as root and verify both required lssec stanzas are readable." "$CTLS"
+    return 0
+  fi
+  SA_USER_CAP=$(printf '%s\n' "$SA_USER_RAW" | awk \
+    '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print "/etc/security/user|default|" substr($i,1,e-1) "|" substr($i,e+1)}}')
+  SA_LOGIN_CAP=$(printf '%s\n' "$SA_LOGIN_RAW" | awk \
+    '{for(i=1;i<=NF;i++){e=index($i,"="); if(e>1) print "/etc/security/login.cfg|default|" substr($i,1,e-1) "|" substr($i,e+1)}}')
+  CAP=$(printf '%s\n%s\n' "$SA_USER_CAP" "$SA_LOGIN_CAP")
 
   # one awk pass: rules then captured values -> per-rule verdict + summary
   RAW=$({ printf '%s\n' "$R_SECATTR"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
@@ -30540,6 +30708,11 @@ function eval_secattr {
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more account/password-policy attributes in /etc/security are weaker than the DISA STIG for IBM AIX 7.x mandates — each is a documented hardening gap an auditor will flag, and it applies to every account inheriting the default stanza."
     FIX="tighten the failing attributes with chsec (chsec -f <file> -s default -a <attr>=<value>); the compliance report lists every rule, the required value, and the observed value."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more account-policy attributes were unavailable; the readable rules passed, but the full STIG account-policy group could not be assessed."
+    FIX="re-run PTxray as root and verify each required lssec stanza and attribute is readable."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"
@@ -30551,28 +30724,27 @@ function eval_secattr {
 }
 
 # eval_nettune — evaluate every R_NETTUNE row and emit one grouped finding (stig_nettune)
-# plus per-rule detail (F_RULES). One capture per distinct command: 'no -a' and/or 'nfso -a'
-# (both are NON-root reads — listing a tunable never needs privilege, only setting one does,
+# plus per-rule detail (F_RULES). The current rule table requires one static `no -a`
+# capture (a NON-root read — listing a tunable never needs privilege, only setting one does,
 # so there is no root gate here). Each captured "tunable = value" line becomes a
 # command|tunable|value record; a tunable absent from the capture is NA. Numeric compare only;
 # unlike R_SECATTR, op le does NOT special-case 0 — for a network tunable 0 is normally the
 # SECURE value, so it is compared literally.
 function eval_nettune {
-  typeset CMDS CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX NT_CMD NT_RAW
+  typeset CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX NT_RAW NT_RC
 
-  # distinct commands (no, nfso) in first-seen order
-  CMDS=$(printf '%s\n' "$R_NETTUNE" | awk -F'|' 'NF>=5 && $1 !~ /^#/ && $2!="" && !seen[$2]++{print $2}')
-  [ -z "$CMDS" ] && return 0
-
-  # one 'no -a' / 'nfso -a' per command; parse "tunable = value" -> "command|tunable|value".
-  # An unreadable command (rc!=0 or empty) emits nothing -> its rules fall to NA.
-  CAP=$(printf '%s\n' "$CMDS" | while read NT_CMD; do
-    [ -z "$NT_CMD" ] && continue
-    NT_RAW=$(aix "stig_${NT_CMD}_a" "$NT_CMD" -a)
-    if [ $? -eq 0 ] && [ -n "$NT_RAW" ]; then
-      printf '%s\n' "$NT_RAW" | awk -v cmd="$NT_CMD" 'NF>=3 && $2=="="{print cmd "|" $1 "|" $3}'
-    fi
-  done)
+  # R_NETTUNE currently contains only AIX `no` rules, so keep the executed command static
+  # and exactly aligned with manifest.json.
+  NT_RAW=$(aix stig_no_a no -a); NT_RC=$?
+  if [ "$NT_RC" -ne 0 ] || [ -z "$NT_RAW" ]; then
+    CTLS=$(printf '%s\n' "$R_NETTUNE" | awk -F'|' \
+      'NF>=5 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_nettune "STIG network tunables" WARN med "n/a" \
+      "Could not read the network tunables (no -a rc=$NT_RC); no STIG network-option rule was assessed." \
+      "verify 'no -a' returns complete output, then re-run PTxray." "$CTLS"
+    return 0
+  fi
+  CAP=$(printf '%s\n' "$NT_RAW" | awk 'NF>=3 && $2=="="{print "no|" $1 "|" $3}')
 
   # one awk pass: rules then captured values -> per-rule verdict + summary
   RAW=$({ printf '%s\n' "$R_NETTUNE"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
@@ -30638,6 +30810,11 @@ function eval_nettune {
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more kernel network options are set to a value the DISA STIG for IBM AIX 7.x flags — e.g. IP forwarding on a non-router, or TCP half-open connection cleanup disabled. Each is a documented hardening gap an auditor will flag."
     FIX="set the failing tunables with 'no -p -o <tunable>=<value>' (nfso for NFS options) so the change persists across reboot; the compliance report lists every rule, the required value, and the observed value."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more network-tunable values were unavailable; the readable rules passed, but the full STIG network-tunable group could not be assessed."
+    FIX="verify 'no -a' and 'nfso -a' return complete output, then re-run PTxray."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"
@@ -30649,51 +30826,30 @@ function eval_nettune {
 }
 
 # eval_svcoff — evaluate every R_SVCOFF row and emit one grouped finding (stig_svcoff) plus
-# per-rule detail (F_RULES). Three captures: the uncommented /etc/inetd.conf service lines
-# (type inetd: the service token must NOT appear enabled), the uncommented start commands in
-# /etc/rc.tcpip (type rctcp: the daemon must not start at boot), and 'lssrc -a' (type lssrc:
-# the SRC subsystem must be inoperative, not active). All are non-root reads. For a
-# disable-service rule the STIG treats "service enabled/running" as the finding, so a token or
-# start command that is absent/commented (inetd/rctcp), or a subsystem that is inoperative/
-# undefined (lssrc), is compliant = PASS, not NA. Guard: if lssrc -a yields no subsystem rows
-# at all, lssrc-type rules are NA (can't assess) rather than a hollow PASS. This is the broad
+# per-rule detail (F_RULES). Two captures read the uncommented /etc/inetd.conf service lines
+# (type inetd: the service token must NOT appear enabled) and uncommented start commands in
+# /etc/rc.tcpip (type rctcp: the daemon must not start at boot). For a disable-service rule,
+# an absent/commented token or start command is compliant = PASS, not NA. This is the broad
 # per-V-ID STIG service list; it does NOT duplicate the inetd_cleartext check (which flags
 # cleartext-LOGIN daemons enabled).
 function eval_svcoff {
-  typeset TYPES CAP INE LSS RCT RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
+  typeset CAP INE INE_RC INE_CAP RCT RCT_RC RCT_CAP
+  typeset RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX
 
-  [ -z "$R_SVCOFF" ] && return 0
-  # space-separated (not newline): the `case " $TYPES "` tests below match on
-  # spaces, so with >1 type a newline-joined list would match none of them.
-  TYPES=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' 'NF>=3 && $1 !~ /^#/{print $2}' | sort -u | tr '\n' ' ')
-  [ -z "$TYPES" ] && return 0
-
-  # Build the evidence: enabled inetd tokens and SRC subsystem states.
-  CAP=$(
-    case " $TYPES " in
-      (*" inetd "*)
-        INE=$(aix stig_inetd_active grep -v '^#' /etc/inetd.conf)
-        printf '%s\n' "$INE" | awk 'NF>=1 && $1 !~ /^#/{print "inetd|" $1 "|on"}'
-        ;;
-    esac
-    case " $TYPES " in
-      (*" lssrc "*)
-        LSS=$(aix stig_lssrc_a lssrc -a)
-        printf '%s\n' "$LSS" | awk 'NR>1 && NF>=2 && $1!="Subsystem"{print "lssrc|" $1 "|" $NF}'
-        ;;
-    esac
-    case " $TYPES " in
-      (*" rctcp "*)
-        # uncommented "start /path/daemon ..." lines in /etc/rc.tcpip = the daemon boots.
-        # A commented rule (#start ...) does not match the anchored grep.
-        RCT=$(aix stig_rctcp grep -E '^[	 ]*start ' /etc/rc.tcpip)
-        printf '%s\n' "$RCT" | awk '$1=="start" && $2!=""{n=split($2,a,"/"); print "rctcp|" a[n] "|on"}'
-        ;;
-    esac
-  )
+  # The current table has only inetd and rc.tcpip rules, so execute those two reads
+  # explicitly. grep rc=1 with empty output is complete evidence that no line matched.
+  INE=$(aix stig_inetd_active grep -v '^#' /etc/inetd.conf); INE_RC=$?
+  RCT=$(aix stig_rctcp grep -E '^[	 ]*start ' /etc/rc.tcpip); RCT_RC=$?
+if { [ "$INE_RC" -eq 0 ] && [ -n "$INE" ]; } ||
+   { [ "$INE_RC" -eq 1 ] && [ -z "$INE" ]; }; then
+  if { [ "$RCT_RC" -eq 0 ] && [ -n "$RCT" ]; } ||
+     { [ "$RCT_RC" -eq 1 ] && [ -z "$RCT" ]; }; then
+      INE_CAP=$(printf '%s\n' "$INE" | awk 'NF>=1 && $1 !~ /^#/{print "inetd|" $1 "|on"}')
+      RCT_CAP=$(printf '%s\n' "$RCT" | awk '$1=="start" && $2!=""{n=split($2,a,"/"); print "rctcp|" a[n] "|on"}')
+      CAP=$(printf 'complete|inetd|\n%s\ncomplete|rctcp|\n%s\n' "$INE_CAP" "$RCT_CAP")
 
   RAW=$({ printf '%s\n' "$R_SVCOFF"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
-    BEGIN{ phase=0; nr=0; nlssrc=0 }
+    BEGIN{ phase=0; nr=0 }
     $0=="AIXRAY_CAP"{ phase=1; next }
     phase==0{
       if($0 ~ /^#/ || $0=="" || NF<3) next
@@ -30702,8 +30858,8 @@ function eval_svcoff {
     }
     phase==1{
       if(NF<3) next
-      if($1=="inetd"){ enabled[$2]=1 }
-      else if($1=="lssrc"){ state[$2]=$3; nlssrc++ }
+      if($1=="complete"){ complete[$2]=1 }
+      else if($1=="inetd"){ enabled[$2]=1 }
       else if($1=="rctcp"){ rctcp_on[$2]=1; nrctcp++ }
       next
     }
@@ -30711,17 +30867,10 @@ function eval_svcoff {
       npass=0; nfail=0; nna=0; nf=0
       for(i=1;i<=nr;i++){
         t=R_type[i]; n=R_name[i]
-        if(t=="inetd"){
+        if((t=="inetd" || t=="rctcp") && !(t in complete)){ st="NA"; obs=n" ("t" evidence incomplete)"; nna++ }
+        else if(t=="inetd"){
           if(n in enabled){ st="FAIL"; obs=n" enabled in inetd.conf"; nfail++; nf++; fl[nf]=R_id[i]" "n }
           else { st="PASS"; obs=n" not enabled in inetd.conf"; npass++ }
-        }
-        else if(t=="lssrc"){
-          if(nlssrc==0){ st="NA"; obs=n" (lssrc unreadable)"; nna++ }
-          else if(n in state){
-            if(state[n]=="active"){ st="FAIL"; obs=n" active"; nfail++; nf++; fl[nf]=R_id[i]" "n }
-            else { st="PASS"; obs=n" "state[n]; npass++ }
-          }
-          else { st="PASS"; obs=n" not defined"; npass++ }
         }
         else if(t=="rctcp"){
           if(n in rctcp_on){ st="FAIL"; obs=n" starts at boot in /etc/rc.tcpip"; nfail++; nf++; fl[nf]=R_id[i]" "n }
@@ -30748,13 +30897,18 @@ function eval_svcoff {
   if [ "$NAPPLIC" -eq 0 ]; then
     ST=WARN; SEV=med
     OBS="n/a"
-    MEAN="Could not read the service inventory (/etc/inetd.conf, /etc/rc.tcpip, and lssrc -a); no STIG disabled-service rule could be assessed on this run."
-    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable and the SRC is running; or inspect 'lssrc -a' manually."
+    MEAN="Could not read the service inventory (/etc/inetd.conf and /etc/rc.tcpip); no STIG disabled-service rule could be assessed on this run."
+    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable, then re-run PTxray."
   elif [ "$NFAIL" -gt 0 ]; then
     ST=FAIL; SEV=high
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more legacy network services the DISA STIG for IBM AIX 7.x requires disabled are still enabled or running — each is an unneeded, often unauthenticated, network-facing daemon an auditor will flag."
-    FIX="comment the service out of /etc/inetd.conf and 'refresh -s inetd' (inetd services), use 'chrctcp -d <daemon>' (/etc/rc.tcpip daemons), or 'stopsrc -s <subsystem>' and disable it at boot (SRC subsystems); the compliance report lists every rule and its evidence."
+    FIX="comment the service out of /etc/inetd.conf and 'refresh -s inetd' (inetd services), or use 'chrctcp -d <daemon>' for /etc/rc.tcpip daemons; the compliance report lists every rule and its evidence."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more service inventories were unavailable; the readable rules passed, but the full STIG disabled-service group could not be assessed."
+    FIX="verify /etc/inetd.conf and /etc/rc.tcpip are readable, then re-run PTxray."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"
@@ -30763,6 +30917,20 @@ function eval_svcoff {
   fi
   add security stig_svcoff "STIG disabled services" "$ST" "$SEV" "$OBS" "$MEAN" "$FIX" "$CTLS"
   F_RULES[$((NFIND-1))]="$DETAIL"
+    else
+      CTLS=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' \
+        'NF>=3 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+      add security stig_svcoff "STIG disabled services" WARN med "n/a" \
+        "Could not read the complete /etc/rc.tcpip service inventory (grep rc=$RCT_RC); no STIG disabled-service rule was assessed." \
+        "verify /etc/rc.tcpip is readable, then re-run PTxray." "$CTLS"
+    fi
+  else
+    CTLS=$(printf '%s\n' "$R_SVCOFF" | awk -F'|' \
+      'NF>=3 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_svcoff "STIG disabled services" WARN med "n/a" \
+      "Could not read the complete /etc/inetd.conf service inventory (grep rc=$INE_RC); no STIG disabled-service rule was assessed." \
+      "verify /etc/inetd.conf is readable, then re-run PTxray." "$CTLS"
+  fi
 
 _AIXRAY_SESSION_KEYS=""
   # nfs_exports — unsafe root/anonymous mappings and unrestricted writable exports.
@@ -40887,13 +41055,22 @@ _AIXRAY_SESSION_KEYS=""
 
 # ---- H. Config hygiene -----------------------------------------------------------------
 function checks_config {
-  typeset XN STAT NTPS RESOLV RT TN TZ HOSTS HOSTSRC HOSTSTATE NETSVC NETSVCRC RESORDER ORDERNOTE
+  typeset XN XNRC STAT NTPCONF NTPCONFRC NTPS RESOLV RT TN TZ TZRC HOSTS HOSTSRC HOSTSTATE NETSVC NETSVCRC RESORDER ORDERNOTE
 
   # ntp — daemon running and at least one server configured
-  XN=$(aix lssrc_xntpd lssrc -s xntpd)
+  XN=$(aix lssrc_xntpd lssrc -s xntpd); XNRC=$?
   STAT=$(printf '%s\n' "$XN" | awk '$1=="xntpd"{print $NF; exit}')
-  NTPS=$(aix ntp_conf grep '^server' /etc/ntp.conf | awk 'NF{n++} END{print n+0}')
-  if [ "$STAT" = "active" ] && [ "${NTPS:-0}" -ge 1 ]; then
+  NTPCONF=$(aix ntp_conf grep '^server' /etc/ntp.conf); NTPCONFRC=$?
+  NTPS=$(printf '%s\n' "$NTPCONF" | awk 'NF{n++} END{print n+0}')
+  if [ "$XNRC" -ne 0 ] || [ -z "$XN" ] || [ -z "$STAT" ] ||
+     [ "$NTPCONFRC" -gt 1 ] ||
+     { [ "$NTPCONFRC" -eq 0 ] && [ -z "$NTPCONF" ]; } ||
+     { [ "$NTPCONFRC" -eq 1 ] && [ -n "$NTPCONF" ]; }; then
+    add config ntp "Time synchronization (NTP)" NOT_ASSESSED med \
+        "not assessed — NTP probe incomplete (lssrc rc=$XNRC, ntp.conf rc=$NTPCONFRC)" \
+        "The NTP daemon/configuration probes failed or returned contradictory evidence." \
+        "run 'lssrc -s xntpd' and inspect /etc/ntp.conf, then rerun PTxray." "stig:V-215208 cis-l1"
+  elif [ "$STAT" = "active" ] && [ "${NTPS:-0}" -ge 1 ]; then
     add config ntp "Time synchronization (NTP)" PASS med "xntpd active, $NTPS server(s)" \
         "The clock is disciplined by NTP — log correlation, Kerberos and TLS all depend on it." "n/a" "stig:V-215208 cis-l1"
   else
@@ -40941,8 +41118,16 @@ function checks_config {
   fi
 
   # tz_set
-  TZ=$(aix etc_environment grep '^TZ=' /etc/environment | awk 'NR==1{print}')
-  if [ -n "$TZ" ]; then
+  TZ=$(aix etc_environment grep '^TZ=' /etc/environment); TZRC=$?
+  TZ=$(printf '%s\n' "$TZ" | awk 'NR==1{print}')
+  if [ "$TZRC" -gt 1 ] ||
+     { [ "$TZRC" -eq 0 ] && [ -z "$TZ" ]; } ||
+     { [ "$TZRC" -eq 1 ] && [ -n "$TZ" ]; }; then
+    add config tz_set "Timezone (TZ)" NOT_ASSESSED low \
+        "not assessed — timezone probe failed or contradicted its status (rc=$TZRC)" \
+        "The /etc/environment probe did not provide reliable timezone evidence." \
+        "inspect /etc/environment, then rerun PTxray."
+  elif [ -n "$TZ" ]; then
     add config tz_set "Timezone (TZ)" PASS low "$TZ" \
         "The system timezone is set explicitly." "n/a"
   else

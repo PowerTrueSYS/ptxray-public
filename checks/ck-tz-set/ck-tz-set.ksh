@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -382,8 +406,16 @@ AIXRAY_TOOL=ck-tz-set
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   # tz_set
-  TZ=$(aix etc_environment grep '^TZ=' /etc/environment | awk 'NR==1{print}')
-  if [ -n "$TZ" ]; then
+  TZ=$(aix etc_environment grep '^TZ=' /etc/environment); TZRC=$?
+  TZ=$(printf '%s\n' "$TZ" | awk 'NR==1{print}')
+  if [ "$TZRC" -gt 1 ] ||
+     { [ "$TZRC" -eq 0 ] && [ -z "$TZ" ]; } ||
+     { [ "$TZRC" -eq 1 ] && [ -n "$TZ" ]; }; then
+    add config tz_set "Timezone (TZ)" NOT_ASSESSED low \
+        "not assessed — timezone probe failed or contradicted its status (rc=$TZRC)" \
+        "The /etc/environment probe did not provide reliable timezone evidence." \
+        "inspect /etc/environment, then rerun PTxray."
+  elif [ -n "$TZ" ]; then
     add config tz_set "Timezone (TZ)" PASS low "$TZ" \
         "The system timezone is set explicitly." "n/a"
   else

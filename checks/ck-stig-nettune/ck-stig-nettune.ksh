@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -391,16 +415,15 @@ V-215430|no|bcastping|eq|0
 # R_SVCOFF — static service-shutdown rules (Family 4, WP-H3).
 #   V-ID|type|name   (type inetd = the inetd.conf service token 'name' must NOT appear enabled/
 #   uncommented in /etc/inetd.conf; type rctcp = an uncommented start command for daemon 'name'
-#   must NOT appear in /etc/rc.tcpip; type lssrc = SRC subsystem 'name' must be inoperative per
-#   'lssrc -a'). For a disable-service rule the STIG treats "service enabled/running" as the
-#   finding, so a token/start command that is absent/commented (or a subsystem inoperative/
-#   undefined) is compliant = PASS, not NA. All captures are non-root reads. This is the broad
+#   must NOT appear in /etc/rc.tcpip). For a disable-service rule the STIG treats "service
+#   enabled/running" as the finding, so an absent/commented token or start command is compliant
+#   = PASS, not NA. All captures are non-root reads. This is the broad
 #   per-V-ID STIG service list; it does NOT duplicate the inetd_cleartext check (which flags
 #   cleartext-LOGIN daemons enabled). Every row transcribed from the DISA STIG Check/Fix text via
 #   the cyber.trackr.live structured API (verbatim XCCDF). HONEST count: 30 inetd.conf disable
 # network-lint: allow-next=5 -- STIG explanatory prose, not network command invocations
 #   rules plus 7 /etc/rc.tcpip boot-daemon rules; the AIX 7.x STIG V3R3 has ZERO pure
-#   lssrc-subsystem disable rules (the engine still supports the lssrc type for completeness).
+#   lssrc-subsystem disable rules, so the grouped check performs no lssrc probe.
 #   The inetd first-field TOKEN is used, not the daemon name (rexec's token is 'exec', rsh's is
 #   'shell', rlogin's is 'login'). NOTES:
 #   V-215334 (high) and V-215386 (med) are two distinct real V-IDs with the same 'tftp' token —
@@ -416,28 +439,27 @@ V-215430|no|bcastping|eq|0
 # network-lint: allow-next=39 -- embedded STIG service-name data table immediately below
 
 # eval_nettune — evaluate every R_NETTUNE row and emit one grouped finding (stig_nettune)
-# plus per-rule detail (F_RULES). One capture per distinct command: 'no -a' and/or 'nfso -a'
-# (both are NON-root reads — listing a tunable never needs privilege, only setting one does,
+# plus per-rule detail (F_RULES). The current rule table requires one static `no -a`
+# capture (a NON-root read — listing a tunable never needs privilege, only setting one does,
 # so there is no root gate here). Each captured "tunable = value" line becomes a
 # command|tunable|value record; a tunable absent from the capture is NA. Numeric compare only;
 # unlike R_SECATTR, op le does NOT special-case 0 — for a network tunable 0 is normally the
 # SECURE value, so it is compared literally.
 function eval_nettune {
-  typeset CMDS CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX NT_CMD NT_RAW
+  typeset CAP RAW DETAIL SUM CTLS NPASS NFAIL NNA NAPPLIC FLIST ST SEV OBS MEAN FIX NT_RAW NT_RC
 
-  # distinct commands (no, nfso) in first-seen order
-  CMDS=$(printf '%s\n' "$R_NETTUNE" | awk -F'|' 'NF>=5 && $1 !~ /^#/ && $2!="" && !seen[$2]++{print $2}')
-  [ -z "$CMDS" ] && return 0
-
-  # one 'no -a' / 'nfso -a' per command; parse "tunable = value" -> "command|tunable|value".
-  # An unreadable command (rc!=0 or empty) emits nothing -> its rules fall to NA.
-  CAP=$(printf '%s\n' "$CMDS" | while read NT_CMD; do
-    [ -z "$NT_CMD" ] && continue
-    NT_RAW=$(aix "stig_${NT_CMD}_a" "$NT_CMD" -a)
-    if [ $? -eq 0 ] && [ -n "$NT_RAW" ]; then
-      printf '%s\n' "$NT_RAW" | awk -v cmd="$NT_CMD" 'NF>=3 && $2=="="{print cmd "|" $1 "|" $3}'
-    fi
-  done)
+  # R_NETTUNE currently contains only AIX `no` rules, so keep the executed command static
+  # and exactly aligned with manifest.json.
+  NT_RAW=$(aix stig_no_a no -a); NT_RC=$?
+  if [ "$NT_RC" -ne 0 ] || [ -z "$NT_RAW" ]; then
+    CTLS=$(printf '%s\n' "$R_NETTUNE" | awk -F'|' \
+      'NF>=5 && $1 !~ /^#/ && $1!=""{printf "%s%s",(n++?" ":""),"stig:" $1}')
+    add security stig_nettune "STIG network tunables" WARN med "n/a" \
+      "Could not read the network tunables (no -a rc=$NT_RC); no STIG network-option rule was assessed." \
+      "verify 'no -a' returns complete output, then re-run PTxray." "$CTLS"
+    return 0
+  fi
+  CAP=$(printf '%s\n' "$NT_RAW" | awk 'NF>=3 && $2=="="{print "no|" $1 "|" $3}')
 
   # one awk pass: rules then captured values -> per-rule verdict + summary
   RAW=$({ printf '%s\n' "$R_NETTUNE"; echo "AIXRAY_CAP"; printf '%s\n' "$CAP"; } | awk -F'|' '
@@ -503,6 +525,11 @@ function eval_nettune {
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a; failing: $FLIST"
     MEAN="One or more kernel network options are set to a value the DISA STIG for IBM AIX 7.x flags — e.g. IP forwarding on a non-router, or TCP half-open connection cleanup disabled. Each is a documented hardening gap an auditor will flag."
     FIX="set the failing tunables with 'no -p -o <tunable>=<value>' (nfso for NFS options) so the change persists across reboot; the compliance report lists every rule, the required value, and the observed value."
+  elif [ "$NNA" -gt 0 ]; then
+    ST=WARN; SEV=med
+    OBS="$NPASS of $NAPPLIC rules compliant, $NNA not assessed"
+    MEAN="One or more network-tunable values were unavailable; the readable rules passed, but the full STIG network-tunable group could not be assessed."
+    FIX="verify 'no -a' and 'nfso -a' return complete output, then re-run PTxray."
   else
     ST=PASS; SEV=med
     OBS="$NPASS of $NAPPLIC rules compliant, $NNA n/a"

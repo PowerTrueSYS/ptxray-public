@@ -41,8 +41,8 @@ function aix {
 
 # aixv preserves stderr as evidence, for read-only commands that write their
 # version banner or diagnostics there rather than to stdout. (Deliberately no
-# example command name here: this comment is copied into all 324 standalone
-# tools, and tools/ci/egress-lint.sh reads a banned network command name in a
+# example command name here: this comment is copied into every standalone tool,
+# and tools/ci/egress-lint.sh reads a banned network command name in a
 # comment as a violation just as it would in a command position.)
 function aixv {
   typeset key rc
@@ -80,6 +80,30 @@ function aix_capture_missing {
     return 0
   fi
   return 1
+}
+
+# count_nonempty_lines <command> [args...] — stream a potentially large command
+# through awk and emit only its small decimal count. The producer appends its rc
+# as a completion marker so awk, whose status is the pipeline status on ksh88,
+# can propagate a failed/incomplete producer instead of laundering it through a
+# successful count. Keep this byte-for-byte aligned with the monolith helper.
+function count_nonempty_lines {
+  {
+    "$@" 2>&1
+    printf '__AIXRAY_COUNT_RC__=%s\n' "$?"
+  } | awk '
+    /^__AIXRAY_COUNT_RC__=[0-9][0-9]*$/ {
+      markers++
+      capture_rc=$0
+      sub(/^__AIXRAY_COUNT_RC__=/,"",capture_rc)
+      next
+    }
+    NF { count++ }
+    END {
+      if (markers != 1) exit 125
+      if (capture_rc+0 != 0) exit capture_rc+0
+      print count+0
+    }'
 }
 
 function jesc {
@@ -381,6 +405,8 @@ AIXRAY_TOOL=ck-aix-uak-expiry
 
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
+typeset AIXUAK_Y AIXUAK_MD AIXUAK_M AIXUAK_D
+
 HW_GEN="
 8202-*|POWER7|2019-09-30
 8205-*|POWER7|2019-09-30
@@ -395,15 +421,6 @@ HW_GEN="
 9105-*|POWER10|SUPPORTED
 9043-*|POWER10|SUPPORTED
 "
-
-function yyyymmdd2iso {
-  typeset raw=$1 y md m d
-  y=${raw%????}
-  md=${raw#????}
-  m=${md%??}
-  d=${raw#??????}
-  echo "${y}-${m}-${d}"
-}
 
 PRTCONF=$(aix prtconf prtconf); PRTCONF_RC=$?
 if [ "$PRTCONF_RC" -ne 0 ]; then PRTCONF=""; fi
@@ -443,7 +460,13 @@ if [ "$PRTCONF_RC" -ne 0 ]; then PRTCONF=""; fi
   fi
   AIXUAKISO=""
   case "$AIXUAKRAW" in
-    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]) AIXUAKISO=$(yyyymmdd2iso "$AIXUAKRAW");;
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9])
+      AIXUAK_Y=${AIXUAKRAW%????}
+      AIXUAK_MD=${AIXUAKRAW#????}
+      AIXUAK_M=${AIXUAK_MD%??}
+      AIXUAK_D=${AIXUAKRAW#??????}
+      AIXUAKISO="${AIXUAK_Y}-${AIXUAK_M}-${AIXUAK_D}"
+      ;;
   esac
   if [ -n "$AIXUAKISO" ] && [ "$(valid_ymd "$AIXUAKISO")" -eq 1 ]; then
     FACT_AIX_UAK_EXPIRY="$AIXUAKISO"
