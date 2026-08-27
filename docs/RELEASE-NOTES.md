@@ -1,6 +1,67 @@
 # Release notes
 
-<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->
+
+<!-- PTXRAY-PUBLICATION-READY:v1.6.0 -->
+
+## v1.6.0
+
+PTxray 1.6.0 is the current published release for IBM AIX and IBM i. It is the
+first release that ships the report: two report runners and the tool tree they
+call, so a scan produces the PTxray report page (`report.html`), its print form,
+and the Blueprint feed — not only verdict tables.
+
+**What is new**
+
+- **Report runners.** `ptxray-report-aix-1.6.0.tar` and
+  `ptxray-report-ibmi-1.6.0.tar` each carry a runner (`dist/tools/aixray-scan.ksh`,
+  `dist/tools/ibmi-scan.ksh`), the tool tree and data it calls, and a
+  `README-REPORT.md` naming the exact command. The runner writes `report.html`,
+  `report.json`, `scan.ptx` (the Blueprint input on AIX) and, on IBM i,
+  `ptxray-ibmi.json` (the Blueprint input on IBM i). The one-file scripts alone
+  do not produce the report.
+- **Definitions by default.** The runners download the latest signed definitions
+  by default. Opt out with `--offline` (cache only) or `--definitions-bundle FILE`
+  to point at definitions you copied in for air-gapped machines.
+- **DISA STIG for AIX 7.x.** The AIX edition assesses the STIG in full alongside
+  CIS Level 1, CIS Level 2 and FFIEC; each standard is selectable at scan time and
+  the report carries an overall grade per selected standard.
+- **IBM i edition.** 122 controls against the CIS IBM i 7.5 Benchmark v2.1.0
+  (Level 1 and Level 2), the IBM i security bulletins/CVE currency, release
+  support and PTF group status, rendered on the same report design as AIX.
+- **Every check has a Blueprint entry.** The Blueprint (the sequenced treatment
+  plan) covers every control in this release, AIX and IBM i, 1:1.
+
+**Not assessed in this release (typed refusals, never silent)**
+
+- IBM i firmware currency, PTF group currency and Security/HIPER group currency:
+  the IBM `SYSTOOLS` currency views they need are outbound calls to IBM FLRT/PSP,
+  which the assessment boundary bans. An explicit `--allow-ibm-lookup` opt-in
+  arrives in 1.7. The IBM i overall grade is computed from the Security pillar;
+  the Currency pillar is shown as not scored.
+- IBM i SMTP relay (`ALWRLY`): its on-disk store could not be verified.
+- AIX SMS multi-boot state and residual human/application accounts require an
+  administrator / ISSO review by design.
+
+**Unchanged from 1.5.0**
+
+The AIX runner requires root; the IBM i runner requires QSECOFR. Assessment
+probes remain no-egress, read-only on system configuration, and non-remediating
+(the only network component is the separate `ptxray-defs.sh`). The release set
+is offline-signed: eleven assets — the six 1.5 artifacts (`ptxray-aix.sh`, the
+byte-identical `aixray-aix.sh` alias, `ptxray-defs.sh`, `ptxray-ibmi.sh`,
+`ptxray-review-pack.sh`, `ptxray-review-validate.awk`), the two report bundles,
+`SHA256SUMS`, its detached signature, and the release public key. The
+authoritative release-key fingerprint is unchanged:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
+
+The one-file scripts remain in the release set for compatibility; they are
+scheduled to retire in 1.7 in favour of the report runners.
+
+The VIOS lane remains disabled pending live VIOS acceptance and is not claimed
+by this release.
 
 ## v1.5.0
 
