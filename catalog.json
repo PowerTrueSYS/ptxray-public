@@ -10527,7 +10527,7 @@
       "blurb": "This check verifies that the SSH daemon terminates idle sessions within ten minutes. STIG V-215290 requires ClientAliveInterval of 600 seconds or less and ClientAliveCountMax of 0 in /etc/ssh/sshd_config. When those settings are missing or looser, an unattended SSH session stays open for reuse.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-stig-ssh-clientalive/ck-stig-ssh-clientalive.ksh",
-      "sha256": "ce7987bbfe5ae4aa06c35ba1dd4a5ef154bef13abb11f640d690deaeedc4f0e2"
+      "sha256": "89253ff1bff5346830654917ea7f61aab9db0158d76e3963351ca4ee77e33e85"
     },
     {
       "id": "ck-stig-ssh-compression",

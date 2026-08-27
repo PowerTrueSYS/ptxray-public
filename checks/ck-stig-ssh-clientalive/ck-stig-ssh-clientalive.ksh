@@ -804,7 +804,7 @@ _AIXRAY_SESSION_KEYS=""
       BEGIN { interval = ""; countmax = ""; bad = 0 }
       /^[ \t]*$/ { next }
       {
-        gsub(/=/, " ")
+        gsub(/[=]/, " ")
         if ($1 != "ClientAliveInterval" && $1 != "ClientAliveCountMax") next
         if (NF != 2) { bad = 1; next }
         if ($2 !~ /^[0-9][0-9]*$/) { bad = 1; next }
