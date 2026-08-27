@@ -22,9 +22,10 @@ and the Blueprint feed — not only verdict tables.
 - **Definitions by default.** The runners download the latest signed definitions
   by default. Opt out with `--offline` (cache only) or `--definitions-bundle FILE`
   to point at definitions you copied in for air-gapped machines.
-- **DISA STIG for AIX 7.x.** The AIX edition assesses the STIG in full alongside
-  CIS Level 1, CIS Level 2 and FFIEC; each standard is selectable at scan time and
-  the report carries an overall grade per selected standard.
+- **DISA STIG for AIX 7.x.** The AIX report runner assesses 91 of the 283 STIG
+  requirements (the one-file script carries a smaller subset) alongside CIS Level 1,
+  CIS Level 2 and FFIEC; each standard is selectable at scan time and the report
+  carries an overall grade per selected standard.
 - **IBM i edition.** 122 controls against the CIS IBM i 7.5 Benchmark v2.1.0
   (Level 1 and Level 2), the IBM i security bulletins/CVE currency, release
   support and PTF group status, rendered on the same report design as AIX.
