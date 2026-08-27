@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldap-ssl-ldap-used",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_ssl_ldap_used"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -iE \"^authtype:[[:blank:]]*ldap_auth\" /etc/security/ldap/ldap.cfg",
+    "grep -iE \"^useSSL:[[:blank:]]*yes\" /etc/security/ldap/ldap.cfg"
+  ],
+  "tags": [
+    "stig:V-215204"
+  ],
+  "severity": "high",
+  "blurb": "If the AIX LDAP client is used for authentication (authtype:ldap_auth) it must connect to the LDAP server over SSL. authtype:ldap_auth without useSSL:yes is a finding; when the LDAP client is not used for authentication the requirement does not apply.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-ssl-ldap-used/ck-stig-ldap-ssl-ldap-used.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ssh-daemon-configured-disable",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_daemon_configured_disable"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/ssh/sshd_config",
+    "sh -c \"grep -i PermitEmptyPasswords /etc/ssh/sshd_config | grep -v '^#'\""
+  ],
+  "tags": [
+    "stig:V-215302"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH daemon is configured to reject empty passwords. PermitEmptyPasswords yes, or a missing uncommented directive, lets an account with no password authenticate over SSH.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-daemon-configured-disable/ck-stig-ssh-daemon-configured-disable.ksh"
+}

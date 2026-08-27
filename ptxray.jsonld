@@ -4,10 +4,10 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "The PTxray 1.5.0 published release for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
+  "description": "The PTxray 1.6.0 published release for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.5.0",
+  "softwareVersion": "1.6.0",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -28,7 +28,7 @@
   "featureList": [
     "Assessment changes no system configuration and performs no remediation",
     "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
-    "PTxray 1.5 AIX requires root; IBM i requires QSECOFR; VIOS is not yet enabled",
+    "PTxray 1.6 AIX requires root; IBM i requires QSECOFR; VIOS is not yet enabled",
     "The runner verifies and invokes the separate adjacent same-release digest-bound ptxray-defs.sh before assessment",
     "Connected mode attempts to download current signed definitions by default; --offline uses signed cache; --definitions-bundle imports a local signed bundle and adjacent signature",
     "Old or stale definitions produce an explicit age warning",
@@ -39,7 +39,7 @@
     "DISA STIG for IBM AIX 7.x coverage is partial: 66 distinct rule V-IDs receive an engine verdict; this count is not a single-release coverage fraction; V-215399 covers only the clean_partial_conns tunable, not its package-commit condition; deferred V-215429 is not counted",
     "260 CIS L1-aligned checks across NFS exports, password hashing, file ownership and permissions, and network tunables, plus login policy, auditing, cron and at, home directories, system accounts and the r-command services, resolving to 209 distinct Level 1 control numbers of the 212 in CIS IBM AIX 7 Benchmark v1.2.0; 5.1.4, 5.1.5 and 7.1 are not claimed; alignment only",
     "IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5: 76 of 89 CIS Level 1 controls receive an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i",
-    "387 standalone check tools with machine-readable manifests"
+    "585 standalone check tools with machine-readable manifests"
   ],
   "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
@@ -51,7 +51,7 @@
     {
       "@type": "PropertyValue",
       "name": "standaloneCheckCount",
-      "value": 387
+      "value": 585
     },
     {
       "@type": "PropertyValue",

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ipsec-default-deny",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ipsec_default_deny"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsfilt -v4 -n0",
+    "lsfilt -v6 -n0"
+  ],
+  "tags": [
+    "stig:V-219057"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must employ a deny-all, allow-by-exception IPsec default filter so connections to other systems are blocked unless an explicit permit exception exists. This check reads the Rule-ID 0 all-traffic filter rule for IPv4 and IPv6 and verifies its action is deny rather than permit.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ipsec-default-deny/ck-stig-ipsec-default-deny.ksh"
+}

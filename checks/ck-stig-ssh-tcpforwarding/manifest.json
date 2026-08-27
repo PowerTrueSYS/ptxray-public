@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-tcpforwarding",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_tcpforwarding"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"[ -r /etc/ssh/sshd_config ] || exit 2; grep -i AllowTcpForwarding /etc/ssh/sshd_config | grep -v '^#'; STF_PRC=\\$?; if [ \\$STF_PRC -eq 1 ]; then printf '%s\\n' ptxray_absent_allowtcpforwarding; exit 0; fi; exit \\$STF_PRC\""
+  ],
+  "tags": [
+    "stig:V-215301"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon has TCP forwarding turned off. TCP forwarding lets an authenticated SSH session relay TCP connections through the host, so a session that should only provide a shell can reach other network services.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-tcpforwarding/ck-stig-ssh-tcpforwarding.ksh"
+}

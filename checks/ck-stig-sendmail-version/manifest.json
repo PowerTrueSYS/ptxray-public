@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-sendmail-version",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sendmail_version"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -qcL bos.net.tcp.sendmail"
+  ],
+  "tags": [
+    "stig:V-215414"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that sendmail is absent or new enough that the DEBUG SMTP command is not implemented. Sendmail versions below 8.6 still implement DEBUG. Evidence is the bos.net.tcp.sendmail fileset level from lslpp, not an invocation of the MTA binary.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sendmail-version/ck-stig-sendmail-version.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-log-perms-audit-logs-set-660",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_log_perms_audit_logs_set_660"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "ls -ln \"$trail_dir\""
+  ],
+  "tags": [
+    "stig:V-215245"
+  ],
+  "severity": "medium",
+  "blurb": "Audit trail files record who did what on the system. A mode looser than 660 lets accounts outside root and the audit group read or alter that record, destroying its value as evidence.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-log-perms-audit-logs-set-660/ck-stig-audit-log-perms-audit-logs-set-660.ksh"
+}

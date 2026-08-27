@@ -1,0 +1,24 @@
+{
+  "id": "ck-stig-mfa-conf",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mfa_conf"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"grep -i \\\"^[^#]*trustedcas\\\" /etc/security/pmfa/pam_pmfa.conf\"",
+    "sh -c \"grep -i \\\"^[^#]*mfa-url\\\" /etc/security/pmfa/pam_pmfa.conf\"",
+    "sh -c \"grep -i \\\"^[^#]*server-version\\\" /etc/security/pmfa/pam_pmfa.conf\"",
+    "sh -c \"grep -i \\\"^[^#]*ctc-prompt\\\" /etc/security/pmfa/pam_pmfa.conf\""
+  ],
+  "tags": [
+    "stig:V-215439"
+  ],
+  "severity": "medium",
+  "blurb": "PowerSC MFA (pam_pmfa.conf) TRUSTEDCAS, MFA-URL, SERVER-VERSION=2, and CTC-PROMPT-ONLY=Y configuration.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mfa-conf/ck-stig-mfa-conf.ksh"
+}

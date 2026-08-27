@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audio-dev-group",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audio_dev_group"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/sbin/lsdev -C",
+    "ls -lL /dev/*aud*"
+  ],
+  "tags": [
+    "stig:V-215271"
+  ],
+  "severity": "medium",
+  "blurb": "Audio input devices such as microphones are readable by whoever their group allows, so an audio device group-owned by an ordinary group lets any member of that group open the device and record what is said near the machine; keeping the group at root, sys, bin or system limits that to administrators.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audio-dev-group/ck-stig-audio-dev-group.ksh"
+}

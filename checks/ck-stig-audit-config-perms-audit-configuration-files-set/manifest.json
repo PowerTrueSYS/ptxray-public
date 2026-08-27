@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-config-perms-audit-configuration-files-set",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_config_perms_audit_configuration_files_set"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -a /etc/security",
+    "ls -l /etc/security/audit"
+  ],
+  "tags": [
+    "stig:V-215317"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that audit configuration files are not readable or writable beyond root and the audit group. Broader access can let an unprivileged account learn exactly what is being recorded, or alter the audit setup so activity by that same account stops being logged.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-config-perms-audit-configuration-files-set/ck-stig-audit-config-perms-audit-configuration-files-set.ksh"
+}

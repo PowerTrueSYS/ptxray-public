@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lib-mode",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lib_mode"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -lLR /usr/lib /lib"
+  ],
+  "tags": [
+    "stig:V-215279"
+  ],
+  "severity": "medium",
+  "blurb": "AIX library files under /usr/lib and /lib must have mode 0755 or less permissive. A more permissive mode lets an unprivileged account replace a library used by privileged processes, so the file could be swapped for a hostile implementation.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lib-mode/ck-stig-lib-mode.ksh"
+}

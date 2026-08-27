@@ -1,0 +1,24 @@
+{
+  "id": "ck-stig-userinit-ldr-preload",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_userinit_ldr_preload"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "sh -c 'cat /etc/passwd | cut -f 1,1 -d \":\" | xargs -n1 -IUSER sh -c \"grep -l LDR_PRELOAD ~USER/.*\"'",
+    "ls -ld \"$SUL_PATH\"",
+    "cat \"$SUL_PATH\""
+  ],
+  "tags": [
+    "stig:V-215425"
+  ],
+  "severity": "medium",
+  "blurb": "Local initialization files must list only absolute paths in LDR_PRELOAD. A relative or empty colon slot can load an attacker-controlled library into the processes of a user. Paths that are absolute still require ISSO/ISSM authorization, which this check cannot decide.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-userinit-ldr-preload/ck-stig-userinit-ldr-preload.ksh"
+}

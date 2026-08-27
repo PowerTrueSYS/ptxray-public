@@ -9,13 +9,14 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "lsuser -a home root",
-    "ls -ldn /root"
+    "sh -c \"grep \\\"^root\\\" /etc/passwd | awk -F\\\":\\\" '{print \\$6}'\"",
+    "sh -c \"ls -ld $DRH_HOME 2>&1\""
   ],
   "tags": [
-    "cis-l1"
+    "cis-l1",
+    "stig:V-215198"
   ],
-  "blurb": "This check confirms the root account has a dedicated home directory (/root) that is owned by root and locked so only root can read or change it. That directory holds the startup files that run every time the root account logs in. If it is missing, owned by someone else, world-accessible, or replaced with the whole filesystem, another user could alter those startup files to steal secrets or sneak commands into the root login and take control of the system.",
+  "blurb": "This check confirms the root account home directory (taken from /etc/passwd, other than /) has mode 0700 exactly and is restricted to root. That directory holds the startup files that run every time the root account logs in. If it is missing, owned by someone else, or has a mode other than 0700, another user could alter those startup files to steal secrets or sneak commands into the root login.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-diracc-roothome/ck-diracc-roothome.ksh"
 }

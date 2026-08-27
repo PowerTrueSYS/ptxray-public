@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-sshd-active",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sshd_active"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c '_out=$(lslpp -i) || exit $?; printf \"%s\\n\" \"$_out\" |grep -i ssh || echo \"openssh.base.server not installed\"'",
+    "lssrc -s sshd"
+  ],
+  "tags": [
+    "stig:V-215179"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that AIX runs the SSH server for replay-resistant authentication to privileged and non-privileged accounts. openssh.base.server must be installed and the sshd subsystem must be active.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sshd-active/ck-stig-sshd-active.ksh"
+}

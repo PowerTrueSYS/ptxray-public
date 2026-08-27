@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-mindigit",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_mindigit"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a mindigit",
+    "lsuser -a mindigit ALL"
+  ],
+  "tags": [
+    "stig:V-215219"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that the default stanza and every user require at least one numeric character in passwords (mindigit >= 1). An unset or zero mindigit on default or any account lets users choose passwords with no digits.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-mindigit/ck-stig-user-mindigit.ksh"
+}

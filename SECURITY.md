@@ -1,14 +1,15 @@
 # Security and trust model
 
-PTxray is intended to be inspected before it is run. The published PTxray 1.5.0
+PTxray is intended to be inspected before it is run. The published PTxray 1.6.0
 release requires root for AIX and QSECOFR for IBM i. The VIOS lane
 remains disabled pending live VIOS acceptance. The
 security boundary is the exact, verified release asset set for the selected
 platform, not a brand claim or a download page.
 
-This document covers the `ptxray-aix.sh` and `ptxray-ibmi.sh` runners, the
-separate adjacent `ptxray-defs.sh` downloader, and the offline
-`ptxray-review-pack.sh` helper in the 1.5 release.
+This document covers the report runners in the `ptxray-report-aix-1.6.0.tar`
+and `ptxray-report-ibmi-1.6.0.tar` bundles, the compatibility `ptxray-aix.sh`
+and `ptxray-ibmi.sh` runners, the separate adjacent `ptxray-defs.sh`
+downloader, and the offline `ptxray-review-pack.sh` helper in the 1.6 release.
 
 ## Assessment security contract
 
@@ -120,12 +121,20 @@ See [`docs/VERIFY.md`](docs/VERIFY.md) for exact commands to inspect likely
 network and mutating primitives, run the public gates, and compare SHA-256
 digests.
 
-## PTxray 1.5 release boundary
+## PTxray 1.6 release boundary
 
-PTxray 1.5.0 is the current published release. AIX requires root, and IBM
+PTxray 1.6.0 is the current published release. The assessment boundary is
+unchanged from 1.5.0. AIX requires root, and IBM
 i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`. The privilege
 gate runs before definitions selection, so an unprivileged invocation neither
 starts a scan nor reaches the network.
+
+The report runners shipped in `ptxray-report-aix-1.6.0.tar` and
+`ptxray-report-ibmi-1.6.0.tar` are the product entry points. They run the same
+read-only assessment tools inside the same boundary: they change no system
+configuration, perform no remediation, and make no network calls of their own.
+The separate `ptxray-defs.sh` remains the only component permitted to reach the
+network.
 
 The runner invokes the separate adjacent `ptxray-defs.sh` only after validating
 its ownership, mode, and embedded same-release SHA-256 digest. Connected mode
@@ -192,7 +201,7 @@ candidate-file audit that remains necessary, are documented in
 > key must not be sent with the review file. Creating either file performs no
 > upload or send; sharing remains a deliberate user action.
 
-The 1.5 release helper writes its `ptxray-review-*.html`,
+The 1.6 release helper writes its `ptxray-review-*.html`,
 `ptxray-local-key-*.map`, and `ptxray-local-removals-*.txt` outputs beside the
 input report through a private scratch directory. Keep the key and removals
 manifest local. This optional local transformation does not broaden

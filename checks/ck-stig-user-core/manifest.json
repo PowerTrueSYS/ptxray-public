@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-user-core",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_core"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a core ALL"
+  ],
+  "tags": [
+    "stig:V-215396"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every user core dump size is 0 so process cores cannot leak memory contents. An account with core unset or set to a nonzero size can write process memory to disk, exposing credentials and other in-memory data.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-core/ck-stig-user-core.ksh"
+}

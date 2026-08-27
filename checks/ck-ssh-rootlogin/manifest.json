@@ -9,7 +9,8 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "sshd -T"
+    "/usr/bin/lslpp -Lc openssh.server.rte",
+    "/usr/sbin/sshd -T"
   ],
   "tags": [
     "stig:V-215287",

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-records-002006",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_records_002006"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "/usr/sbin/auditpr -i /audit/trail -v"
+  ],
+  "tags": [
+    "stig:V-215240"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX audit trail records the full text of privileged commands. Without full-text recording, the audit trail can show that a privileged action happened but not exactly what command an administrator or an intruder actually ran, so an investigator cannot reconstruct the action from the record.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-records-002006/ck-stig-audit-records-002006.ksh"
+}

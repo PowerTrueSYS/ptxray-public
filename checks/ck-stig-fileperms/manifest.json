@@ -12,9 +12,22 @@
     "ls -ldn /etc/inetd.conf /etc/ntp.conf /etc/group /etc/hosts /etc/syslog.conf"
   ],
   "tags": [
-    "stig"
+    "stig:V-215269",
+    "stig:V-215272",
+    "stig:V-215273",
+    "stig:V-215281",
+    "stig:V-215274",
+    "stig:V-215275",
+    "stig:V-215282",
+    "stig:V-245558",
+    "stig:V-245559",
+    "stig:V-245562",
+    "stig:V-245563",
+    "stig:V-245564",
+    "stig:V-245565"
   ],
-  "blurb": "This check verifies the ownership, group, and permission bits of five files mandated by the DISA STIG for IBM AIX 7.x \u2014 /etc/inetd.conf, /etc/ntp.conf, /etc/group, /etc/hosts, and /etc/syslog.conf. Any file that exists and is more permissive than the rule ceiling, or owned or grouped by the wrong id, fails; an absent file is not applicable. A wrong-owned or over-permissive config file is a documented hardening gap an auditor will flag.",
+  "severity": "medium",
+  "blurb": "This check verifies the ownership, group, and permission bits of five files mandated by the DISA STIG for IBM AIX 7.x \u2014 /etc/inetd.conf, /etc/ntp.conf, /etc/group, /etc/hosts, and /etc/syslog.conf. Any file that exists and is more permissive than the ceiling of its rule, or owned or grouped by the wrong id, fails; an absent file is not applicable. A wrong-owned or over-permissive config file is a documented hardening gap an auditor will flag.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-stig-fileperms/ck-stig-fileperms.ksh"
 }

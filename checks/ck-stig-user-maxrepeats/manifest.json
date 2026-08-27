@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-maxrepeats",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_maxrepeats"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a maxrepeats",
+    "lsuser -a maxrepeats ALL"
+  ],
+  "tags": [
+    "stig:V-215232"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that default and every account have maxrepeats set to 1, 2, or 3 so AIX rejects passwords with more than three consecutive repeating characters. An unset, 0, or greater-than-3 value on default or any user disables that limit and lets guessable runs of the same character through.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-maxrepeats/ck-stig-user-maxrepeats.ksh"
+}

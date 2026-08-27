@@ -1,0 +1,27 @@
+{
+  "id": "ck-stig-ldap-ssl-only-allow",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_ssl_only_allow"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep LDAP /etc/security/user",
+    "grep '^useSSL' /etc/security/ldap/ldap.cfg",
+    "grep -i '^ldapsslkeyf' /etc/security/ldap/ldap.cfg",
+    "ls -ld \"$LSO_KDB\"",
+    "gsk8capicmd -cert -list CA -db \"$LSO_KDB\" -stashed",
+    "gsk8capicmd -cert -details -showOID -db \"$LSO_KDB\" -stashed -label \"$LSO_LAB\"",
+    "cat /etc/security/ldap/dod-pki-anchors"
+  ],
+  "tags": [
+    "stig:V-215215"
+  ],
+  "severity": "medium",
+  "blurb": "LDAP SSL must use only DoD PKI-established certificate authorities to verify protected sessions.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-ssl-only-allow/ck-stig-ldap-ssl-only-allow.ksh"
+}

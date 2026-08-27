@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ndpd-host-daemon-disabled",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ndpd_host_daemon_disabled"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/ndpd-host\" /etc/rc.tcpip",
+    "ifconfig -a"
+  ],
+  "tags": [
+    "stig:V-215367"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the ndpd-host (IPv6 Neighbor Discovery host) daemon is not started at boot on a system that does not use IPv6. The rule is Not Applicable when ifconfig shows IPv6 (inet6) configured. When IPv6 is not in use, an uncommented \"start /usr/sbin/ndpd-host\" line in /etc/rc.tcpip is a finding: it boots an unneeded network-facing daemon that an auditor will flag on a non-IPv6 server.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ndpd-host-daemon-disabled/ck-stig-ndpd-host-daemon-disabled.ksh"
+}

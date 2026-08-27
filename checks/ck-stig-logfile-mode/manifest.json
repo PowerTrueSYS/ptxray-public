@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-logfile-mode",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_logfile_mode"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -lL /var/log /var/log/syslog /var/adm"
+  ],
+  "tags": [
+    "stig:V-215323"
+  ],
+  "severity": "medium",
+  "blurb": "AIX log files under /var/log and /var/adm must have mode 0640 or less permissive. Log files more permissive than 0640 can leak or be altered.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-logfile-mode/ck-stig-logfile-mode.ksh"
+}

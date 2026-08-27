@@ -1,0 +1,27 @@
+{
+  "id": "ck-stig-sysdir-acl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sysdir_acl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "aclget /etc",
+    "aclget /bin",
+    "aclget /usr/bin",
+    "aclget /usr/lbin",
+    "aclget /usr/ucb",
+    "aclget /sbin",
+    "aclget /usr/sbin"
+  ],
+  "tags": [
+    "stig:V-215325"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that system command directories do not have extended ACLs. An extended ACL on /etc, /bin, /usr/bin, /usr/lbin, /usr/ucb, /sbin, or /usr/sbin lets a non-owner change or replace those files.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sysdir-acl/ck-stig-sysdir-acl.ksh"
+}

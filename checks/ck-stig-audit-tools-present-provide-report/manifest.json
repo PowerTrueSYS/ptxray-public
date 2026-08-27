@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-audit-tools-present-provide-report",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_tools_present_provide_report"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -l /usr/sbin/auditpr"
+  ],
+  "tags": [
+    "stig:V-215254"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX provides /usr/sbin/auditpr so administrators can generate audit reports on demand for review, analysis, and after-the-fact security incident investigation.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-tools-present-provide-report/ck-stig-audit-tools-present-provide-report.ksh"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-devfile-worldwrite",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_devfile_worldwrite"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find / \\( -fstype jfs -o -fstype jfs2 \\) -type b -ls",
+    "find / \\( -fstype jfs -o -fstype jfs2 \\) -type c -ls",
+    "find / \\( -fstype jfs -o -fstype jfs2 \\) -type d -perm -o+w -ls"
+  ],
+  "tags": [
+    "stig:V-215184"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that device files (block and character) on local jfs/jfs2 filesystems, and the directories that hold them, are not world-writable except for device nodes the vendor intends any user to open, such as /dev/null. A world-writable device node or a world-writable directory containing device nodes lets any local user replace or remove the node and thereby disrupt or divert the device it represents.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-devfile-worldwrite/ck-stig-devfile-worldwrite.ksh"
+}

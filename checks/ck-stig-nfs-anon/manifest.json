@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-nfs-anon",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_nfs_anon"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "exportfs -v"
+  ],
+  "tags": [
+    "stig:V-215209"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every configured AIX NFS export has an anonymous UID or GID of -1, 60001, 60002, 65534, or 65535, values intended to have no permissions.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-nfs-anon/ck-stig-nfs-anon.ksh"
+}

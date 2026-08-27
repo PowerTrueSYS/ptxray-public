@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-icmp-timestamp-filter",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_icmp_timestamp_filter"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsdev -Cc ipsec",
+    "lsfilt"
+  ],
+  "tags": [
+    "stig:V-215429"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX does not process ICMP timestamp requests: the IPsec filter device is Available (lsdev -Cc ipsec shows ipsec_v4 or ipsec_v6) and the filter table (lsfilt) denies ICMP type 13 (timestamp request) inbound and ICMP type 14 (timestamp reply) outbound. Answering ICMP timestamp requests widens the network attack surface.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-icmp-timestamp-filter/ck-stig-icmp-timestamp-filter.ksh"
+}

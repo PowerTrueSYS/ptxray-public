@@ -1,0 +1,24 @@
+{
+  "id": "ck-stig-ksh-logout",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ksh_logout"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "awk -F: '$7 ~ /(^|\\/)(ksh|sh)$/ { print $1 \"|\" $6; n++ } END { if (n == 0) print \"none\" }' /etc/passwd",
+    "sh -c 'for home in `cut -d: -f6 /etc/passwd`; do if ls -alL $home/.logout >/dev/null 2>&1; then echo \"$home|present\"; else echo \"$home|missing\"; fi; done'",
+    "sh -c 'for home in `cut -d: -f6 /etc/passwd`; do if cat $home/.logout 2>/dev/null | awk \"NF { found=1 } END { exit !found }\"; then echo \"$home|message\"; else echo \"$home|empty\"; fi; done'",
+    "sh -c 'for home in `cut -d: -f6 /etc/passwd`; do if grep \"trap '\\''\\$HOME/.logout'\\'' EXIT \" $home/.profile >/dev/null 2>&1; then echo \"$home\"; fi; done'"
+  ],
+  "tags": [
+    "stig:V-215310"
+  ],
+  "severity": "low",
+  "blurb": "Interactive ksh and Bourne users must have a ~/.logout that displays a logout message and a ~/.profile EXIT trap that calls $HOME/.logout.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ksh-logout/ck-stig-ksh-logout.ksh"
+}

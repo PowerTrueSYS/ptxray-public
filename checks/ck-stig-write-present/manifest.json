@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-write-present",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_write_present"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -al /usr/bin/write"
+  ],
+  "tags": [
+    "stig:V-215401"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must keep /usr/bin/write present so admins can send a message to a currently logged-in user.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-write-present/ck-stig-write-present.ksh"
+}

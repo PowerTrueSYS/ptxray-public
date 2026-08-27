@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-sudo-authenticate",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sudo_authenticate"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l sudo.rte",
+    "grep \"!authenticate\" /etc/sudoers",
+    "find /etc/sudoers.d -type f -exec grep -l \"!authenticate\" {} \\;"
+  ],
+  "tags": [
+    "stig:V-215261"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX sudoers configuration does not use the !authenticate option. That option lets a sudo command run without re-authenticating the invoking user, so a stolen session can keep using elevated rights. Hosts that do not use sudo are not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sudo-authenticate/ck-stig-sudo-authenticate.ksh"
+}

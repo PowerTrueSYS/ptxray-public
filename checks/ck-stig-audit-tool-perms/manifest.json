@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-audit-tool-perms",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_tool_perms"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -l /usr/sbin/audit*|grep -v ldap"
+  ],
+  "tags": [
+    "stig:V-215248"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX audit tools under /usr/sbin are owned by the root account. When an audit tool belongs to another account, that account can modify or disable the tool and alter or erase the audit trail, defeating the audit subsystem that records who did what on the system.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-tool-perms/ck-stig-audit-tool-perms.ksh"
+}

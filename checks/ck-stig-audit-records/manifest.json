@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-audit-records",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_records"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "audit query",
+    "grep trail /etc/security/audit/config",
+    "/usr/sbin/auditpr -i /var/audit/audittrail -helRtcp"
+  ],
+  "tags": [
+    "stig:V-215236"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must produce audit records that carry date, time, and event type information so the audit trail can establish what events occurred.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-records/ck-stig-audit-records.ksh"
+}

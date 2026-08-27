@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-accounts-assigned-unique-user",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_accounts_assigned_unique_user"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "usrck -n ALL",
+    "cat /etc/passwd"
+  ],
+  "tags": [
+    "stig:V-215176"
+  ],
+  "severity": "high",
+  "blurb": "When two accounts share a UID the system cannot tell them apart, so the actions of one user are logged and authorized as those of the other and accountability is lost.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-accounts-assigned-unique-user/ck-stig-accounts-assigned-unique-user.ksh"
+}

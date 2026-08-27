@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-mfa-filesets",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mfa_filesets"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l"
+  ],
+  "tags": [
+    "stig:V-215436"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that IBM PowerSC MFA filesets are installed so Multi Factor Authentication is available. When those filesets are missing, the operating system cannot require a second authentication factor.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mfa-filesets/ck-stig-mfa-filesets.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-files-directories-have-valid",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_files_directories_have_valid"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'find / -nogroup -print; echo \"fgh-scan-complete rc=$?\"'"
+  ],
+  "tags": [
+    "stig:V-215420"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every file and directory on the system has a group that resolves to a valid group. A file or directory whose group does not resolve to a known identity is detached from any accountable group and can be claimed or altered by an unintended group, so its ownership does not meet the STIG requirement.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-files-directories-have-valid/ck-stig-files-directories-have-valid.ksh"
+}

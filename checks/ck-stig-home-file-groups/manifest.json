@@ -1,0 +1,24 @@
+{
+  "id": "ck-stig-home-file-groups",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_home_file_groups"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cut -d : -f 1,6 /etc/passwd",
+    "lsuser -a groups ALL",
+    "cat /etc/group",
+    "find \"$HFG_HOME\" -exec ls -lLd {} \\;"
+  ],
+  "tags": [
+    "stig:V-215278"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every file and directory inside each user home directory is group-owned by a group of which the home directory owner is a member. When a home-directory entry belongs to a group the owner does not belong to, accounts outside the intended set of the owner can reach the entry through the group permission bits, so data of the owner is exposed to unintended group access.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-home-file-groups/ck-stig-home-file-groups.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-cron-allow-sysaccounts",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_cron_allow_sysaccounts"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "more /var/adm/cron/cron.allow",
+    "more /var/adm/cron/cron.deny"
+  ],
+  "tags": [
+    "stig:V-215192"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the default AIX system accounts (bin, sys, adm, and lpd, with root excepted) are not granted cron access. If /var/adm/cron/cron.allow exists it must not be empty and must not list those accounts; if it does not exist, those accounts must instead be listed in /var/adm/cron/cron.deny. When a default system account can submit cron jobs, those jobs run with the privileges of that account and can be used to maintain unauthorized access or disrupt scheduled work.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-cron-allow-sysaccounts/ck-stig-cron-allow-sysaccounts.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-tool-perms-audit-tools",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_tool_perms_audit_tools"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -l /usr/sbin/audit*|grep -v ldap",
+    "ls -l /usr/sbin/auditldap"
+  ],
+  "tags": [
+    "stig:V-215249"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX audit tools under /usr/sbin are group-owned by the audit group and that /usr/sbin/auditldap is group-owned by the security group. When those binaries belong to the wrong group, an unauthorized group can access or alter the audit subsystem, so audit evidence can be read, changed, or suppressed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-tool-perms-audit-tools/ck-stig-audit-tool-perms-audit-tools.ksh"
+}

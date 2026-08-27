@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-listenaddress",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_listenaddress"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"grep -i ListenAddress /etc/ssh/sshd_config | grep -v '^#'\""
+  ],
+  "tags": [
+    "stig:V-215306"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon listens only on approved IP addresses. When ListenAddress is missing or binds all interfaces, the daemon accepts connections on every address; whether a specific non-loopback bind is ISSO-permitted needs site policy and is not silently passed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-listenaddress/ck-stig-ssh-listenaddress.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-rc-ldr-preload",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_rc_ldr_preload"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -r LDR_PRELOAD /etc/rc*"
+  ],
+  "tags": [
+    "stig:V-215422"
+  ],
+  "severity": "medium",
+  "blurb": "LDR_PRELOAD lists in control scripts must contain only absolute paths (or $PATH) with no empty colon entries.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-rc-ldr-preload/ck-stig-rc-ldr-preload.ksh"
+}

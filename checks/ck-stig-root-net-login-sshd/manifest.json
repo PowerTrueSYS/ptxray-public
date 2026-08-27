@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-root-net-login-sshd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_net_login_sshd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'last() { command last | head -n 200; }; last | grep \"root \" | egrep -v \"reboot|console\" | more'",
+    "sh -c 'ps -ef |grep sshd'"
+  ],
+  "tags": [
+    "stig:V-215221"
+  ],
+  "severity": "high",
+  "blurb": "root passwords must never travel the network in clear text; a non-console root login with sshd down is the finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-net-login-sshd/ck-stig-root-net-login-sshd.ksh"
+}

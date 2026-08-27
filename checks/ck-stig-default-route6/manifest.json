@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-default-route6",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_default_route6"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ifconfig -a",
+    "no -a",
+    "netstat -rn -f inet6"
+  ],
+  "tags": [
+    "stig:V-215264"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that a host using IPv6 has a default IPv6 gateway, unless the host is itself a router. When IPv6 is enabled but no default inet6 route exists, off-link IPv6 traffic has no exit path and cannot be routed reliably; DISA STIG V-215264 requires the default gateway to be configured.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-default-route6/ck-stig-default-route6.ksh"
+}

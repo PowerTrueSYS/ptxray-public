@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-have-accounts-configured-blank",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_have_accounts_configured_blank"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "pwdck -n ALL"
+  ],
+  "tags": [
+    "stig:V-215197"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that no interactive account is configured with a blank or null password. An account with a blank password can be signed into without presenting any credential, so any such account is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-have-accounts-configured-blank/ck-stig-have-accounts-configured-blank.ksh"
+}

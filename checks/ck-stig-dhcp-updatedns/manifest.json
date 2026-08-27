@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-dhcp-updatedns",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_dhcp_updatedns"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssrc -s dhcpcd",
+    "ls -l /etc/dhcpc.opt /etc/dhcpcd.ini",
+    "grep \"^updateDNS\" /etc/dhcpc.opt /etc/dhcpcd.ini"
+  ],
+  "tags": [
+    "stig:V-215427"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX DHCP client does not send dynamic DNS updates. When the DHCP client is running, any uncommented \"updateDNS\" directive in /etc/dhcpc.opt or /etc/dhcpcd.ini causes the client to publish dynamic DNS updates, which can inject uncontrolled records into the DNS namespace. The requirement is Not Applicable when AIX does not run the DHCP client. AIX grep exits 2 when one of the two config files is absent, so a matched line is still a finding and an empty rc=2 result is resolved against a config-file readability probe.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-dhcp-updatedns/ck-stig-dhcp-updatedns.ksh"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-passwd-shells",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_passwd_shells"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "cat /etc/shells",
+    "sh -c \"grep shells /etc/security/login.cfg | grep -v '*'\""
+  ],
+  "tags": [
+    "stig:V-215288"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every login shell in /etc/passwd is listed in /etc/shells or the login.cfg usw shells list, except shells used to prevent logins. Required AIX shells must appear in that allowed set. An unlisted login shell lets an account run a shell the administrator did not authorize.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-passwd-shells/ck-stig-passwd-shells.ksh"
+}

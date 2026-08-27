@@ -31,10 +31,14 @@ available from the published download channel.
 **No remediation.** PTxray reads and reports. Any change that mutates a host contradicts the
 product.
 
-## Published 1.5 release boundary
+## Published 1.6 release boundary
 
-PTxray 1.5.0 is the current published release and is available from `releases/latest` as an
-exact signed asset set. Its AIX runner requires root, and its IBM i runner
+PTxray 1.6.0 is the current published release and is available from `releases/latest` as an
+exact signed eleven-asset set: eight payloads recorded in `SHA256SUMS` — the six 1.5 artifacts
+plus `ptxray-report-aix-1.6.0.tar` and `ptxray-report-ibmi-1.6.0.tar` — that manifest, its
+detached signature, and the release public key. The report runners inside the two bundles are
+the product entry points; the one-file scripts remain for compatibility and do not produce the
+report. Its AIX runner requires root, and its IBM i runner
 requires QSECOFR. Before assessment probes begin, each runner verifies and invokes the separate,
 adjacent, same-release digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions
 update by default; `--offline` selects the signed cache, and `--definitions-bundle` imports a local
@@ -45,5 +49,8 @@ before any request. The assessment probes remain read-only, perform no remediati
 network calls, and send no assessment data away from the host. A report or explicitly requested
 export is still a local write. Keep this distinction intact on every customer-visible surface.
 
+IBM i firmware, PTF group, and Security/HIPER group currency are `NOT_ASSESSED` in 1.6; the
+`--allow-ibm-lookup` opt-in arrives in 1.7. Do not describe that currency as measured.
+
 The VIOS lane remains disabled pending live VIOS acceptance. Do not describe
-the published 1.5 release as VIOS-capable.
+the published 1.6 release as VIOS-capable.

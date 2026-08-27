@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-freespace",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_freespace"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -E \"freespace\" /etc/security/audit/config",
+    "df -k /audit"
+  ],
+  "tags": [
+    "stig:V-215241"
+  ],
+  "severity": "medium",
+  "blurb": "The system is supposed to warn while there is still room left in the audit filesystem. If the reserve is set too small, or not set at all, the filesystem fills before anyone is told and the record of what happened stops being written.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-freespace/ck-stig-audit-freespace.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-user-system-attr",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_system_attr"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a SYSTEM ALL"
+  ],
+  "tags": [
+    "stig:V-215177"
+  ],
+  "severity": "high",
+  "blurb": "The AIX SYSTEM attribute must not be NONE for any account (V-215177). SYSTEM=NONE on any account is a finding: that account is not authenticated by any method, so a login is accepted without a credential.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-system-attr/ck-stig-user-system-attr.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-mkuser-pgrp",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mkuser_pgrp"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/mkuser.default -s user -a pgrp"
+  ],
+  "tags": [
+    "stig:V-215182"
+  ],
+  "severity": "medium",
+  "blurb": "The default primary group for new regular users must be staff (or equivalent) on AIX, so that new accounts are not created in an overly privileged or untracked group.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mkuser-pgrp/ck-stig-mkuser-pgrp.ksh"
+}

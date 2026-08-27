@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-efs",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_efs"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l |grep clic",
+    "lsfs -q /fs2_mnt"
+  ],
+  "tags": [
+    "stig:V-215207"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX protects information at rest with the Encrypted File System: the clic.rte fileset is installed and the required filesystem reports EFS enabled. Whether the organization requires data-at-rest encryption, and which filesystems are in scope, is a site/ISSO determination the check does not auto-decide; a missing required filesystem, a failed probe, or an unparseable EFS flag refuses with a typed not-assessed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-efs/ck-stig-efs.ksh"
+}

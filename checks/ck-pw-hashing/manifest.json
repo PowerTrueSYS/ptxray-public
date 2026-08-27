@@ -12,9 +12,10 @@
     "lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm"
   ],
   "tags": [
+    "stig:V-215225",
     "cis-l1"
   ],
-  "blurb": "This control checks that the system is configured to hash passwords with a modern algorithm such as ssha256, ssha512, or bcrypt instead of the legacy DES crypt default. If it fails, stored passwords are protected only by the old DES method, which ignores everything past the eighth character. An attacker who obtains the password file can then crack even long passwords far more quickly.",
+  "blurb": "This control checks that the system is configured to hash passwords with a Loadable Password Algorithm, either ssha512 or ssha256, instead of the legacy DES crypt default. If it fails, stored passwords are protected only by the old DES method, which ignores everything past the eighth character. An attacker who obtains the password file can then crack even long passwords far more quickly.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-pw-hashing/ck-pw-hashing.ksh"
 }

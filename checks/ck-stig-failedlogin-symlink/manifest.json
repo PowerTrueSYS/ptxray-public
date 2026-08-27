@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-failedlogin-symlink",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_failedlogin_symlink"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -al /etc/security/failedlogin"
+  ],
+  "tags": [
+    "stig:V-215286"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that /etc/security/failedlogin is a real file and not a symbolic link. AIX appends one record per unsuccessful remote login attempt to that file; if the path is a symlink, those records can be redirected to another file or location, so the local audit trail for failed remote logins is lost.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-failedlogin-symlink/ck-stig-failedlogin-symlink.ksh"
+}

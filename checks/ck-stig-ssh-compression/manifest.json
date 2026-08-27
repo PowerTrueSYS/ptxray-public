@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ssh-compression",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_compression"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"ssh -V 2>&1\"",
+    "sh -c \"grep -i Compression /etc/ssh/sshd_config | grep -v '^#'\""
+  ],
+  "tags": [
+    "stig:V-215296"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH daemon does not allow compression when OpenSSH is older than 7.4. Compression on those versions can leak data from encrypted SSH sessions; OpenSSH 7.4 and above make the requirement not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-compression/ck-stig-ssh-compression.ksh"
+}

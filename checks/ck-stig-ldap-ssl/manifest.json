@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldap-ssl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_ssl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/bin/cat /etc/security/user",
+    "/usr/bin/cat /etc/security/ldap/ldap.cfg"
+  ],
+  "tags": [
+    "stig:V-215173"
+  ],
+  "severity": "medium",
+  "blurb": "If the AIX system uses LDAP for authentication or account information, the LDAP SSL/TLS connection must require the server to provide a certificate and that certificate must have a valid path to a trusted CA. This check verifies the decidable sub-condition: LDAP usage, useSSL=yes, and a configured ldapsslkeyf key database. Confirming that the certificate in the key database was issued by DoD PKI or a DoD-approved external PKI requires the KDB password and gsk8capicmd, which is the site/ISSO manual portion.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-ssl/ck-stig-ldap-ssl.ksh"
+}

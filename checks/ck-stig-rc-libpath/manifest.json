@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-rc-libpath",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_rc_libpath"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -r LIBPATH /etc/rc*"
+  ],
+  "tags": [
+    "stig:V-215421"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX run control scripts under /etc/rc* set LIBPATH with only absolute directory entries (the $PATH variable is accepted because it expands to absolute directories). An empty entry (leading, trailing, or doubled colon) or an entry that is not an absolute path lets the dynamic loader search an unintended directory, which can load a substituted library at boot or service start.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-rc-libpath/ck-stig-rc-libpath.ksh"
+}

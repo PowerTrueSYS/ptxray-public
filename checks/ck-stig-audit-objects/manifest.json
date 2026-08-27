@@ -1,0 +1,25 @@
+{
+  "id": "ck-stig-audit-objects",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_objects"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "audit query",
+    "ls -ld /etc/security/audit/objects",
+    "cat /etc/security/audit/objects",
+    "cat /etc/security/audit/config",
+    "lsuser -c -a auditclasses ALL"
+  ],
+  "tags": [
+    "stig:V-215246"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the system keeps an audit record of the security-relevant changes the baseline requires. Without a configured audit class applied to every user and without the listed audited objects, the system records no trail of who changed accounts, passwords, groups, limits, or the audit configuration itself, so changes by an intruder go unnoticed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-objects/ck-stig-audit-objects.ksh"
+}

@@ -10,13 +10,13 @@
   "read_only": true,
   "commands": [
     "ls -ld /etc/mail/sendmail.cf",
-    "/usr/bin/egrep -i '^O SmtpGreetingMessage' /etc/mail/sendmail.cf",
-    "test -e /etc/mail/helpfile"
+    "grep SmtpGreetingMessage /etc/mail/sendmail.cf"
   ],
   "tags": [
-    "cis-l1"
+    "cis-l1",
+    "stig:V-215412"
   ],
-  "blurb": "This control verifies that the sendmail service greets incoming mail connections with a fixed, static message rather than one that discloses the host name and the sendmail software version, and that its help file is present. A greeting that reveals those details lets anyone who connects, including an attacker scanning the network, learn the exact sendmail version running, which is the information an attacker needs to target version-specific weaknesses.",
+  "blurb": "This control verifies that the SMTP greeting offered by sendmail does not disclose the sendmail version. The SmtpGreetingMessage parameter in /etc/mail/sendmail.cf must not contain the $v or $Z macros; a greeting that expands those macros reveals the exact sendmail version to any connecting client, giving an attacker the information needed to target version-specific weaknesses.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-sendmail-greeting/ck-sendmail-greeting.ksh"
 }

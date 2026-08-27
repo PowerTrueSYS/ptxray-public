@@ -16,7 +16,27 @@ export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.5.0"
+AIXRAY_STANDALONE_VERSION="1.6.0"
+
+# aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
+# writable. Never mkdir. On first unusable directory, print one stderr line
+# naming it and set AIXRAY_CAPTURE_DIR_WARNED so later probes (including
+# those inside $(aix) subshells, which inherit the flag from the parent)
+# do not repeat the line. Call from the parent shell before the first
+# substitution so the door names the directory once.
+function aix_capture_dir_ok {
+  if [ -z "${AIXRAY_CAPTURE_DIR:-}" ]; then
+    return 1
+  fi
+  if [ -d "$AIXRAY_CAPTURE_DIR" ] && [ -w "$AIXRAY_CAPTURE_DIR" ]; then
+    return 0
+  fi
+  if [ -z "${AIXRAY_CAPTURE_DIR_WARNED:-}" ]; then
+    echo "AIXRAY_CAPTURE_DIR is not a writable directory: $AIXRAY_CAPTURE_DIR" >&2
+    AIXRAY_CAPTURE_DIR_WARNED=1
+  fi
+  return 1
+}
 
 # aix <key> <command> [args...] — fixture-aware, read-only capture boundary.
 function aix {
@@ -35,6 +55,24 @@ function aix {
       return $rc
     fi
     return 127
+  fi
+  # Capture mode: record what each probe actually returned on a live box, so a
+  # fixture set is a genuine capture rather than a hand-maintained transcription.
+  # Off unless AIXRAY_CAPTURE_DIR is set. Writes ONLY into that directory and
+  # never alters the system under inspection. Never mkdir: a missing or
+  # unwritable directory falls back to the live branch and names the path once.
+  if [ -n "${AIXRAY_CAPTURE_DIR:-}" ]; then
+    if aix_capture_dir_ok; then
+      "$@" > "$AIXRAY_CAPTURE_DIR/$key.out" 2>/dev/null
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "$rc" > "$AIXRAY_CAPTURE_DIR/$key.rc"
+      else
+        rm -f "$AIXRAY_CAPTURE_DIR/$key.rc"
+      fi
+      cat "$AIXRAY_CAPTURE_DIR/$key.out"
+      return $rc
+    fi
   fi
   "$@" 2>/dev/null
 }
@@ -57,6 +95,27 @@ function aixv {
       return $rc
     fi
     return 127
+  fi
+  # Capture mode — MUST exist here, not only in aix(). Without it a live
+  # capture simply never records an aixv() key, and replay then hits the
+  # "both files absent" branch above and returns 127. The two channels are
+  # recorded SEPARATELY so the fixture keeps the distinction this wrapper
+  # exists for, then emitted out-then-err to match replay ordering. Never
+  # mkdir: a missing or unwritable directory falls back to the live branch
+  # and names the path once.
+  if [ -n "${AIXRAY_CAPTURE_DIR:-}" ]; then
+    if aix_capture_dir_ok; then
+      "$@" > "$AIXRAY_CAPTURE_DIR/$key.out" 2> "$AIXRAY_CAPTURE_DIR/$key.err"
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "$rc" > "$AIXRAY_CAPTURE_DIR/$key.rc"
+      else
+        rm -f "$AIXRAY_CAPTURE_DIR/$key.rc"
+      fi
+      cat "$AIXRAY_CAPTURE_DIR/$key.out"
+      cat "$AIXRAY_CAPTURE_DIR/$key.err"
+      return $rc
+    fi
   fi
   "$@" 2>&1
 }
@@ -229,6 +288,293 @@ function errpt_cutoff {
   j2d $(( TODAY_J - $1 )) | awk '{printf "%02d%02d0000%02d", $2, $3, $1 % 100}'
 }
 
+# ---- canonical source currency -------------------------------------------------------
+# A standalone door reads its source-registry rows from the CR_* arrays the
+# assembler embeds (the same emit_currency_registry output the monolith gets
+# from #@@embed-currency-registry).  CU_* is the evaluated copy for this run.
+# currency_source_status is the read-only accessor: it prints one row's status
+# and reason exactly as the monolith's currency_evaluate would, so a check
+# fragment can refuse honestly when its reference row is not CURRENT.
+set -A CU_ID; set -A CU_LABEL; set -A CU_CLASS; set -A CU_REQUIRED
+set -A CU_LOADED; set -A CU_VERSION; set -A CU_VERSION_BASIS
+set -A CU_ASOF; set -A CU_ASOF_BASIS; set -A CU_SHA256; set -A CU_LOCATOR
+set -A CU_THRESHOLD; set -A CU_INTEGRITY; set -A CU_PROVENANCE
+set -A CU_AGE; set -A CU_STATUS; set -A CU_REASON; set -A CU_OVERRIDE
+CURRENCY_STATUS=UNVERIFIED
+CURRENCY_INTERNAL_ERROR=""
+
+function currency_normalize_metadata {
+  typeset value
+  value=$1
+  case "$value" in
+    ""|unknown) printf '%s' unknown; return 0;;
+  esac
+  if printf '%s\n' "$value" \
+      | awk '$0 ~ /^[ \t]*$/ {blank=1} END{exit blank?0:1}'; then
+    printf '%s' unknown
+  else
+    printf '%s' "$value"
+  fi
+}
+
+# currency_source_index <source-id> — echoes the CU_ row index for a source id,
+# rc 0 when found, rc 1 when absent.  Byte-for-byte the monolith's helper.
+function currency_source_index {
+  typeset wanted ci
+  wanted=$1; ci=0
+  while [ "$ci" -lt "$CURRENCY_SOURCE_COUNT" ]; do
+    if [ "${CU_ID[$ci]}" = "$wanted" ]; then echo "$ci"; return 0; fi
+    ci=$((ci+1))
+  done
+  return 1
+}
+
+# currency_copy_registry — evaluate a copy of the embedded CR_* rows, leaving
+# the CR_* arrays themselves untouched.
+function currency_copy_registry {
+  typeset ci
+  ci=0
+  while [ "$ci" -lt "$CURRENCY_SOURCE_COUNT" ]; do
+    CU_ID[$ci]=${CR_ID[$ci]}
+    CU_LABEL[$ci]=${CR_LABEL[$ci]}
+    CU_CLASS[$ci]=${CR_CLASS[$ci]}
+    CU_REQUIRED[$ci]=${CR_REQUIRED[$ci]}
+    CU_LOADED[$ci]=${CR_LOADED[$ci]}
+    CU_VERSION[$ci]=${CR_VERSION[$ci]}
+    CU_VERSION_BASIS[$ci]=${CR_VERSION_BASIS[$ci]}
+    CU_ASOF[$ci]=${CR_AS_OF[$ci]}
+    CU_ASOF_BASIS[$ci]=${CR_AS_OF_BASIS[$ci]}
+    CU_SHA256[$ci]=${CR_SHA256[$ci]}
+    CU_LOCATOR[$ci]=${CR_LOCATOR[$ci]}
+    CU_THRESHOLD[$ci]=${CR_THRESHOLD[$ci]}
+    CU_INTEGRITY[$ci]=${CR_INTEGRITY[$ci]}
+    CU_PROVENANCE[$ci]=${CR_PROVENANCE[$ci]}
+    CU_OVERRIDE[$ci]=0
+    ci=$((ci+1))
+  done
+}
+
+# currency_load_fixture_records <file> — replace the CU_ metadata rows from a
+# fixture TSV in the shape of tests/fixtures/currency/<state>/source-records.tsv
+# (id, loaded, version, version_basis, as_of, as_of_basis, content_sha256,
+# record_locator, integrity, provenance).  Applied AFTER currency_copy_registry,
+# so identity and threshold come from the embedded registry while the fixture
+# drives the evaluated fields.  Same malformed and out-of-order rejection as the
+# monolith: exact row count, rows in CR_ID order, loaded true/false, no extra
+# columns.  On rejection CURRENCY_INTERNAL_ERROR is set and rc 1 is returned.
+function currency_load_fixture_records {
+  typeset fixture_file tab ci rid rloaded rversion rvbasis rasof rabasis
+  typeset rsha rlocator rintegrity rprovenance extra
+  fixture_file=$1
+  tab=$(printf '\t')
+  ci=0
+  while IFS="$tab" read rid rloaded rversion rvbasis rasof rabasis rsha rlocator rintegrity rprovenance extra; do
+    case "$rid" in ""|\#*) continue;; esac
+    if [ "$ci" -ge "$CURRENCY_SOURCE_COUNT" ] \
+        || [ "$rid" != "${CR_ID[$ci]}" ] || [ -n "${extra:-}" ]; then
+      CURRENCY_INTERNAL_ERROR="malformed or out-of-order currency fixture record at row $((ci+1))"
+      return 1
+    fi
+    case "$rloaded" in true) CU_LOADED[$ci]=1;; false) CU_LOADED[$ci]=0;;
+      *) CURRENCY_INTERNAL_ERROR="invalid loaded value in currency fixture for $rid"; return 1;;
+    esac
+    CU_VERSION[$ci]=$rversion
+    CU_VERSION_BASIS[$ci]=$rvbasis
+    CU_ASOF[$ci]=$rasof
+    CU_ASOF_BASIS[$ci]=$rabasis
+    CU_SHA256[$ci]=$rsha
+    CU_LOCATOR[$ci]=$rlocator
+    CU_INTEGRITY[$ci]=$rintegrity
+    CU_PROVENANCE[$ci]=$rprovenance
+    ci=$((ci+1))
+  done < "$fixture_file"
+  if [ "$ci" -ne "$CURRENCY_SOURCE_COUNT" ]; then
+    CURRENCY_INTERNAL_ERROR="currency fixture has $ci rows; expected $CURRENCY_SOURCE_COUNT"
+    return 1
+  fi
+  return 0
+}
+
+# currency_evaluate_row <ci> <today_j> — evaluate one CU_ row with the
+# monolith's currency_evaluate semantics and print "<STATUS>\t<reason>".
+function currency_evaluate_row {
+  typeset ci today_j asof age unknowns digest_ok stale
+  ci=$1
+  today_j=$2
+  CU_AGE[$ci]=""
+  CU_STATUS[$ci]=UNKNOWN
+  CU_REASON[$ci]="source identity or provenance is unknown"
+  CU_VERSION[$ci]=$(currency_normalize_metadata "${CU_VERSION[$ci]}")
+  CU_VERSION_BASIS[$ci]=$(currency_normalize_metadata "${CU_VERSION_BASIS[$ci]}")
+  CU_ASOF[$ci]=$(currency_normalize_metadata "${CU_ASOF[$ci]}")
+  CU_ASOF_BASIS[$ci]=$(currency_normalize_metadata "${CU_ASOF_BASIS[$ci]}")
+  CU_SHA256[$ci]=$(currency_normalize_metadata "${CU_SHA256[$ci]}")
+  CU_LOCATOR[$ci]=$(currency_normalize_metadata "${CU_LOCATOR[$ci]}")
+  asof=${CU_ASOF[$ci]}
+  if [ "${CU_LOADED[$ci]}" -ne 1 ] \
+      && { [ "${CU_INTEGRITY[$ci]}" = invalid ] \
+        || [ "${CU_PROVENANCE[$ci]}" = invalid ]; }; then
+    CU_STATUS[$ci]=INVALID
+    case "${CU_LOCATOR[$ci]}" in
+      operator-supplied*)
+        CU_REASON[$ci]="operator-supplied source could not be read"
+        ;;
+      *)
+        CU_REASON[$ci]="source was not loaded and its proof state is invalid"
+        ;;
+    esac
+  elif [ "${CU_LOADED[$ci]}" -ne 1 ]; then
+    CU_REASON[$ci]="source was not loaded"
+  elif [ "${CU_INTEGRITY[$ci]}" != verified ] \
+      && [ "${CU_INTEGRITY[$ci]}" != unknown ] \
+      && [ "${CU_INTEGRITY[$ci]}" != invalid ]; then
+    CU_STATUS[$ci]=INVALID
+    CU_REASON[$ci]="integrity proof state is malformed"
+  elif [ "${CU_PROVENANCE[$ci]}" != verified ] \
+      && [ "${CU_PROVENANCE[$ci]}" != unknown ] \
+      && [ "${CU_PROVENANCE[$ci]}" != invalid ]; then
+    CU_STATUS[$ci]=INVALID
+    CU_REASON[$ci]="provenance proof state is malformed"
+  elif [ "${CU_INTEGRITY[$ci]}" = invalid ]; then
+    CU_STATUS[$ci]=INVALID
+    CU_REASON[$ci]="loaded bytes failed integrity validation"
+  elif [ "${CU_PROVENANCE[$ci]}" = invalid ]; then
+    CU_STATUS[$ci]=INVALID
+    CU_REASON[$ci]="source provenance is invalid or internally conflicting"
+  else
+    digest_ok=1
+    if [ "${CU_SHA256[$ci]}" != unknown ]; then
+      if [ "${#CU_SHA256[$ci]}" -ne 71 ] \
+          || ! printf '%s\n' "${CU_SHA256[$ci]}" \
+            | awk '$0 ~ /^sha256:[0-9a-f]+$/ {ok=1} END{exit ok?0:1}'; then
+        digest_ok=0
+        CU_STATUS[$ci]=INVALID
+        CU_REASON[$ci]="content SHA-256 is malformed"
+      fi
+    fi
+    if [ "$digest_ok" -eq 1 ] && [ "$asof" != unknown ]; then
+      if [ "$(valid_ymd "$asof")" -eq 1 ]; then
+        age=$(( today_j - $(d2j "$asof") ))
+        CU_AGE[$ci]=$age
+      else
+        CU_ASOF[$ci]=unknown
+        asof=unknown
+        CU_REASON[$ci]="as-of date is unknown"
+      fi
+    fi
+  fi
+  if [ "${CU_LOADED[$ci]}" -eq 1 ] \
+      && [ "${CU_STATUS[$ci]}" != INVALID ]; then
+    unknowns=""
+    [ -n "${CU_VERSION[$ci]}" ] && [ "${CU_VERSION[$ci]}" != unknown ] \
+      || unknowns="version"
+    if [ -z "${CU_VERSION_BASIS[$ci]}" ] || [ "${CU_VERSION_BASIS[$ci]}" = unknown ]; then
+      unknowns="$unknowns${unknowns:+, }version basis"
+    fi
+    if [ -z "${CU_ASOF[$ci]}" ] || [ "${CU_ASOF[$ci]}" = unknown ]; then
+      unknowns="$unknowns${unknowns:+, }as-of date"
+    fi
+    if [ -z "${CU_ASOF_BASIS[$ci]}" ] || [ "${CU_ASOF_BASIS[$ci]}" = unknown ]; then
+      unknowns="$unknowns${unknowns:+, }as-of basis"
+    fi
+    if [ -z "${CU_SHA256[$ci]}" ] || [ "${CU_SHA256[$ci]}" = unknown ]; then
+      unknowns="$unknowns${unknowns:+, }content digest"
+    fi
+    if [ -z "${CU_LOCATOR[$ci]}" ] || [ "${CU_LOCATOR[$ci]}" = unknown ]; then
+      unknowns="$unknowns${unknowns:+, }record locator"
+    fi
+    if [ "${CU_INTEGRITY[$ci]}" != verified ]; then
+      unknowns="$unknowns${unknowns:+, }integrity proof"
+    fi
+    if [ "${CU_PROVENANCE[$ci]}" != verified ]; then
+      unknowns="$unknowns${unknowns:+, }provenance proof"
+    fi
+    if [ -n "$unknowns" ]; then
+      CU_STATUS[$ci]=UNKNOWN
+      CU_REASON[$ci]="$unknowns is unknown"
+    elif [ -z "${CU_AGE[$ci]}" ]; then
+      CU_STATUS[$ci]=UNKNOWN
+      CU_REASON[$ci]="as-of date is unknown"
+    elif [ "${CU_AGE[$ci]}" -lt 0 ]; then
+      CU_STATUS[$ci]=FUTURE
+      CU_REASON[$ci]="as-of date is $((0-CU_AGE[$ci])) day(s) after the evaluation date"
+    else
+      stale=$(awk -v age="${CU_AGE[$ci]}" -v limit="${CU_THRESHOLD[$ci]}" \
+        'BEGIN{print (age+0 > limit+0) ? 1 : 0}')
+      if [ "$stale" -eq 1 ]; then
+        CU_STATUS[$ci]=STALE
+        CU_REASON[$ci]="source is ${CU_AGE[$ci]} days old; configured limit ${CU_THRESHOLD[$ci]} days"
+      else
+        CU_STATUS[$ci]=CURRENT
+        CU_REASON[$ci]="identified, integrity-verified, and within the configured limit"
+      fi
+    fi
+  fi
+  printf '%s\t%s\n' "${CU_STATUS[$ci]}" "${CU_REASON[$ci]}"
+}
+
+# currency_source_status <source-id> [<fixture-file>] — the read-only accessor.
+# Prints "<STATUS>\t<reason>" for one source row, with semantics identical to
+# the monolith's currency_evaluate.  A fixture TSV (the shape the monolith reads
+# from $AIXRAY_FIXTURES/source-records.tsv) overrides the embedded metadata for
+# the evaluated row; identity and threshold always come from the embedded
+# registry.  Missing/malformed registry, an unreadable or malformed or
+# out-of-order fixture, an absent source id, and an unavailable evaluation date
+# all refuse with INVALID and a non-empty reason — never CURRENT on absent data,
+# never a silent success.  age_days is computed from AIXRAY_TODAY (via the
+# prelude's d2j), never a live clock.
+function currency_source_status {
+  typeset wanted fixture_file count ci today_j
+  wanted=${1:-}
+  fixture_file=${2:-}
+  count=${CURRENCY_SOURCE_COUNT:-0}
+  # Fail-closed on every call: an unreadable fixture must refuse with the same
+  # deterministic reason regardless of what an earlier call left in the shared
+  # internal-error slot.
+  CURRENCY_INTERNAL_ERROR=""
+  if [ "$count" -lt 1 ]; then
+    printf 'INVALID\tcurrency registry is not embedded in this tool\n'
+    return 0
+  fi
+  if [ -z "$fixture_file" ] && [ -n "${AIXRAY_FIXTURES:-}" ] \
+      && [ -r "$AIXRAY_FIXTURES/source-records.tsv" ]; then
+    fixture_file="$AIXRAY_FIXTURES/source-records.tsv"
+  fi
+  currency_copy_registry
+  if [ -n "$fixture_file" ]; then
+    # The monolith only calls currency_load_fixture_records behind a [ -r ]
+    # guard; a fixture the accessor cannot open must refuse here,
+    # deterministically, instead of letting the loader's failed redirection
+    # produce a misleading row count or a stale reason.
+    if [ ! -f "$fixture_file" ] || [ ! -r "$fixture_file" ]; then
+      printf 'INVALID\tcurrency fixture %s could not be read\n' "$fixture_file"
+      return 0
+    fi
+    if ! currency_load_fixture_records "$fixture_file"; then
+      printf 'INVALID\t%s\n' "$CURRENCY_INTERNAL_ERROR"
+      return 0
+    fi
+  fi
+  if ! ci=$(currency_source_index "$wanted"); then
+    printf 'INVALID\tno registry row for source id %s\n' "$wanted"
+    return 0
+  fi
+  today_j=${TODAY_J:-0}
+  if [ "$today_j" -eq 0 ]; then
+    if [ -n "${AIXRAY_TODAY:-}" ]; then
+      today_j=$(d2j "$AIXRAY_TODAY") 2>/dev/null || today_j=0
+    elif [ -n "${TODAY:-}" ]; then
+      today_j=$(d2j "$TODAY") 2>/dev/null || today_j=0
+    fi
+  fi
+  if [ "$today_j" -eq 0 ]; then
+    printf 'INVALID\tevaluation date is unavailable (set AIXRAY_TODAY)\n'
+    return 0
+  fi
+  currency_evaluate_row "$ci" "$today_j"
+  return 0
+}
+
 function nr_warn {
   typeset nr_status nr_severity
   nr_status=${7:-WARN}
@@ -298,6 +644,11 @@ FACT_STORAGE_VG_READ=0
 
 function standalone_initialize {
   typeset today_overridden
+  # Prime the capture-dir warning in this shell so $(aix)/$(aixv) subshells
+  # inherit AIXRAY_CAPTURE_DIR_WARNED and the directory is named once.
+  if [ -n "${AIXRAY_CAPTURE_DIR:-}" ]; then
+    aix_capture_dir_ok || :
+  fi
   today_overridden=0
   if [ "${AIXRAY_TODAY+x}" = x ]; then
     TODAY=$AIXRAY_TODAY
@@ -399,137 +750,115 @@ function standalone_main {
   [ "$assessed" -eq 1 ] && return 0
   return 3
 }
+CURRENCY_REGISTRY_SCHEMA='ptxray-source-registry/1'
+CURRENCY_SOURCE_COUNT=8
+set -A CR_ID 'ibm-aix-lifecycle' 'ibm-security-advisories' 'cisa-kev' 'ibm-apar-csv' 'ibm-flrtvc' 'ibm-flrt-firmware' 'cis-ibm-aix' 'disa-stig-ibm-aix-7'
+set -A CR_LABEL 'IBM AIX lifecycle reference data' 'IBM security advisory seed' 'CISA Known Exploited Vulnerabilities catalog' 'IBM FLRT apar.csv' 'IBM FLRTVC engine' 'IBM FLRT firmware lifecycle response' 'CIS IBM AIX benchmark' 'DISA STIG for IBM AIX 7.x'
+set -A CR_CLASS 'advisory' 'advisory' 'cve' 'apar' 'flrt' 'flrt' 'benchmark' 'benchmark'
+set -A CR_REQUIRED '1' '1' '1' '1' '1' '1' '1' '1'
+set -A CR_LOADED '1' '1' '0' '0' '0' '0' '1' '1'
+set -A CR_VERSION 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
+set -A CR_VERSION_BASIS 'content-sha256' 'content-sha256' 'unknown' 'unknown' 'unknown' 'unknown' 'publisher-version' 'publisher-version'
+set -A CR_AS_OF '2026-08-15' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
+set -A CR_AS_OF_BASIS 'curator-verified' 'curator-review' 'unknown' 'unknown' 'unknown' 'unknown' 'curator-verified' 'publisher-benchmark-date'
+set -A CR_SHA256 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
+set -A CR_LOCATOR 'https://www.ibm.com/support/pages/aix-standard-edition720 (no announced AIX 7.2 EOS shown; supported state is a curator inference from that absence); https://www.ibm.com/support/pages/aix-support-lifecycle-information (AIX 7.2 TL5 EoFS: To be determined)' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'operator-supplied local IBM FLRT fetch envelope' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
+set -A CR_THRESHOLD '30' '30' '30' '30' '30' '30' '180' '180'
+set -A CR_INTEGRITY 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
+set -A CR_PROVENANCE 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
 
 AIXRAY_TOOL=ck-sendmail-privacyoptions
 
 
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
-  # sendmail_privacyoptions — CIS control 4.6.4.2: sendmail must set # network-lint: allow -- prose header comment, no network call
-  # PrivacyOptions to include authwarnings, novrfy and noexpn so VRFY/EXPN
-  # queries are suppressed and SMTP authentication warnings are emitted.
+  # sendmail_privacyoptions — DISA STIG V-215415. # network-lint: allow -- tool id and V-ID header name the local mail service; no network endpoint
+  # network-lint: allow-next=20 -- decision block below documents the STIG privacy-options pipeline over the local mail configuration file; no line names a network endpoint
+  # SMTP service must not have the EXPN or VRFY features active. The STIG
+  # check-content pipeline reads /etc/mail/sendmail.cf with comments stripped
+  # and requires the "O PrivacyOptions" value to contain 'goaway' (which turns
+  # off EXPN/VRFY along with the other privacy features).
   #
-  # Two captures, the second gated on the first:
-  #   probe 1: ls -ld on the configuration file.
-  #     rc=2  => file absent; nothing to constrain -> NOT_APPLICABLE
-  #     rc=0  => file present; run probe 2
-  #     other => the probe failed; state unknown -> NOT_ASSESSED
-  #   probe 2: egrep for the PrivacyOptions line.
-  #     rc=1  => no PrivacyOptions declared -> FAIL
-  #     rc=0  => inspect the captured line for the three required options
-  #     rc>1  => the probe failed; state unknown -> NOT_ASSESSED
+  # Two captures. Capture 1 gates on the subject's existence: the STIG pipeline
+  # alone cannot tell "sendmail.cf absent" (subject genuinely missing -> PASS,
+  # a prohibition / svcoff rule) from "sendmail.cf present but declaring no
+  # PrivacyOptions" (an unhardened SMTP config -> FAIL), and both collapse to
+  # the same rc=1 from the second grep.
+  #   ls -ld /etc/mail/sendmail.cf
+  #   rc != 0 or empty => sendmail.cf not present -> PASS.
+  #   rc=0 + stat line => sendmail.cf present; decide on the STIG pipeline.
   #
-  typeset SP_CF_RAW SP_CF_RC SP_PRIV SP_PRIV_RC SP_LC
-  typeset SP_STATUS SP_SEV SP_OBS SP_MEAN SP_FIX
-  typeset SP_MISSING SP_HAS_AUTH SP_HAS_NOVRFY SP_HAS_NOEXPN
+  # Capture 2, the STIG check-content pipeline:
+  #   grep -v "^#" /etc/mail/sendmail.cf | grep -i privacyoptions
+  #   rc=0 + line  => PrivacyOptions present; pass iff the value has 'goaway'.
+  #   rc=1 + empty => no PrivacyOptions line declared; file present -> FAIL.
+  #   rc=0 + empty => the probe swallowed an error; state unknown -> NOT_ASSESSED.
+  #   other rc     => the probe failed; state unknown -> NOT_ASSESSED.
+  typeset SP_CF SP_CF_RC SP_PRIV SP_RC SP_LC SP_STATUS SP_SEV SP_OBS SP_MEAN SP_FIX
 
-  SP_CF_RAW=""
-  SP_CF_RC=0
-  SP_PRIV=""
-  SP_PRIV_RC=0
-  SP_LC=""
-  SP_MISSING=""
-  SP_HAS_AUTH=0
-  SP_HAS_NOVRFY=0
-  SP_HAS_NOEXPN=0
-
-  SP_CF_RAW=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL ls on /etc/mail/sendmail.cf metadata; ls makes no network call
+  SP_CF=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs ls -ld locally; ls makes no network call
   SP_CF_RC=$?
+  SP_SEV=med
 
-  if [ "$SP_CF_RC" -eq 0 ]; then
-    SP_PRIV=$(aix sendmail_privacy_options /usr/bin/egrep -i "^O PrivacyOptions" /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL egrep on /etc/mail/sendmail.cf capture text; egrep makes no network call
-    SP_PRIV_RC=$?
-    case "$SP_PRIV_RC" in
+  if [ "$SP_CF_RC" -ne 0 ] || [ -z "$SP_CF" ]; then
+    SP_STATUS=PASS
+    SP_OBS="sendmail.cf is not present" # network-lint: allow -- local mail path in prose
+  else
+    SP_PRIV=$(aix sendmail_privacy_options sh -c 'grep -v "^#" /etc/mail/sendmail.cf | grep -i privacyoptions') # network-lint: allow -- aix() runs the LOCAL grep pipeline; grep makes no network call
+    SP_RC=$?
+
+    case "$SP_RC" in
       0)
         if [ -z "$SP_PRIV" ]; then
           SP_STATUS=NOT_ASSESSED
-          SP_OBS="not assessed - PrivacyOptions probe returned rc=0 with no output"
+          SP_OBS="not assessed - PrivacyOptions probe returned rc=0 with no output" # network-lint: allow -- sendmail setting in prose
         else
           SP_LC=$(printf '%s\n' "$SP_PRIV" | tr 'A-Z' 'a-z')
           case "$SP_LC" in
-            *authwarnings*) SP_HAS_AUTH=1 ;;
+            *goaway*)
+              SP_STATUS=PASS
+              SP_OBS="PrivacyOptions includes goaway" # network-lint: allow -- sendmail setting in prose
+              ;;
+            *)
+              SP_STATUS=FAIL
+              SP_OBS="PrivacyOptions is present but does not include goaway" # network-lint: allow -- sendmail setting in prose
+              ;;
           esac
-          case "$SP_LC" in
-            *novrfy*) SP_HAS_NOVRFY=1 ;;
-          esac
-          case "$SP_LC" in
-            *noexpn*) SP_HAS_NOEXPN=1 ;;
-          esac
-          SP_MISSING=""
-          if [ "$SP_HAS_AUTH" -eq 0 ]; then
-            SP_MISSING="authwarnings"
-          fi
-          if [ "$SP_HAS_NOVRFY" -eq 0 ]; then
-            if [ -n "$SP_MISSING" ]; then
-              SP_MISSING="$SP_MISSING novrfy"
-            else
-              SP_MISSING="novrfy"
-            fi
-          fi
-          if [ "$SP_HAS_NOEXPN" -eq 0 ]; then
-            if [ -n "$SP_MISSING" ]; then
-              SP_MISSING="$SP_MISSING noexpn"
-            else
-              SP_MISSING="noexpn"
-            fi
-          fi
-          if [ -n "$SP_MISSING" ]; then
-            SP_STATUS=FAIL
-            SP_OBS="PrivacyOptions is missing: $SP_MISSING"
-          else
-            SP_STATUS=PASS
-            SP_OBS="PrivacyOptions includes authwarnings, novrfy and noexpn"
-          fi
         fi
         ;;
       1)
         SP_STATUS=FAIL
-        SP_OBS="sendmail.cf exists but declares no PrivacyOptions" # network-lint: allow -- prose finding text, no network call
+        SP_OBS="sendmail.cf is present but declares no PrivacyOptions" # network-lint: allow -- local mail path in prose
         ;;
       *)
         SP_STATUS=NOT_ASSESSED
-        SP_OBS="not assessed - PrivacyOptions probe failed (rc=$SP_PRIV_RC)"
+        SP_OBS="not assessed - PrivacyOptions probe failed (rc=$SP_RC)" # network-lint: allow -- sendmail setting in prose
         ;;
     esac
-  elif [ "$SP_CF_RC" -eq 2 ]; then
-    SP_STATUS=NOT_APPLICABLE
-    SP_OBS="sendmail.cf is not present" # network-lint: allow -- prose finding text, no network call
-  else
-    SP_STATUS=NOT_ASSESSED
-    SP_OBS="not assessed - sendmail.cf probe failed (rc=$SP_CF_RC)" # network-lint: allow -- prose finding text, no network call
   fi
 
   case "$SP_STATUS" in
-    FAIL) SP_SEV=med ;;
-    *) SP_SEV=low ;;
-  esac
-
-  case "$SP_STATUS" in
     PASS)
-      SP_MEAN="sendmail suppresses VRFY/EXPN information leakage and emits authentication warnings." # network-lint: allow -- prose finding text, no network call
+      SP_MEAN="sendmail suppresses VRFY/EXPN information leakage through the goaway PrivacyOptions setting." # network-lint: allow -- sendmail/SMTP prose
       SP_FIX="n/a"
       ;;
     FAIL)
-      SP_MEAN="Without the required PrivacyOptions, sendmail answers VRFY/EXPN queries and omits authentication warnings, leaking account information over SMTP." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="add 'O PrivacyOptions=authwarnings,novrfy,noexpn' to /etc/mail/sendmail.cf and restart sendmail; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
-      ;;
-    NOT_APPLICABLE)
-      SP_MEAN="The sendmail configuration file does not exist, so there is no PrivacyOptions setting to enforce." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="n/a"
+      SP_MEAN="Without goaway in PrivacyOptions, sendmail answers VRFY/EXPN queries and leaks account information over SMTP." # network-lint: allow -- sendmail/SMTP prose
+      SP_FIX="# startsrc -s sendmail -a \"-bd -q30m\"" # network-lint: allow -- the fix text is a recommendation string, never executed
       ;;
     *)
-      SP_MEAN="PTxray did not obtain trustworthy evidence about the sendmail configuration." # network-lint: allow -- prose finding text, no network call
+      SP_MEAN="PTxray did not obtain trustworthy evidence about the sendmail PrivacyOptions setting." # network-lint: allow -- sendmail setting in prose
       SP_FIX="resolve the probe failure and rerun PTxray."
       ;;
   esac
 
-  # network-lint: allow-next=6 -- the finding label names the SMTP mailer PrivacyOptions settings; the add command emits a finding, no network call
-  add security sendmail_privacyoptions "sendmail PrivacyOptions settings" \
+  # network-lint: allow-next=6 -- add() emits the sendmail PrivacyOptions finding; the finding id and prose strings name the local mail service, not a network endpoint
+  add security sendmail_privacyoptions "sendmail PrivacyOptions setting" \
     "$SP_STATUS" "$SP_SEV" \
     "$SP_OBS" \
     "$SP_MEAN" \
     "$SP_FIX" \
-    "cis-l1"
+    "cis-l1 stig:V-215415"
 }
 
 function standalone_run {

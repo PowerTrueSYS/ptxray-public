@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-sysdump-null",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sysdump_null"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sysdumpdev -l"
+  ],
+  "tags": [
+    "stig:V-215397"
+  ],
+  "severity": "medium",
+  "blurb": "Kernel core dumps must be disabled unless needed. On a managed AIX system a dump device is needed, so a configured dump device is NOT_APPLICABLE citing V-215407; this check never FAILs a real dump device.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sysdump-null/ck-stig-sysdump-null.ksh"
+}

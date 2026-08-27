@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-users-home-directories-have",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_users_home_directories_have"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"cut -d : -f 6 /etc/passwd | xargs -n1 ls -ld\""
+  ],
+  "tags": [
+    "stig:V-215331"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every interactive AIX user home directory has mode 0750 or less permissive. A more permissive home lets another identity read or alter the files of the account. Unclassified passwd homes are assessed against 0750. Application directories are allowed 0755 or less permissive.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-users-home-directories-have/ck-stig-users-home-directories-have.ksh"
+}

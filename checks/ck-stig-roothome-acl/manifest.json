@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-roothome-acl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_roothome_acl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "aclget ~root"
+  ],
+  "tags": [
+    "stig:V-215199"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the home directory of the root account has no extended ACL. An extended ACL on that directory grants rights to principals the base permissions do not list, widening the root environment boundary, so DISA STIG V-215199 requires the directory carry base permissions only.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-roothome-acl/ck-stig-roothome-acl.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldd-mode",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldd_mode"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find / -name ldd",
+    "ls -lL \"$SLD_PATH\""
+  ],
+  "tags": [
+    "stig:V-215329"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX ldd command is disabled (mode 0000) or absent. An executable ldd can be pointed at an untrusted binary and load or run it, so a mode more permissive than 0000 is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldd-mode/ck-stig-ldd-mode.ksh"
+}

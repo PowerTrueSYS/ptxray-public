@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldap-ssl-ldap-authentication",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_ssl_ldap_authentication"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -iE \"^authtype:[[:blank:]]*ldap_auth\" /etc/security/ldap/ldap.cfg",
+    "grep -iE \"^useSSL:[[:blank:]]*yes\" /etc/security/ldap/ldap.cfg"
+  ],
+  "tags": [
+    "stig:V-215214"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that when LDAP authentication is required (authtype ldap_auth in /etc/security/ldap/ldap.cfg), SSL is used between LDAP clients and LDAP servers (useSSL yes), protecting the integrity of remote access sessions. It reads /etc/security/ldap/ldap.cfg with two read-only greps; LDAP authentication without useSSL yes is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-ssl-ldap-authentication/ck-stig-ldap-ssl-ldap-authentication.ksh"
+}

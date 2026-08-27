@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lppchk-cron",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lppchk_cron"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "crontab -l"
+  ],
+  "tags": [
+    "stig:V-215426"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that a crontab job runs the AIX package management tool lppchk daily to verify installed software, as DISA STIG V-215426 requires. When no such job exists, corrupt or mismatched installed filesets can go unnoticed and the system software is never verified.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lppchk-cron/ck-stig-lppchk-cron.ksh"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-root-path-worldwrite",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_path_worldwrite"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "echo \"$PATH\"",
+    "ls -ld $(echo $PATH | sed \"s/:/ /g\")",
+    "ls -ldL $(echo $PATH | sed \"s/:/ /g\")"
+  ],
+  "tags": [
+    "stig:V-215193"
+  ],
+  "severity": "medium",
+  "blurb": "This check reads the executable search path of the root account and lists the permissions of each directory on that path. A finding is a world-writable directory on the path. A world-writable directory allows an unprivileged writer to plant a namesake binary that root later executes.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-path-worldwrite/ck-stig-root-path-worldwrite.ksh"
+}

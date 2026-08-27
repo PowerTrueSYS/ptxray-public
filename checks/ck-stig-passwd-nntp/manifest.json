@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-passwd-nntp",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_passwd_nntp"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find / -name passwd.nntp \\( -fstype jfs -o -fstype jfs2 \\) -exec ls -lL {} \\;"
+  ],
+  "tags": [
+    "stig:V-215327"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every passwd.nntp file on jfs/jfs2 has mode 0600 or less permissive. When no such file exists, NNTP is treated as not in use.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-passwd-nntp/ck-stig-passwd-nntp.ksh"
+}

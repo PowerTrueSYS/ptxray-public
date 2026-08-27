@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-dhcp-server-required-dhcp",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_dhcp_server_required_dhcp"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/dhcpsd\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215405"
+  ],
+  "severity": "medium",
+  "blurb": "This control verifies that the DHCP server daemon (dhcpsd) is not configured to start at boot when the host is not required to serve DHCP. DISA STIG V-215405 states the rule as a prohibition: running the check command must yield no output at all. If a \"start /usr/sbin/dhcpsd\" line is present in /etc/rc.tcpip, the system boots a service that hands out IP addresses and network configuration, letting a rogue client or an attacker redirect traffic or hand out conflicting addresses.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-dhcp-server-required-dhcp/ck-stig-dhcp-server-required-dhcp.ksh"
+}

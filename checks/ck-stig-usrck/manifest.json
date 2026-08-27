@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-usrck",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_usrck"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "usrck -n ALL"
+  ],
+  "tags": [
+    "stig:V-215175"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that every account name on the AIX host is unique by reading usrck -n ALL (report mode, no changes). Duplicate names break accountability because one name maps to more than one account record.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-usrck/ck-stig-usrck.ksh"
+}

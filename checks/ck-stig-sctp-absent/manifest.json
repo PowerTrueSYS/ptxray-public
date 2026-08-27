@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-sctp-absent",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sctp_absent"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -L bos.net.sctp"
+  ],
+  "tags": [
+    "stig:V-215393"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that Stream Control Transmission Protocol (SCTP) is not installed on the AIX host. SCTP support is carried by the bos.net.sctp fileset; when that fileset is installed, SCTP endpoints and transports can be created, expanding the attack surface without an operational need. When lslpp does not list the fileset, SCTP is absent and the host passes this STIG control.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sctp-absent/ck-stig-sctp-absent.ksh"
+}

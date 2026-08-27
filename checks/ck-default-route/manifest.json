@@ -1,7 +1,7 @@
 {
   "id": "ck-default-route",
   "pillar": "operational-readiness",
-  "category": "config",
+  "category": "security",
   "finding_ids": [
     "default_route"
   ],
@@ -9,9 +9,11 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "netstat -rn"
+    "netstat -r"
   ],
-  "tags": [],
+  "tags": [
+    "stig:V-215262"
+  ],
   "blurb": "A default route tells the system where to send traffic that is not for its own local network. If it is missing, traffic to other networks goes nowhere and the system may become unreachable or lose access to remote services.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-default-route/ck-default-route.ksh"

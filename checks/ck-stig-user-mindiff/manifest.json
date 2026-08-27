@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-mindiff",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_mindiff"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a mindiff",
+    "lsuser -a mindiff ALL"
+  ],
+  "tags": [
+    "stig:V-215220"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that AIX requires password changes to replace at least 50 percent of characters. Default and every account must have mindiff set to 8 or greater; an unset or weaker mindiff lets a user keep most of an old password.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-mindiff/ck-stig-user-mindiff.ksh"
+}

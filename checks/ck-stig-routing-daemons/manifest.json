@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-routing-daemons",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_routing_daemons"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ps -ef | egrep '(ospf|route|bgp|zebra|quagga|gate)'"
+  ],
+  "tags": [
+    "stig:V-215428"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX is not running routing protocol daemons (ospfd, bgpd, zebra, quagga, gated, routed). The STIG allows an exception when the host is a designated router; that role is a site decision and is not auto-detected.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-routing-daemons/ck-stig-routing-daemons.ksh"
+}

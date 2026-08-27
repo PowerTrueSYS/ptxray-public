@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-globalinit-ldr-preload",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_globalinit_ldr_preload"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep LDR_PRELOAD /etc/profile /etc/bashrc /etc/security/.login /etc/environment /etc/security/environ"
+  ],
+  "tags": [
+    "stig:V-215423"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every LDR_PRELOAD list in the global initialization files (/etc/profile, /etc/bashrc, /etc/security/.login, /etc/environment, /etc/security/environ) contains only absolute library paths or $PATH. A relative preload entry lets a process started from those files load a library from the current directory, so an attacker who can drop a library there injects code into any session that sources the file; an empty preload slot is equally invalid.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-globalinit-ldr-preload/ck-stig-globalinit-ldr-preload.ksh"
+}

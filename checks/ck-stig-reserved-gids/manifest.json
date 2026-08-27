@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-reserved-gids",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_reserved_gids"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "more /etc/passwd"
+  ],
+  "tags": [
+    "stig:V-215194"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that Group Identifiers reserved for AIX system accounts (GIDs 0 through 99) are not assigned as the primary group of a non-system account. A non-system login that inherits a reserved GID shares the group identity of system accounts and can read or alter group-owned system files those GIDs protect.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-reserved-gids/ck-stig-reserved-gids.ksh"
+}

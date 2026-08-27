@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-sendmail-helpfile",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sendmail_helpfile"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^O HelpFile\" /etc/mail/sendmail.cf",
+    "ls -ld <helpfile_path>"
+  ],
+  "tags": [
+    "stig:V-215417"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SMTP service HELP command is not enabled. sendmail serves the HELP command when the O HelpFile option in /etc/mail/sendmail.cf names a help text file that exists on the system. When that option is absent, the subject sendmail.cf is absent, or the named help file is missing, the HELP command is not enabled. The HELP command discloses the sendmail command grammar to connecting peers.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sendmail-helpfile/ck-stig-sendmail-helpfile.ksh"
+}

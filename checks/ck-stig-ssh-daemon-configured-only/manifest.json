@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-daemon-configured-only",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_daemon_configured_only"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i macs /etc/ssh/sshd_config | grep -v '^#'"
+  ],
+  "tags": [
+    "stig:V-215294"
+  ],
+  "severity": "medium",
+  "blurb": "The AIX SSH daemon must be configured to use only Message Authentication Codes (MACs) that employ FIPS 140-2 approved cryptographic hash algorithms. Any other MAC, an empty MAC list, or a missing MACs setting is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-daemon-configured-only/ck-stig-ssh-daemon-configured-only.ksh"
+}

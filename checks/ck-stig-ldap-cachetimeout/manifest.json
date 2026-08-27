@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldap-cachetimeout",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_cachetimeout"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i usercachetimeout /etc/security/ldap/ldap.cfg",
+    "grep -i groupcachetimeout /etc/security/ldap/ldap.cfg"
+  ],
+  "tags": [
+    "stig:V-215205"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the LDAP client refreshes user and group caches in less than a day. DISA STIG V-215205 requires usercachetimeout and groupcachetimeout in /etc/security/ldap/ldap.cfg to both be present, uncommented, and no greater than 900 seconds; any value above 900 lets the client hold stale user or group entries for a day or more. When LDAP authentication is not required the requirement is Not Applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-cachetimeout/ck-stig-ldap-cachetimeout.ksh"
+}

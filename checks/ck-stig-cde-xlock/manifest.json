@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-cde-xlock",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_cde_xlock"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -L X11.apps.clients",
+    "ls /usr/bin/X11/xlock"
+  ],
+  "tags": [
+    "stig:V-215188"
+  ],
+  "severity": "medium",
+  "blurb": "AIX CDE must provide the xlock command so users can lock their sessions until they reauthenticate. When AIX CDE (X11) is not used the rule text says the control is Not Applicable; when it is in use, the X11.apps.clients fileset and the /usr/bin/X11/xlock binary must both be present, because without xlock an unattended CDE session stays unlocked and exposed to anyone at the console.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-cde-xlock/ck-stig-cde-xlock.ksh"
+}

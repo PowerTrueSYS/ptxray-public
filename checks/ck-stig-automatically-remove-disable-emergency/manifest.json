@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-automatically-remove-disable-emergency",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_automatically_remove_disable_emergency"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a expires ALL"
+  ],
+  "tags": [
+    "stig:V-215180"
+  ],
+  "severity": "medium",
+  "pared": true,
+  "question": "Obtain a list of emergency accounts from the ISSO/ISSM.",
+  "blurb": "Emergency accounts must be removed or disabled after the crisis is resolved or within 72 hours.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-automatically-remove-disable-emergency/ck-stig-automatically-remove-disable-emergency.ksh"
+}

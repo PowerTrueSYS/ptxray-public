@@ -15,7 +15,7 @@ Do not run it first on a production AIX target.
 
 ## Verify the signed manifest first
 
-This is the verification order for the published PTxray 1.5.0 release. Obtain
+This is the verification order for the published PTxray 1.6.0 release. Obtain
 the release-key fingerprint through the independently controlled
 [PowerTrue PTxray release-key trust page](https://powertruesystems.com/security/ptxray-release-key/)
 before trusting a public key downloaded beside the payloads.
@@ -29,16 +29,20 @@ ptxray-defs.sh
 ptxray-review-pack.sh
 ptxray-review-validate.awk
 aixray-aix.sh
+ptxray-report-aix-1.6.0.tar
+ptxray-report-ibmi-1.6.0.tar
 SHA256SUMS
 SHA256SUMS.sig
 POWERTRUE-RELEASE-PUBLIC.pem
 ```
 
 `aixray-aix.sh` is the only legacy-named compatibility asset and must be
-byte-identical to `ptxray-aix.sh`. `SHA256SUMS` must contain exactly six
-basename entries: the five `ptxray-*` payloads above and the compatibility
-asset. It does not hash itself, its signature, or the public key. Repository or
-tag metadata is not an additional release asset.
+byte-identical to `ptxray-aix.sh`. The two `ptxray-report-*` tar bundles carry
+the report runners and are named from the release they belong to.
+`SHA256SUMS` must contain exactly eight basename entries: the five `ptxray-*`
+scripts above, the compatibility asset, and the two report bundles. It does not
+hash itself, its signature, or the public key. Repository or tag metadata is
+not an additional release asset.
 
 On a trusted review workstation with OpenSSL, print the downloaded key's
 SPKI-DER SHA-256 fingerprint:
@@ -64,7 +68,7 @@ Only after the independent fingerprint matches, verify the RSA-3072 / SHA-256
 openssl dgst -sha256 -verify POWERTRUE-RELEASE-PUBLIC.pem -signature SHA256SUMS.sig SHA256SUMS
 ```
 
-Require `Verified OK`, then verify all six payload digests before running a
+Require `Verified OK`, then verify all eight payload digests before running a
 payload:
 
 ```sh
@@ -91,12 +95,12 @@ Before pushing a release tag, run the tree-only gate from the committed
 candidate revision:
 
 ```sh
-python3 tools/verify-release-integrity.py --tag v1.5.0
+python3 tools/verify-release-integrity.py --tag v1.6.0
 ```
 
 For `v1.0.0` through `v1.4.0`, use that release's documented asset set. The
-published 1.5 release uses the nine assets listed in the signature-first
-section above.
+published 1.5 release used nine assets; the published 1.6 release uses the
+eleven assets listed in the signature-first section above.
 The immutable `v0.1.0` release retains its historical two-asset contract
 (`ptxray-aix.sh` and `ptxray-review-pack.sh`):
 
@@ -249,7 +253,8 @@ require_equal(
 legacy_release = catalog.get("tool_version") == "0.1.0"
 release_digests = {}
 if not legacy_release:
-    # PTxray 1.5 publishes exactly these six executable/data payloads. The
+    # PTxray 1.5 published exactly these six executable/data payloads. From
+    # 1.6 the two versioned report bundles are signed payloads as well. The
     # standalone tools remain source-visible and catalog-digest-bound, but are
     # not separately uploaded release assets.
     payloads = (
@@ -260,6 +265,23 @@ if not legacy_release:
         "ptxray-review-pack.sh",
         "ptxray-review-validate.awk",
     )
+    tool_version = catalog.get("tool_version")
+    version_match = re.match(
+        r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?", str(tool_version)
+    )
+    if version_match is None:
+        fail(
+            "catalog.json tool_version is not a dotted version "
+            f"({tool_version!r})"
+        )
+    release_series = tuple(
+        int(part or 0) for part in version_match.groups()
+    )
+    if release_series >= (1, 6, 0):
+        payloads += (
+            f"ptxray-report-aix-{tool_version}.tar",
+            f"ptxray-report-ibmi-{tool_version}.tar",
+        )
     checksum_source = read_text("SHA256SUMS")
     for line_number, line in enumerate(checksum_source.splitlines(), start=1):
         match = re.fullmatch(r"([0-9A-Fa-f]{64})[ \t]+\*?(\S+)", line)

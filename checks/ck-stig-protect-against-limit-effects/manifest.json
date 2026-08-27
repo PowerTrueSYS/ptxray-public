@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-protect-against-limit-effects",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_protect_against_limit_effects"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'lslpp -l | grep bos.net.tcp.client_core'",
+    "/usr/sbin/no -o clean_partial_conns"
+  ],
+  "tags": [
+    "stig:V-215399"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies AIX rate-limits half-open TCP connections on network interfaces by requiring bos.net.tcp.client_core to be COMMITTED and clean_partial_conns to be 1, limiting Denial of Service effects from incomplete connection floods.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-protect-against-limit-effects/ck-stig-protect-against-limit-effects.ksh"
+}

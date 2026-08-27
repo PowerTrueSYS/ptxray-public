@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-x11forwarding",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_x11forwarding"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'X11F_GREP=$(grep -i X11Forwarding /etc/ssh/sshd_config); X11F_GREP_RC=$?; if [ \"$X11F_GREP_RC\" -ne 0 ]; then exit \"$X11F_GREP_RC\"; fi; printf \"%s\\n\" \"$X11F_GREP\" | grep -v \"^#\"'"
+  ],
+  "tags": [
+    "stig:V-215300"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon has X11 forwarding turned off. When X11Forwarding is missing or set to yes, graphical sessions can be tunneled through SSH.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-x11forwarding/ck-stig-ssh-x11forwarding.ksh"
+}

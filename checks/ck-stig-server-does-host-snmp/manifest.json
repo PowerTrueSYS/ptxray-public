@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-server-does-host-snmp",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_server_does_host_snmp"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep '^start[[:blank:]]/usr/sbin/dpid2' /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215364"
+  ],
+  "severity": "medium",
+  "blurb": "If this AIX server does not host an SNMP agent, the dpid2 daemon must not be started from /etc/rc.tcpip. An uncommented start /usr/sbin/dpid2 boot entry is the decidable sub-condition; whether the host hosts an SNMP agent is a site/ISSO determination, so a matching start line is not assessed as a failure until that premise is answered.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-server-does-host-snmp/ck-stig-server-does-host-snmp.ksh"
+}

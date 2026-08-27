@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lib-acl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lib_acl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'find /usr/lib/security /usr/lib/methods -type f | while read file; do aclget \"$file\" 2>/dev/null | grep -e \"[[:space:]]enabled$\" >/dev/null 2>&1 && printf \"%s\\n\" \"$file\"; done; printf \"scan complete\\n\"'"
+  ],
+  "tags": [
+    "stig:V-215326"
+  ],
+  "severity": "medium",
+  "blurb": "This control verifies that no regular file under the system library directories /usr/lib/security and /usr/lib/methods carries an extended ACL (extended permissions enabled). The STIG inline script writes each aclget dump to a temp file and greps it for a whitespace-prefixed \"enabled\" line; this read-only port runs aclget to stdout and never writes a temp file. Any library file with an enabled extended ACL can grant principals beyond the intended base permissions access to security-critical library code, so any such file is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lib-acl/ck-stig-lib-acl.ksh"
+}

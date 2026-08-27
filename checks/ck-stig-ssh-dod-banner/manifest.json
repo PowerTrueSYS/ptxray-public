@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-ssh-dod-banner",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_dod_banner"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls /etc/motd.ssh",
+    "cat /etc/motd.ssh",
+    "sshd -T"
+  ],
+  "tags": [
+    "stig:V-215202"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that SSH uses /etc/motd.ssh to display the complete Standard Mandatory DoD Notice and Consent Banner for SSH, sftp, and scp login sessions.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-dod-banner/ck-stig-ssh-dod-banner.ksh"
+}

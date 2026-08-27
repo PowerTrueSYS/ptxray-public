@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ndpd-router-disabled",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ndpd_router_disabled"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/ndpd-router\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215368"
+  ],
+  "severity": "medium",
+  "blurb": "The ndpd-router daemon must not be started from /etc/rc.tcpip. A start command for it at boot brings up the IPv6 router discovery daemon, which DISA STIG V-215368 requires disabled; a matching start line is the finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ndpd-router-disabled/ck-stig-ndpd-router-disabled.ksh"
+}

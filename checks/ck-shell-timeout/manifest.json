@@ -9,12 +9,13 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "grep -E 'TMOUT|TIMEOUT' /etc/profile /etc/environment"
+    "grep -E ' TMOUT|TIMEOUT' /etc/profile"
   ],
   "tags": [
-    "cis-l1"
+    "cis-l1",
+    "stig:V-215320"
   ],
-  "blurb": "An interactive shell session can keep running until someone closes it. This check verifies that a timeout is set in the system login files /etc/profile and /etc/environment so an idle session logs itself out. Without it, an unattended session stays open and anyone who reaches it can act with the full privileges of that account.",
+  "blurb": "An interactive shell session can keep running until someone closes it. This check verifies that /etc/profile sets both TMOUT and TIMEOUT to 600 seconds or less, uncommented, so an idle login session is terminated after 10 minutes of inactivity (DISA STIG V-215320). Without it, an unattended session stays open and anyone who reaches it can act with the full privileges of that account.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-shell-timeout/ck-shell-timeout.ksh"
 }

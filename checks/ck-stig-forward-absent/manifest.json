@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-forward-absent",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_forward_absent"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find / -prune -print",
+    "find / -name .forward -print",
+    "find /home -prune -print"
+  ],
+  "tags": [
+    "stig:V-215413"
+  ],
+  "severity": "low",
+  "blurb": "This check scans the whole local filesystem tree from / for files named .forward. A .forward file silently diverts mail destined for one user to an arbitrary address, so an unintended account or system can collect mail that was never meant for it. Any .forward file anywhere on the system is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-forward-absent/ck-stig-forward-absent.ksh"
+}

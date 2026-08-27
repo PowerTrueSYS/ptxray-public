@@ -10,7 +10,7 @@
   "read_only": true,
   "commands": [
     "test -r /etc/security/passwd",
-    "/usr/bin/egrep -p \"password = +$\" /etc/security/passwd"
+    "/usr/bin/egrep -p 'password = +$' /etc/security/passwd"
   ],
   "tags": [
     "cis-l1"

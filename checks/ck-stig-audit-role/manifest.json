@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-audit-role",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_role"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsrole ALL"
+  ],
+  "tags": [
+    "stig:V-215252"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that a role carries the aix.security.audit, aix.security.user.audit, and aix.security.role.audit authorizations. Without such a role, no assigned ISSO or designated SA can change the auditing performed on all operating system components in near real time, as DISA STIG V-215252 requires.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-role/ck-stig-audit-role.ksh"
+}

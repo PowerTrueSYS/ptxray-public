@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-bash-logout",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_bash_logout"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "ls -alL \"$BLO_HOME/.bash_logout\"",
+    "cat \"$BLO_HOME/.bash_logout\""
+  ],
+  "tags": [
+    "stig:V-215309"
+  ],
+  "severity": "low",
+  "blurb": "When a bash session ends it should print a logout message so anyone watching the console knows the session is over. If the ~/.bash_logout file for a bash user is missing or prints nothing, the logout is silent and the end of the session goes unannounced.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-bash-logout/ck-stig-bash-logout.ksh"
+}

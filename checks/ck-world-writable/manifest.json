@@ -9,7 +9,10 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "find /etc /usr/local/bin -xdev -type f -perm -002 -print"
+    "sh -c 'test -d /etc && echo yes || echo no'",
+    "sh -c 'test -d /usr/local/bin && echo yes || echo no'",
+    "find /etc -xdev -type f -perm -002 -print",
+    "find /usr/local/bin -xdev -type f -perm -002 -print"
   ],
   "tags": [
     "cis-l1"

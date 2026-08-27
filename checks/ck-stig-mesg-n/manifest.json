@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-mesg-n",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mesg_n"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"mesg\" /etc/profile /etc/environment /etc/security/environ /etc/security/.profile /etc/csh.login /etc/csh.cshrc"
+  ],
+  "tags": [
+    "stig:V-215342"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every AIX global initialization file (/etc/profile, /etc/environment, /etc/security/environ, /etc/security/.profile, /etc/csh.login, /etc/csh.cshrc) contains the \"mesg n\" (or \"mesg -n\") command and that none contains the \"mesg y\" command, so users are denied write access to the terminal and another user cannot write to or capture an active session.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mesg-n/ck-stig-mesg-n.ksh"
+}

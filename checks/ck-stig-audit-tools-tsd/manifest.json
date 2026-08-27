@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-tools-tsd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_tools_tsd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "trustchk -p",
+    "awk '/\\/usr\\/sbin\\/audit/ {print; for(i=1; i<=10; i++) {getline; print}}' /etc/security/tsd/tsd.dat"
+  ],
+  "tags": [
+    "stig:V-215251"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must verify the hash of audit tools (trustchk TE/CHKEXEC plus tsd.dat cert_tag/signature/hash_value not VOLATILE for each required audit tool).",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-tools-tsd/ck-stig-audit-tools-tsd.ksh"
+}

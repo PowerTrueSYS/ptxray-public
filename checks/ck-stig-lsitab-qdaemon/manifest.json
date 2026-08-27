@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lsitab-qdaemon",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lsitab_qdaemon"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsitab qdaemon"
+  ],
+  "tags": [
+    "stig:V-215348"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX qdaemon (the print spooler) is disabled when local or remote printing is not required. A qdaemon entry in /etc/inittab starts the spooler at every boot; DISA STIG V-215348 requires that entry to be absent so printing services do not run unless the site actually needs them.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lsitab-qdaemon/ck-stig-lsitab-qdaemon.ksh"
+}

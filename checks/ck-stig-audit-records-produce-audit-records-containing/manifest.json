@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-records-produce-audit-records-containing",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_records_produce_audit_records_containing"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "/usr/sbin/auditpr -i \"$AR_TRAIL_PATH\" -helRtcp"
+  ],
+  "tags": [
+    "stig:V-215238"
+  ],
+  "severity": "medium",
+  "blurb": "Audit records that do not name the user and the process behind an event cannot attribute activity to anyone, so actions by an intruder are indistinguishable from routine work during an investigation.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-records-produce-audit-records-containing/ck-stig-audit-records-produce-audit-records-containing.ksh"
+}

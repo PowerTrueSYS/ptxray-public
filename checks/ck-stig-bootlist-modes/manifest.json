@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-bootlist-modes",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_bootlist_modes"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "bootlist -m normal -o"
+  ],
+  "tags": [
+    "stig:V-215410"
+  ],
+  "severity": "medium",
+  "blurb": "Checks DISA AIX STIG V-215410 (medium): AIX must boot only from the system boot device. A non-hard-disk device (cd, rmt, ent, network, usb, tok, fddi, or other) in the normal boot list is a finding, and a boot list with no boot device configured is a finding. The SMS firmware multi-boot clause is not visible from the OS, so a hard-disk-only normal boot list still renders NOT_ASSESSED for the manual portion; this check never emits PASS for V-215410.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-bootlist-modes/ck-stig-bootlist-modes.ksh"
+}

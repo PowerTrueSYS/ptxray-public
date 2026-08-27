@@ -1,0 +1,25 @@
+{
+  "id": "ck-stig-mount-nodev",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mount_nodev"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsfs -v nfs",
+    "mount",
+    "/usr/bin/grep -nE \"^/|^\\s+(vfs|dev|options|nodename|mount)\\s*=\" /etc/filesystems",
+    "cat /etc/filesystems",
+    "find \"$SMN_MP\" -xdev -type b -o -type c"
+  ],
+  "tags": [
+    "stig:V-215235"
+  ],
+  "severity": "medium",
+  "blurb": "AIX removable media, remote file systems, and any file system not containing approved device files must be mounted with the nodev option. This check decides NFS and removable-media stanzas in /etc/filesystems; whether a local file system contains approved device files is a site/ISSO judgement and is never auto-passed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mount-nodev/ck-stig-mount-nodev.ksh"
+}

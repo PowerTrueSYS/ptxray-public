@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-rc-path",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_rc_path"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -r PATH /etc/rc*"
+  ],
+  "tags": [
+    "stig:V-215345"
+  ],
+  "severity": "medium",
+  "blurb": "Run-control executable search paths must contain only absolute entries: no empty PATH slots and no relative components such as . or bin.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-rc-path/ck-stig-rc-path.ksh"
+}

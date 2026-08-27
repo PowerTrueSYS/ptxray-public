@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-hostbased",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_hostbased"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"grep -i HostbasedAuthentication /etc/ssh/sshd_config | grep -v '^#'\""
+  ],
+  "tags": [
+    "stig:V-215304"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH daemon is explicitly configured not to use host-based authentication.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-hostbased/ck-stig-ssh-hostbased.ksh"
+}

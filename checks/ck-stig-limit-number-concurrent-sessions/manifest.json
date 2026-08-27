@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-limit-number-concurrent-sessions",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_limit_number_concurrent_sessions"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a maxulogs ALL"
+  ],
+  "tags": [
+    "stig:V-215172"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies every account has maxulogs set and in 1..10 so concurrent sessions cannot exceed 10. An account with maxulogs unset, 0, or greater than 10 can hold unlimited or excessive simultaneous logins, so a stolen password can be used from many places at once.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-limit-number-concurrent-sessions/ck-stig-limit-number-concurrent-sessions.ksh"
+}

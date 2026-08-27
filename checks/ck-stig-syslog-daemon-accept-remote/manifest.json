@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-syslog-daemon-accept-remote",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_syslog_daemon_accept_remote"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'ps -ef | grep syslogd | grep -v grep'"
+  ],
+  "tags": [
+    "stig:V-215313"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX syslogd daemon does not accept remote messages unless the host is a syslog server documented using site-defined procedures. A running syslogd without the -R flag accepts network log traffic that can flood logs or hide local events.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-syslog-daemon-accept-remote/ck-stig-syslog-daemon-accept-remote.ksh"
+}

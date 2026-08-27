@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-interactive-users-home-directories",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_interactive_users_home_directories"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "ksh -c 'cut -d: -f6 /etc/passwd | xargs ls -lLd'"
+  ],
+  "tags": [
+    "stig:V-215276"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the home directory of every interactive (non-system) AIX user is owned by that user, as required by DISA STIG V-215276. When a home directory belongs to another account, that account can alter the startup files and environment of the user, so the home of every interactive user must be owned by the respective user.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-interactive-users-home-directories/ck-stig-interactive-users-home-directories.ksh"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-tcpwrappers-deny",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_tcpwrappers_deny"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -la /etc/hosts.allow",
+    "ls -la /etc/hosts.deny",
+    "grep -E \"ALL:[[:blank:]]*ALL\" /etc/hosts.deny"
+  ],
+  "tags": [
+    "stig:V-215419"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that TCP wrappers hosts.allow and hosts.deny exist and that hosts.deny contains ALL:ALL so hosts not listed in hosts.allow are denied.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-tcpwrappers-deny/ck-stig-tcpwrappers-deny.ksh"
+}

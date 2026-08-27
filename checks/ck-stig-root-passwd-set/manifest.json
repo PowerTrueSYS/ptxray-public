@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-root-passwd-set",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_passwd_set"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cut -d: -f1,2 /etc/passwd"
+  ],
+  "tags": [
+    "stig:V-215308"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies the root account password field in /etc/passwd is locked (\"!\"). AIX must require authentication when booting into single-user and maintenance modes; an unlocked root password field lets a walk-up attacker boot into a maintenance shell without a password, which violates DISA STIG V-215308.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-passwd-set/ck-stig-root-passwd-set.ksh"
+}

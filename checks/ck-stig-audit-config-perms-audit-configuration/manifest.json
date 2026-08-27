@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-config-perms-audit-configuration",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_config_perms_audit_configuration"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "id -u",
+    "ls -l '/etc/security/audit/*'"
+  ],
+  "tags": [
+    "stig:V-215316"
+  ],
+  "severity": "medium",
+  "blurb": "The configuration files of the audit subsystem under /etc/security/audit must be group-owned by the audit group. When another group owns them, members of that group can edit which events are recorded, so an intruder can switch off the audit trail that would record what they did next.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-config-perms-audit-configuration/ck-stig-audit-config-perms-audit-configuration.ksh"
+}

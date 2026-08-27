@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-sendmail-loglevel",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sendmail_loglevel"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep '^O LogLevel' /etc/mail/sendmail.cf"
+  ],
+  "tags": [
+    "stig:V-215344"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that sendmail LogLevel in /etc/mail/sendmail.cf is not set below 9, so mail activity is logged at STIG depth.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sendmail-loglevel/ck-stig-sendmail-loglevel.ksh"
+}

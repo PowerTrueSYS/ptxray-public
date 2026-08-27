@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-mfa-hotplug",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mfa_hotplug"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'lslpp -l |grep bos.ahafs'",
+    "lssrc -s pmfahotplugd"
+  ],
+  "tags": [
+    "stig:V-215441"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX accepts and verifies Personal Identity Verification (PIV) credentials by having the bos.ahafs fileset installed and the pmfahotplugd subsystem active.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mfa-hotplug/ck-stig-mfa-hotplug.ksh"
+}

@@ -9,10 +9,11 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "find / \\( -fstype jfs -o -fstype jfs2 \\) -type d -perm -o+w ! -perm -1000 -ls"
+    "find / -type d -perm -002 ! -perm -1000"
   ],
   "tags": [
-    "cis-l1"
+    "cis-l1",
+    "stig:V-215341"
   ],
   "blurb": "This check finds shared directories that every user can write to but that are missing the sticky bit, the setting that keeps users from deleting or renaming files they do not own. Without that protection, any local user can remove or replace files belonging to other users, which can disrupt running services and may be used to run a program as another account.",
   "license": "Apache-2.0",

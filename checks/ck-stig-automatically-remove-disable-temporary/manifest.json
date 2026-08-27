@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-automatically-remove-disable-temporary",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_automatically_remove_disable_temporary"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "pared": true,
+  "commands": [
+    "lsuser -a expires tmp_user"
+  ],
+  "tags": [
+    "stig:V-215170"
+  ],
+  "severity": "medium",
+  "blurb": "This check runs the read-only expiration probe \"lsuser -a expires tmp_user\" against a fixed placeholder account and always renders NOT_ASSESSED, because which accounts are temporary and whether each is removed or disabled within 72 hours is answered only by the onboarding interview. The interview question this check needs is recorded in README.md.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-automatically-remove-disable-temporary/ck-stig-automatically-remove-disable-temporary.ksh"
+}

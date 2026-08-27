@@ -1,0 +1,25 @@
+{
+  "id": "ck-stig-rcmd-binaries-mode",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_rcmd_binaries_mode"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -l /usr/bin/rcp | awk '{print $1}'",
+    "ls -l /usr/bin/rlogin | awk '{print $1}'",
+    "ls -l /usr/bin/rsh | awk '{print $1}'",
+    "ls -l /usr/bin/telnet | awk '{print $1}'",
+    "ls -l /usr/bin/rexec | awk '{print $1}'"
+  ],
+  "tags": [
+    "stig:V-215322"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that /usr/bin/rcp, /usr/bin/rlogin, /usr/bin/rsh, /usr/bin/rexec and /usr/bin/telnet are mode 0000 (----------) or absent. Those programs are the legacy rcmd and telnet clients; if they remain executable a user on this host can start a cleartext remote login or remote command that exposes credentials and session data.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-rcmd-binaries-mode/ck-stig-rcmd-binaries-mode.ksh"
+}

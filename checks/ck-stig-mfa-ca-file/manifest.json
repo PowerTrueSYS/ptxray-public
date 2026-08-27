@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-mfa-ca-file",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mfa_ca_file"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i \"trustedcas\" /etc/security/pmfa/pam_pmfa.conf | grep -v '#'",
+    "ls -ld /etc/security/pmfa/pam_pmfa.conf",
+    "ls -la /<path_to_file>/server_ca.pem"
+  ],
+  "tags": [
+    "stig:V-215440"
+  ],
+  "severity": "medium",
+  "blurb": "AIX MFA PAM must point TRUSTEDCAS at a real server_ca.pem so the authenticator can verify the MFA server; a missing or unusable CA file means MFA cannot be trusted.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mfa-ca-file/ck-stig-mfa-ca-file.ksh"
+}

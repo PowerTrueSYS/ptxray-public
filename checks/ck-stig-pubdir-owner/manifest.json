@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-pubdir-owner",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_pubdir_owner"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'find / -type d -perm -1002 -exec ls -ld {} \\;; echo \"pubdir-scan-complete rc=$?\"'"
+  ],
+  "tags": [
+    "stig:V-215190"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every public directory \u2014 a world-writable directory with the sticky bit set \u2014 is owned by root or a site-approved application account. When a public directory belongs to another account, that account controls the files any user may write there, can tamper with or delete them, and can hide their actions, so the STIG requires the owner to be root or an application account.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-pubdir-owner/ck-stig-pubdir-owner.ksh"
+}

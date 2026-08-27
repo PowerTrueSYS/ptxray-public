@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-kerberos",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_kerberos"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i KerberosAuthentication /etc/ssh/sshd_config | grep -v '^#'"
+  ],
+  "tags": [
+    "stig:V-215291"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that sshd configuration does not enable KerberosAuthentication, so Kerberos authentication cannot bypass the system access restrictions.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-kerberos/ck-stig-ssh-kerberos.ksh"
+}

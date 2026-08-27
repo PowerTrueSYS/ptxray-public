@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-root-rlogin",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_rlogin"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a rlogin root"
+  ],
+  "tags": [
+    "stig:V-215189"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the rlogin attribute for the root account is false. With rlogin enabled, the root account can log in directly over the network through rlogin, bypassing the requirement that root log in only from the system console.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-rlogin/ck-stig-root-rlogin.ksh"
+}

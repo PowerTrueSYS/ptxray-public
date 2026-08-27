@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-sysfile-owner",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sysfile_owner"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a id ALL",
+    "lslpp -w /usr/sbin/sendmail",
+    "ls -lLa /etc /bin /usr/bin /usr/lbin /usr/ucb /sbin /usr/sbin"
+  ],
+  "tags": [
+    "stig:V-215183"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that system files, programs, and directories under /etc, /bin, /usr/bin, /usr/lbin, /usr/ucb, /sbin, and /usr/sbin are owned by a system account (authored as UID 0-128 per V-215195, plus ipsec). An unauthorized owner can replace those programs or configuration files.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sysfile-owner/ck-stig-sysfile-owner.ksh"
+}

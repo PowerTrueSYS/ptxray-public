@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-home-group",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_home_group"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "ls -lLdn"
+  ],
+  "tags": [
+    "stig:V-215277"
+  ],
+  "severity": "medium",
+  "blurb": "All AIX interactive users home directories must be group-owned by the primary group of the home directory owner (DISA STIG V-215277). A home directory whose group is not the primary group of its owner lets members of the wrong group read or alter the files of the user, so PTxray compares the home directory group id of each interactive user against the primary group id of the user from /etc/passwd and reports any mismatch.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-home-group/ck-stig-home-group.ksh"
+}

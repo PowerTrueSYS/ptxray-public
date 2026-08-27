@@ -9,12 +9,14 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "grep -E '^dt:' /etc/inittab"
+    "lsitab -a",
+    "lsitab dt"
   ],
   "tags": [
+    "stig:V-215351",
     "cis-l1"
   ],
-  "blurb": "This check reports whether the CDE graphical login service (dtlogin) is set to start automatically at boot through its entry in /etc/inittab. If that entry is present, a server that does not need a desktop login is still running an extra login service that listens for graphical logins, enlarging the surface an attacker can probe and attack.",
+  "blurb": "This check reports whether the CDE graphical login service (dtlogin) is set to start automatically at boot through the dt entry in the system init table. If that entry is present, a server that does not need a desktop login is still running an extra login service that listens for graphical logins, enlarging the surface an attacker can probe and attack.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-cde-dtlogin/ck-cde-dtlogin.ksh"
 }

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-passwd-gid-defined",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_passwd_gid_defined"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cut -d: -f4 /etc/passwd",
+    "cut -d: -f3 /etc/group"
+  ],
+  "tags": [
+    "stig:V-215339"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every group identifier (GID) referenced in /etc/passwd field 4 is defined by a group in /etc/group field 3. A GID without a matching group entry means the owning account resolves to an undefined group, which breaks ownership, permissions, and access control across the system.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-passwd-gid-defined/ck-stig-passwd-gid-defined.ksh"
+}

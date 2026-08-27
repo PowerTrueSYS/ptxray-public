@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-root-user-home-directory",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_user_home_directory"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'grep \"^root\" /etc/passwd | awk -F\":\" '\\''{print $6}'\\'''"
+  ],
+  "tags": [
+    "stig:V-215434"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX root user home directory is not the root directory (/). When the root user logs in with the root directory as home, commands and files behave unexpectedly and root-owned data is exposed at the top of the filesystem, so the home directory must be a dedicated directory such as /root.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-user-home-directory/ck-stig-root-user-home-directory.ksh"
+}

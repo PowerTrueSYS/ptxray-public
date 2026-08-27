@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-dhcp-enabled-network-dhcprd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_dhcp_enabled_network_dhcprd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/dhcprd\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215356"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the DHCP daemon dhcprd is not started from /etc/rc.tcpip. When DHCP is not enabled in the network on AIX, an uncommented start line for /usr/sbin/dhcprd would launch the daemon at every boot, exposing an unneeded DHCP server. Any output from the anchored read is the finding; absence of the start line is the compliant state.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-dhcp-enabled-network-dhcprd/ck-stig-dhcp-enabled-network-dhcprd.ksh"
+}

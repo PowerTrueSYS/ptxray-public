@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-group-acl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_group_acl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "aclget /etc/group"
+  ],
+  "tags": [
+    "stig:V-215328"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX group database file /etc/group has no extended ACL. An extended ACL on /etc/group adds access rules beyond owner/group/other, so accounts the base mode does not list can be granted read or write access to the group database and alter group membership without the intended administrative control (DISA STIG V-215328).",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-group-acl/ck-stig-group-acl.ksh"
+}

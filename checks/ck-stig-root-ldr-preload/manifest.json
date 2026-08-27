@@ -1,0 +1,25 @@
+{
+  "id": "ck-stig-root-ldr-preload",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_ldr_preload"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -ld /etc/environment",
+    "cat /etc/environment",
+    "ls -ld /.profile",
+    "cat /.profile",
+    "lsuser -a home root"
+  ],
+  "tags": [
+    "stig:V-215196"
+  ],
+  "severity": "medium",
+  "blurb": "AIX root LDR_PRELOAD list must be empty. STIG check-content greps the env output for LDR_PRELOAD in the root shell of the auditor; this scanner reads /etc/environment, /.profile, and the profile of root instead.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-ldr-preload/ck-stig-root-ldr-preload.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-sysfile-group",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sysfile_group"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -lLa /etc /bin /usr/bin /usr/lbin /usr/ucb /sbin /usr/sbin",
+    "lsgroup -a id ALL"
+  ],
+  "tags": [
+    "stig:V-215268"
+  ],
+  "severity": "medium",
+  "blurb": "system files/programs/directories not group-owned by a system group can be modified by that group.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sysfile-group/ck-stig-sysfile-group.ksh"
+}

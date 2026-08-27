@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-ttys",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_ttys"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a ttys",
+    "lsuser -a ttys ALL"
+  ],
+  "tags": [
+    "stig:V-215186"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the /etc/security/user default stanza and every interactive account have ttys=ALL so users can log in on any terminal. A missing or non-ALL default, or any interactive account without ttys=ALL, leaves a required login path blocked or narrowed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-ttys/ck-stig-user-ttys.ksh"
+}

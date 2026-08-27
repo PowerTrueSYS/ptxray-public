@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-automated-file-mounting-tool",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_automated_file_mounting_tool"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssrc -s automountd"
+  ],
+  "tags": [
+    "stig:V-215395"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX automountd subsystem is not active when automated file system mounting is not required.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-automated-file-mounting-tool/ck-stig-automated-file-mounting-tool.ksh"
+}

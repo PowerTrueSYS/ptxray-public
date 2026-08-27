@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-lock-cmd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lock_cmd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -L bos.rte.security",
+    "ls /usr/bin/lock"
+  ],
+  "tags": [
+    "stig:V-215187"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX lock command and its supporting bos.rte.security fileset are present. Without /usr/bin/lock a user cannot retain their session lock until reauthenticated, so an unattended session can be left open to walk-up access.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lock-cmd/ck-stig-lock-cmd.ksh"
+}

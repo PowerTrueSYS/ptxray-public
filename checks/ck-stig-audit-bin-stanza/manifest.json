@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-audit-bin-stanza",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_bin_stanza"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/security/audit/config"
+  ],
+  "tags": [
+    "stig:V-219956"
+  ],
+  "severity": "medium",
+  "blurb": "When the audit bin stanza lacks its trail, bin, backup settings or its size and free-space floors, the audit subsystem can silently stop recording or overwrite records when the audit filesystem fills, destroying the evidence trail.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-bin-stanza/ck-stig-audit-bin-stanza.ksh"
+}

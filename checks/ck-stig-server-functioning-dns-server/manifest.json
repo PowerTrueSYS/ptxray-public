@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-server-functioning-dns-server",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_server_functioning_dns_server"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/named\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215360"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that named is not started from /etc/rc.tcpip unless the host is a DNS server. A start /usr/sbin/named line at boot enables an unneeded name-server daemon on hosts that are not DNS servers.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-server-functioning-dns-server/ck-stig-server-functioning-dns-server.ksh"
+}

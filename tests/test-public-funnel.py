@@ -50,7 +50,17 @@ RELEASE_ASSET_URL = (
 RELEASE_ASSET_URL_IBMI = (
     "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh"
 )
-PUBLISHED_VERSION = "1.5.0"
+PUBLISHED_VERSION = "1.6.0"
+REPORT_BUNDLE_AIX = f"ptxray-report-aix-{PUBLISHED_VERSION}.tar"
+REPORT_BUNDLE_IBMI = f"ptxray-report-ibmi-{PUBLISHED_VERSION}.tar"
+RELEASE_ASSET_URL_REPORT_AIX = (
+    "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/"
+    f"{REPORT_BUNDLE_AIX}"
+)
+RELEASE_ASSET_URL_REPORT_IBMI = (
+    "https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/"
+    f"{REPORT_BUNDLE_IBMI}"
+)
 SIGNED_PAYLOADS = (
     "aixray-aix.sh",
     "ptxray-aix.sh",
@@ -58,6 +68,8 @@ SIGNED_PAYLOADS = (
     "ptxray-ibmi.sh",
     "ptxray-review-pack.sh",
     "ptxray-review-validate.awk",
+    REPORT_BUNDLE_AIX,
+    REPORT_BUNDLE_IBMI,
 )
 # Tracks the shipped artifact rather than preserving an obsolete response-time
 # promise. A free review has no response-time SLA, so this gate pins only the
@@ -290,6 +302,8 @@ class PublicFunnelTests(unittest.TestCase):
             "ptxray-ibmi.sh",
             "ptxray-review-pack.sh",
             "ptxray-review-validate.awk",
+            REPORT_BUNDLE_AIX,
+            REPORT_BUNDLE_IBMI,
             "SHA256SUMS",
             "site/ptxray-aix.sh",
         ):
@@ -306,7 +320,7 @@ class PublicFunnelTests(unittest.TestCase):
     def write_release_checksums(
         self, candidate: Path, overrides: dict[str, str] | None = None
     ) -> None:
-        """Write the exact six-payload signed-release manifest.
+        """Write the exact eight-payload signed-release manifest.
 
         Standalone check digests remain bound by catalog.json; they are not
         separately published release assets. `overrides` plants a specific
@@ -566,6 +580,16 @@ class PublicFunnelTests(unittest.TestCase):
         # It links straight to the public release asset — no lead gate.
         self.assertIn(RELEASE_ASSET_URL, site_html)
 
+        # The 1.6 product entry points are the two signed report bundles.
+        for asset_url in (
+            RELEASE_ASSET_URL_REPORT_AIX,
+            RELEASE_ASSET_URL_REPORT_IBMI,
+        ):
+            with self.subTest(asset=asset_url, surface="README.md"):
+                self.assertIn(asset_url, readme)
+            with self.subTest(asset=asset_url, surface="site/index.html"):
+                self.assertIn(asset_url, site_html)
+
         # Customer copy must not revive the retired lead-form headline.
         retired_headline = "".join(("Ga", "ted download"))
         self.assertNotIn(retired_headline, readme)
@@ -657,7 +681,7 @@ class PublicFunnelTests(unittest.TestCase):
             with self.subTest(surface=surface, contract="no legacy repo identity"):
                 self.assertNotIn("PowerTrueSYS/aixray-public", text)
 
-    def test_published_15_boundary_is_precise(self) -> None:
+    def test_published_16_boundary_is_precise(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         security = SECURITY_POLICY.read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
@@ -672,10 +696,10 @@ class PublicFunnelTests(unittest.TestCase):
 
         release_sections = []
         for text, heading in (
-            (readme, "## PTxray 1.5 release"),
-            (security, "## PTxray 1.5 release boundary"),
-            (llms, "## PTxray 1.5 release"),
-            (agent_instructions, "## Published 1.5 release boundary"),
+            (readme, "## PTxray 1.6 release"),
+            (security, "## PTxray 1.6 release boundary"),
+            (llms, "## PTxray 1.6 release"),
+            (agent_instructions, "## Published 1.6 release boundary"),
         ):
             with self.subTest(heading=heading):
                 self.assertIn(heading, text)
@@ -700,11 +724,11 @@ class PublicFunnelTests(unittest.TestCase):
                     )
 
         self.assertIn(
-            'data-release-status="published-1.5"',
+            'data-release-status="published-1.6"',
             site_html,
         )
         site_release = site_html.split(
-            'data-release-status="published-1.5"', 1
+            'data-release-status="published-1.6"', 1
         )[1].split("</section>", 1)[0]
         self.assertRegex(site_release, r"(?i)published release")
         self.assertRegex(site_release, r"(?i)AIX[^<.]{0,100}\brequires? root\b")
@@ -717,11 +741,11 @@ class PublicFunnelTests(unittest.TestCase):
 
         for label, metadata in (("root", root_jsonld), ("site", site_jsonld)):
             with self.subTest(metadata=label):
-                self.assertEqual("1.5.0", metadata.get("softwareVersion"))
+                self.assertEqual(PUBLISHED_VERSION, metadata.get("softwareVersion"))
                 self.assertNotIn("releaseStatus", metadata)
                 self.assertRegex(
                     str(metadata.get("description", "")),
-                    r"(?i)PTxray 1\.5(?:\.0)? (?:published )?release",
+                    r"(?i)PTxray 1\.6(?:\.0)? (?:published )?release",
                 )
                 requirements = str(metadata.get("softwareRequirements", ""))
                 self.assertRegex(requirements, r"AIX requires? root")
@@ -797,12 +821,12 @@ class PublicFunnelTests(unittest.TestCase):
         )
         self.assertRegex(lower, r"no (?:fixed |guaranteed )?(?:response )?sla")
 
-    def test_release_notes_mark_15_published_and_redirects_active(self) -> None:
+    def test_release_notes_mark_16_published_and_redirects_active(self) -> None:
         notes = RELEASE_NOTES.read_text(encoding="utf-8")
         prefix = notes.split("## v1.4.0", 1)[0]
-        self.assertEqual(1, notes.count("<!-- PTXRAY-PUBLICATION-READY:v1.5.0 -->"))
-        self.assertIn("## v1.5.0", prefix)
-        self.assertRegex(prefix, r"(?is)1\.5\.0.{0,80}published release")
+        self.assertEqual(1, notes.count("<!-- PTXRAY-PUBLICATION-READY:v1.6.0 -->"))
+        self.assertIn("## v1.6.0", prefix)
+        self.assertRegex(prefix, r"(?is)1\.6\.0.{0,80}published release")
         self.assertIn("https://powertruesystems.com/ptxray/", prefix)
         self.assertIn("https://github.com/PowerTrueSYS/ptxray-public", prefix)
         self.assertIn("https://powertruesystems.com/aixray/", prefix)
@@ -820,24 +844,26 @@ class PublicFunnelTests(unittest.TestCase):
             prefix,
         )
 
-    def test_ibmi_15_published_download_is_named_and_verifiable(self) -> None:
+    def test_ibmi_16_published_download_is_named_and_verifiable(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         llms = (ROOT / "llms.txt").read_text(encoding="utf-8")
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
         self.assertIn(RELEASE_ASSET_URL_IBMI, readme)
-        self.assertRegex(readme, r"(?is)published release.{0,100}1\.5\.0")
+        self.assertRegex(readme, r"(?is)published release.{0,100}1\.6\.0")
         self.assertIn(RELEASE_ASSET_URL_IBMI, site_html)
         published_panel = site_html.split(
-            "Current published download: PTxray 1.5", 1
+            "Current published download: PTxray 1.6", 1
         )[1].split("</section>", 1)[0]
         self.assertIn(RELEASE_ASSET_URL_IBMI, published_panel)
+        self.assertIn(RELEASE_ASSET_URL_REPORT_AIX, published_panel)
+        self.assertIn(RELEASE_ASSET_URL_REPORT_IBMI, published_panel)
         self.assertIn(f"Version {PUBLISHED_VERSION}", published_panel)
         llms_ibmi_download = next(
             line for line in llms.splitlines() if RELEASE_ASSET_URL_IBMI in line
         )
         self.assertRegex(
             llms_ibmi_download,
-            r"(?i)releases/latest[^.]{0,120}published PTxray 1\.5",
+            r"(?i)releases/latest[^.]{0,120}published PTxray 1\.6",
         )
         for surface, text in (("README.md", readme), ("site/index.html", site_html)):
             with self.subTest(surface=surface, contract="ibmi hash verification"):
@@ -1180,7 +1206,7 @@ class PublicFunnelTests(unittest.TestCase):
 
         site_html = (SITE / "index.html").read_text(encoding="utf-8")
         published_panel = site_html.split(
-            "Current published download: PTxray 1.5", 1
+            "Current published download: PTxray 1.6", 1
         )[1].split("</section>", 1)[0]
         self.assertIn(f"Version {declared_version}", published_panel)
 
@@ -1238,7 +1264,7 @@ class PublicFunnelTests(unittest.TestCase):
             )
             rendered_published_panel = (candidate / "site/index.html").read_text(
                 encoding="utf-8"
-            ).split("Current published download: PTxray 1.5", 1)[1].split(
+            ).split("Current published download: PTxray 1.6", 1)[1].split(
                 "</section>", 1
             )[0]
             self.assertIn(f"Version {declared_version}", rendered_published_panel)
@@ -1270,7 +1296,7 @@ class PublicFunnelTests(unittest.TestCase):
                 with self.subTest(path=path.relative_to(ROOT), term=pattern.pattern):
                     self.assertIsNone(pattern.search(text))
 
-    def test_readme_leads_a_new_customer_through_the_15_candidate_run(self) -> None:
+    def test_readme_leads_a_new_customer_through_the_16_candidate_run(self) -> None:
         readme = (ROOT / "README.md").read_text(encoding="utf-8")
         lower = readme.lower()
         self.assertRegex(readme, r"(?m)^## Prerequisites[ \t]*$")
@@ -1303,6 +1329,14 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertIsNotNone(json_mode, "advanced JSON stdout mode is missing")
         if bare is not None and html_mode is not None:
             self.assertLess(bare.start(), html_mode.start())
+        report_runner = re.search(
+            r"(?m)^dist/tools/aixray-scan\.ksh --html --json --compliance <std> "
+            r"--definitions-bundle F --out DIR\s*$",
+            readme,
+        )
+        self.assertIsNotNone(
+            report_runner, "the AIX report runner command is missing"
+        )
         self.assertIn("Report ready:", readme)
         self.assertRegex(readme, r"ptxray-<hostname>-<date>\.html")
 
@@ -2061,6 +2095,8 @@ START_HERE_ITEMS=""
             "ptxray-review-pack.sh",
             "ptxray-review-validate.awk",
             "aixray-aix.sh",
+            REPORT_BUNDLE_AIX,
+            REPORT_BUNDLE_IBMI,
             "SHA256SUMS",
             "SHA256SUMS.sig",
             "POWERTRUE-RELEASE-PUBLIC.pem",

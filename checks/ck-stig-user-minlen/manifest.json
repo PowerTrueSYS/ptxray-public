@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-minlen",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_minlen"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a minlen",
+    "lsuser -a minlen ALL"
+  ],
+  "tags": [
+    "stig:V-215226"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that the default stanza and every account enforce minlen of at least 15 so short passwords are rejected. An unset minlen, a default below 15, or any user below 15 lets accounts choose passwords shorter than the STIG requires.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-minlen/ck-stig-user-minlen.ksh"
+}

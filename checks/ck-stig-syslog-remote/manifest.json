@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-syslog-remote",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_syslog_remote"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/syslog.conf"
+  ],
+  "tags": [
+    "stig:V-215312"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must send syslog to a documented remote log host. An uncommented action token beginning with @ in /etc/syslog.conf is the decidable part; whether that host is justified and documented is a site/ISSO question this check does not silently pass.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-syslog-remote/ck-stig-syslog-remote.ksh"
+}

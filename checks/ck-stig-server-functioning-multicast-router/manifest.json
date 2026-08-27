@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-server-functioning-multicast-router",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_server_functioning_multicast_router"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/mrouted\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215359"
+  ],
+  "severity": "medium",
+  "blurb": "If this AIX server is not a multicast router, mrouted must not be started from /etc/rc.tcpip. An uncommented start /usr/sbin/mrouted line boots a multicast routing daemon the host does not need.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-server-functioning-multicast-router/ck-stig-server-functioning-multicast-router.ksh"
+}

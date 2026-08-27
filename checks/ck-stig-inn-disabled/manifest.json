@@ -1,0 +1,24 @@
+{
+  "id": "ck-stig-inn-disabled",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_inn_disabled"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/bin/ps -ef",
+    "/usr/bin/cat /etc/inetd.conf",
+    "/usr/bin/lssrc -s innd",
+    "/usr/bin/lssrc -s nntpd"
+  ],
+  "tags": [
+    "stig:V-215392"
+  ],
+  "severity": "medium",
+  "blurb": "The Internet Network News (INN) server must be disabled on AIX: innd/nntpd must not be running, must not be enabled in inetd.conf, and must not be defined in SRC.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-inn-disabled/ck-stig-inn-disabled.ksh"
+}

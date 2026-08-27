@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-wall-present",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_wall_present"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -al /usr/sbin/wall"
+  ],
+  "tags": [
+    "stig:V-215400"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that /usr/sbin/wall is present so administrators can send a message to currently logged-in users. When that command is missing, there is no supported way to warn those users of a system event.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-wall-present/ck-stig-wall-present.ksh"
+}

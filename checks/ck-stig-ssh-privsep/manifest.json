@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-privsep",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_privsep"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i UsePrivilegeSeparation /etc/ssh/sshd_config | grep -v '^#'"
+  ],
+  "tags": [
+    "stig:V-215297"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon has privilege separation turned on. Privilege separation prevents the SSH daemon from remaining fully privileged after authentication, so a compromised session cannot act with the original privileges of the daemon.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-privsep/ck-stig-ssh-privsep.ksh"
+}

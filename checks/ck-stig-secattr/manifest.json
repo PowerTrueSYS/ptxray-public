@@ -13,19 +13,20 @@
     "lssec -f /etc/security/login.cfg -s default -a logindelay"
   ],
   "tags": [
-    "V-215171",
-    "V-215172",
-    "V-215217",
-    "V-215218",
-    "V-215219",
-    "V-215220",
-    "V-215222",
-    "V-215223",
-    "V-215226",
-    "V-215227",
-    "V-215232",
-    "V-215337"
+    "stig:V-215171",
+    "stig:V-215172",
+    "stig:V-215217",
+    "stig:V-215218",
+    "stig:V-215219",
+    "stig:V-215220",
+    "stig:V-215222",
+    "stig:V-215223",
+    "stig:V-215226",
+    "stig:V-215227",
+    "stig:V-215232",
+    "stig:V-215337"
   ],
+  "severity": "high",
   "blurb": "This check measures the AIX account and password-policy attributes in /etc/security against the DISA STIG for IBM AIX 7.x: login retry and logging limits, password length, character-class mix, reuse distance, minimum/maximum age, and login delay. Any attribute weaker than its mandated value fails, because it is a documented hardening gap an auditor will flag and it applies to every account inheriting the default stanza. The check only reads these attributes; it never changes them.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-stig-secattr/ck-stig-secattr.ksh"

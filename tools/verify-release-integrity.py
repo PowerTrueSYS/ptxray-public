@@ -41,17 +41,16 @@ SIGNED_PAYLOAD_ARTIFACTS = (
     REVIEW_HELPER_PATH,
     REVIEW_VALIDATOR_PATH,
 )
-SIGNED_RELEASE_TREE_ARTIFACTS = (
-    *SIGNED_PAYLOAD_ARTIFACTS,
+SIGNED_RELEASE_TRAILER_ARTIFACTS = (
     CHECKSUM_MANIFEST_PATH,
     CHECKSUM_SIGNATURE_PATH,
     RELEASE_PUBLIC_KEY_PATH,
 )
-SIGNED_RELEASE_ASSETS = (
-    *SIGNED_PAYLOAD_ARTIFACTS,
-    CHECKSUM_MANIFEST_PATH,
-    CHECKSUM_SIGNATURE_PATH,
-    RELEASE_PUBLIC_KEY_PATH,
+# From 1.6.0 the report runners ship as versioned bundles and are signed
+# payloads alongside the one-file scripts.
+REPORT_BUNDLE_TEMPLATES = (
+    "ptxray-report-aix-{version}.tar",
+    "ptxray-report-ibmi-{version}.tar",
 )
 LEGACY_RELEASE_ARTIFACTS = {
     "0.1.0": (SCANNER_PATH, REVIEW_HELPER_PATH),
@@ -84,15 +83,45 @@ def is_signed_release_version(version: str | None) -> bool:
     return (int(major), int(minor), int(patch or 0)) >= (1, 5, 0)
 
 
+def is_report_bundle_release_version(version: str | None) -> bool:
+    if version is None:
+        return False
+    match = re.match(r"([0-9]+)\.([0-9]+)(?:\.([0-9]+))?", version)
+    if match is None:
+        return False
+    major, minor, patch = match.groups()
+    return (int(major), int(minor), int(patch or 0)) >= (1, 6, 0)
+
+
+def report_bundle_artifacts_for_version(version: str | None) -> tuple[str, ...]:
+    if not is_report_bundle_release_version(version):
+        return ()
+    return tuple(
+        template.format(version=version) for template in REPORT_BUNDLE_TEMPLATES
+    )
+
+
+def signed_payload_artifacts_for_version(version: str | None) -> tuple[str, ...]:
+    return SIGNED_PAYLOAD_ARTIFACTS + report_bundle_artifacts_for_version(
+        version
+    )
+
+
 def release_artifacts_for_version(version: str | None) -> tuple[str, ...]:
     if is_signed_release_version(version):
-        return SIGNED_RELEASE_TREE_ARTIFACTS
+        return (
+            *signed_payload_artifacts_for_version(version),
+            *SIGNED_RELEASE_TRAILER_ARTIFACTS,
+        )
     return LEGACY_RELEASE_ARTIFACTS.get(version, CURRENT_RELEASE_ARTIFACTS)
 
 
 def release_assets_for_version(version: str | None) -> tuple[str, ...]:
     if is_signed_release_version(version):
-        return SIGNED_RELEASE_ASSETS
+        return (
+            *signed_payload_artifacts_for_version(version),
+            *SIGNED_RELEASE_TRAILER_ARTIFACTS,
+        )
     return release_artifacts_for_version(version)
 
 
@@ -320,7 +349,9 @@ class Validator:
             entries[relative] = digest.lower()
 
         if is_signed_release_version(self.version):
-            expected_payloads = SIGNED_PAYLOAD_ARTIFACTS
+            expected_payloads = signed_payload_artifacts_for_version(
+                self.version
+            )
         elif self.version == "0.1.0":
             expected_payloads = CURRENT_PAYLOAD_ARTIFACTS
         else:

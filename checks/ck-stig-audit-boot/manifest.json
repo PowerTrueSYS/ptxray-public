@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-boot",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_boot"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -ld /etc/rc",
+    "grep \"audit start\" /etc/rc"
+  ],
+  "tags": [
+    "stig:V-215247"
+  ],
+  "severity": "medium",
+  "blurb": "If AIX does not start auditing at boot, actions taken between boot and any later manual audit start leave no audit trail, so early-boot activity by an intruder is unrecoverable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-boot/ck-stig-audit-boot.ksh"
+}

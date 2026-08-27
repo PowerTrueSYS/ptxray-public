@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-mkuser-sys-pristine",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_mkuser_sys_pristine"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/security/mkuser.sys"
+  ],
+  "tags": [
+    "stig:V-215181"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the shipped /etc/security/mkuser.sys script has not been customized directly. Site customizations must be placed in /etc/security/mkuser.sys.custom; a directly edited mkuser.sys can be overwritten by system updates and bypasses the supported customization contract, breaking or silently altering user account creation.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-mkuser-sys-pristine/ck-stig-mkuser-sys-pristine.ksh"
+}

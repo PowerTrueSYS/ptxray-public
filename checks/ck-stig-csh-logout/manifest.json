@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-csh-logout",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_csh_logout"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a home shell ALL",
+    "ls -ld \"$CSHLO_HOME/.logout\"",
+    "cat \"$CSHLO_HOME/.logout\""
+  ],
+  "tags": [
+    "stig:V-215311"
+  ],
+  "severity": "low",
+  "blurb": "This check verifies that every csh/tcsh user has a $HOME/.logout file that displays the STIG logout message when their session ends. A csh/tcsh user who is missing .logout, or whose .logout does not display the message, is not warned that they are being disconnected. The per-user ls/cat commands are templated with the home directory of each subject.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-csh-logout/ck-stig-csh-logout.ksh"
+}

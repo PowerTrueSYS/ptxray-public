@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-reserved-uids",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_reserved_uids"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "more /etc/passwd"
+  ],
+  "tags": [
+    "stig:V-215195"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that UIDs reserved for system accounts (0-128) are not assigned to non-system accounts on AIX. A regular user account holding a reserved UID inherits the privileges and identification reserved for system accounts, so every reserved-UID occupant must be a recognized AIX system account.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-reserved-uids/ck-stig-reserved-uids.ksh"
+}

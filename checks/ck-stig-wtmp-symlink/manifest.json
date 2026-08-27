@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-wtmp-symlink",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_wtmp_symlink"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -al /var/adm/wtmp"
+  ],
+  "tags": [
+    "stig:V-215285"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that /var/adm/wtmp is a real login accounting file rather than a symlink. When that path is a symlink, successful remote logins can be redirected or suppressed so they are not recorded for monitoring.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-wtmp-symlink/ck-stig-wtmp-symlink.ksh"
+}

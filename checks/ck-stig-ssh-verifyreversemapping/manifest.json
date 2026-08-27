@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-verifyreversemapping",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_verifyreversemapping"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/ssh/sshd_config"
+  ],
+  "tags": [
+    "stig:V-215298"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon has reverse name checking turned on. Reverse name checking stops SSH from trusting a client whose claimed hostname does not match a reverse lookup of its address. VerifyReverseMapping is obsolete in modern OpenSSH (UseDNS replaced it); this check still evaluates the STIG directive literally.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-verifyreversemapping/ck-stig-ssh-verifyreversemapping.ksh"
+}

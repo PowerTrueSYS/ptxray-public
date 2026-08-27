@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-trustchk-kernext",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_trustchk_kernext"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "trustchk -p"
+  ],
+  "tags": [
+    "stig:V-215333"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies Trusted Execution Check policy has TE, CHKEXEC, and CHKKERNEXT all ON. When any of those attributes is OFF, the kernel will run unverified executables or kernel extensions, so a modified or planted binary can execute.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-trustchk-kernext/ck-stig-trustchk-kernext.ksh"
+}

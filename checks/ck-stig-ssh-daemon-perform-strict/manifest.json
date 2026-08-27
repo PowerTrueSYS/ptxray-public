@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-daemon-perform-strict",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_daemon_perform_strict"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"test -r /etc/ssh/sshd_config || exit 1; grep -i StrictModes /etc/ssh/sshd_config | grep -v '^#' || echo STRICTMODES_ABSENT\""
+  ],
+  "tags": [
+    "stig:V-215299"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon performs StrictModes checking of home-directory configuration files so unauthorized users cannot plant or alter those files to hijack sessions.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-daemon-perform-strict/ck-stig-ssh-daemon-perform-strict.ksh"
+}

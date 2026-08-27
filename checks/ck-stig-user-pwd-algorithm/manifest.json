@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-user-pwd-algorithm",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_pwd_algorithm"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm",
+    "sh -c 'cat /etc/passwd | cut -f2,2 -d\":\"'",
+    "sh -c 'cat /etc/security/passwd | grep password'"
+  ],
+  "tags": [
+    "stig:V-215230"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX password hashes were generated with a FIPS 140-2 approved algorithm (ssha256 or ssha512): pwd_algorithm is one of those values, /etc/passwd field 2 contains no hashes, and every hash in /etc/security/passwd begins with {ssha256} or {ssha512}.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-pwd-algorithm/ck-stig-user-pwd-algorithm.ksh"
+}

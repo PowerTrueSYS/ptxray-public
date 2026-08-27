@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-cde-dod-banner",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_cde_dod_banner"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls /etc/dt/config/en_US/Xresources",
+    "grep -F \"Dtlogin*greeting.labelString\" /etc/dt/config/en_US/Xresources"
+  ],
+  "tags": [
+    "stig:V-215201"
+  ],
+  "severity": "medium",
+  "blurb": "The CDE login greeting must display the DoD banner. This check verifies that the Dtlogin*greeting.labelString resource in /etc/dt/config/en_US/Xresources carries the Standard Mandatory DoD Notice and Consent Banner so users are shown the required notice immediately prior to graphical login; when CDE is not used the rule is Not Applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-cde-dod-banner/ck-stig-cde-dod-banner.ksh"
+}

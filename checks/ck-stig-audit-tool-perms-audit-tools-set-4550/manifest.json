@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-tool-perms-audit-tools-set-4550",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_tool_perms_audit_tools_set_4550"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -l /usr/sbin/audit*|grep -v ldap",
+    "ls -l /usr/sbin/auditldap"
+  ],
+  "tags": [
+    "stig:V-215250"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX audit tools are set to mode 4550 or less and that auditldap is set to mode 500 or less. The audit tools collect, filter and merge audit records, so a group- or other-writable (or otherwise over-permissive) mode lets an unprivileged user alter the audit subsystem and mask activity.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-tool-perms-audit-tools-set-4550/ck-stig-audit-tool-perms-audit-tools-set-4550.ksh"
+}

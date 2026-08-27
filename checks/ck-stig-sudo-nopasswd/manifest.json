@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-sudo-nopasswd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sudo_nopasswd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'ls -ld /usr/bin/sudo 2>&1'",
+    "grep NOPASSWD /etc/sudoers",
+    "sh -c 'find /etc/sudoers.d -type f -exec grep -l NOPASSWD {} \\; 2>&1'"
+  ],
+  "tags": [
+    "stig:V-215260"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that sudoers configuration files do not contain a NOPASSWD tag. A NOPASSWD grant lets a user run privileged commands without re-authentication, so a compromised account can escalate without leaving a password prompt in the audit trail.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sudo-nopasswd/ck-stig-sudo-nopasswd.ksh"
+}

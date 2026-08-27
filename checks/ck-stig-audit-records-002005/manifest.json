@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-records-002005",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_records_002005"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "/usr/sbin/auditpr -i \"$trail\" -helRtcp"
+  ],
+  "tags": [
+    "stig:V-215239"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX audit records show the outcome of each audited event. Without a status column, an investigator cannot tell whether a privileged command or login succeeded, so the trail cannot answer what an intruder achieved.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-records-002005/ck-stig-audit-records-002005.ksh"
+}

@@ -14,7 +14,8 @@
     "cat /etc/exports"
   ],
   "tags": [
-    "cis-l2"
+    "cis-l2",
+    "stig:V-215330"
   ],
   "blurb": "This check reads the local active NFS export table and fails when any exported directory lacks an explicit client access allow list. An unrestricted export can be mounted by any system that can reach it, exposing its files to unauthorized reading or modification.",
   "license": "Apache-2.0",

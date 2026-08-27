@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-log-perms",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_log_perms"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "ls -ln"
+  ],
+  "tags": [
+    "stig:V-215243"
+  ],
+  "severity": "medium",
+  "blurb": "Audit logs must be owned by root so their records cannot be edited or truncated by another account. An account that owns an audit log could destroy the evidence of its own activity.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-log-perms/ck-stig-audit-log-perms.ksh"
+}

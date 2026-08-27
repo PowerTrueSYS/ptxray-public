@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-able-control-ability-remote",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_able_control_ability_remote"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "pared": true,
+  "question": "remote_login_unauthorized_users: Which local user accounts must NOT be able to log in remotely (SSH, rlogin, telnet)? List them, or state that every account currently showing rlogin=true is authorized.",
+  "commands": [
+    "lsuser -a rlogin ALL"
+  ],
+  "tags": [
+    "stig:V-215233"
+  ],
+  "severity": "high",
+  "blurb": "This check records, for every local account, whether AIX lets that account start an interactive session from the network (the rlogin attribute). An account with rlogin=true can be logged into remotely by anyone who has its password, so an account meant to be console-only or purely non-interactive becomes reachable from the network. AIX itself offers no way to tell an authorized remote user from an unauthorized one, so PTxray only collects the evidence and reports the control as not assessed until the site supplies its own list of accounts that must not log in remotely.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-able-control-ability-remote/ck-stig-able-control-ability-remote.ksh"
+}

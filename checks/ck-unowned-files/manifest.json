@@ -9,12 +9,14 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "/usr/bin/find / \\( -fstype jfs -o -fstype jfs2 \\) \\( -type d -o -type f \\) \\( -nouser -o -nogroup \\) -ls"
+    "find / -prune -print",
+    "find / -nouser -print"
   ],
   "tags": [
-    "cis-l1"
+    "cis-l1",
+    "stig:V-215340"
   ],
-  "blurb": "This check scans local filesystems for files and folders whose owner or group no longer matches any known user or group, often left behind after an account was removed. Those files have no one accountable for them and escape normal access review and cleanup. If the check fails, sensitive files or a planted backdoor can go unmanaged, and a new account that later reuses the same ID number would silently take ownership of them.",
+  "blurb": "This check scans the whole local filesystem tree from / for any file or directory whose numeric owner no longer resolves to a known account. When an account is removed, the files it owned are left behind with an unresolvable owner: no one is accountable for them, they escape normal access review and cleanup, and a later account that reuses the same numeric ID silently takes ownership of them. Any such file or directory is a finding.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-unowned-files/ck-unowned-files.ksh"
 }

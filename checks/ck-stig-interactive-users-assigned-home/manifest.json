@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-interactive-users-assigned-home",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_interactive_users_assigned_home"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cut -d: -f1,6,7 /etc/passwd",
+    "ls -ld \"$SIU_HOME\""
+  ],
+  "tags": [
+    "stig:V-215435"
+  ],
+  "severity": "medium",
+  "blurb": "Interactive (login-capable) accounts must be assigned a home directory in /etc/passwd and that directory must exist. An account with no home directory, or a home directory that has been removed, breaks login and user state and hides unauthorized access, so every interactive user must have an assigned home directory that is present on the filesystem.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-interactive-users-assigned-home/ck-stig-interactive-users-assigned-home.ksh"
+}

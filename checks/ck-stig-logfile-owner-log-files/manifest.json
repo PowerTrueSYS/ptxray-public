@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-logfile-owner-log-files",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_logfile_owner_log_files"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -lL /var/log /var/log/syslog /var/adm"
+  ],
+  "tags": [
+    "stig:V-215267"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX log files under /var/log, /var/log/syslog, and /var/adm are owned by a system group so a non-system group cannot alter or suppress logs. Confirming the system-group policy for the site beyond the authored set remains an ISSO judgement this check does not automate.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-logfile-owner-log-files/ck-stig-logfile-owner-log-files.ksh"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-ssh-daemon-configured-disable-ssh-daemon",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_daemon_configured_disable_ssh_daemon"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -ld /etc/ssh/sshd_config",
+    "grep -i IgnoreRhosts /etc/ssh/sshd_config",
+    "grep -i IgnoreRhosts /etc/ssh/sshd_config | grep -v '^#'"
+  ],
+  "tags": [
+    "stig:V-215303"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH daemon is configured to ignore user .rhosts files (IgnoreRhosts yes). When that directive is missing or is not yes, SSH can honor per-user .rhosts trust and allow host-based login that bypasses the system authentication policy.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-daemon-configured-disable-ssh-daemon/ck-stig-ssh-daemon-configured-disable-ssh-daemon.ksh"
+}

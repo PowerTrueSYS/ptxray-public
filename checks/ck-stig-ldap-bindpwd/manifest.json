@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ldap-bindpwd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ldap_bindpwd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep ^bindpwd: /etc/security/ldap/ldap.cfg",
+    "grep '^ldapsslkeypwd' /etc/security/ldap/ldap.cfg"
+  ],
+  "tags": [
+    "stig:V-215174"
+  ],
+  "severity": "high",
+  "blurb": "This check reads the bindpwd and ldapsslkeypwd fields in the AIX LDAP client configuration file /etc/security/ldap/ldap.cfg and flags a finding when a bind or SSL key password is stored in plaintext instead of encrypted or absent. A plaintext directory password is recoverable by anyone who can read the file.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ldap-bindpwd/ck-stig-ldap-bindpwd.ksh"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-cde-conceal-via-session",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_cde_conceal_via_session"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -qcL 'X11.Dt*'",
+    "grep -E '^[[:blank:]]*dtsession[*](saverTimeout|lockTimeout)[[:blank:]]*:' /etc/dt/config/*/sys.resources"
+  ],
+  "tags": [
+    "stig:V-215212"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX CDE conceals the display, via the session lock, within a short window as DISA STIG V-215212 requires. It reads the CDE install state and every dtsession*saverTimeout and dtsession*lockTimeout value in the /etc/dt/config/*/sys.resources site files, failing when a site config file is missing or any timeout exceeds 15 minutes. When CDE (X11) is not used, the control is Not Applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-cde-conceal-via-session/ck-stig-cde-conceal-via-session.ksh"
+}

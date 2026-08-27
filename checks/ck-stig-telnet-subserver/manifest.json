@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-telnet-subserver",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_telnet_subserver"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssrc -t telnet"
+  ],
+  "tags": [
+    "stig:V-215213"
+  ],
+  "severity": "high",
+  "blurb": "This check verifies that AIX employs strong authenticators for nonlocal maintenance and diagnostic sessions by confirming the telnet subserver is not active. An active telnet subserver accepts cleartext credentials for remote maintenance.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-telnet-subserver/ck-stig-telnet-subserver.ksh"
+}

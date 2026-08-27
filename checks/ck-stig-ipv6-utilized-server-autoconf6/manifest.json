@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ipv6-utilized-server-autoconf6",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ipv6_utilized_server_autoconf6"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^start[[:blank:]]/usr/sbin/autoconf6\" /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215357"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the autoconf6 daemon is not started at boot on a server where IPv6 is not utilized. An enabled autoconf6 starts the IPv6 address-autoconfiguration daemon, an unneeded network-facing service on a non-IPv6 server that an auditor will flag; the required state is that no uncommented \"start /usr/sbin/autoconf6\" line appears in /etc/rc.tcpip.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ipv6-utilized-server-autoconf6/ck-stig-ipv6-utilized-server-autoconf6.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-openssl-version",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_openssl_version"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l openssl.base"
+  ],
+  "tags": [
+    "stig:V-215216"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX openssl.base fileset is installed at VRMF 20.13.102.1000 or later, the STIG V-215216 floor for NIST FIPS-validated OpenSSL used to provision digital signatures, generate cryptographic hashes, and protect unclassified information requiring confidentiality.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-openssl-version/ck-stig-openssl-version.ksh"
+}

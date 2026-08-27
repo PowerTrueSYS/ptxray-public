@@ -1,7 +1,7 @@
 {
   "id": "ck-ntp",
   "pillar": "operational-readiness",
-  "category": "config",
+  "category": "security",
   "finding_ids": [
     "ntp"
   ],
@@ -10,13 +10,14 @@
   "read_only": true,
   "commands": [
     "lssrc -s xntpd",
-    "grep ^server /etc/ntp.conf"
+    "grep ^server /etc/ntp.conf",
+    "grep maxpoll /etc/ntp.conf"
   ],
   "tags": [
     "stig:V-215208",
     "cis-l1"
   ],
-  "blurb": "This control checks that the host keeps its clock synchronized using the Network Time Protocol (NTP). A compliant host has the NTP daemon running and at least one time server to synchronize against. When time sync is missing or the clock drifts, log timestamps become unreliable and time-sensitive security features such as Kerberos and TLS can fail.",
+  "blurb": "This control checks that the host keeps its clock synchronized using the Network Time Protocol (NTP). A compliant host has the NTP daemon active, at least one time server configured in /etc/ntp.conf, and an NTP poll interval bound (maxpoll) of 16 (about 18 hours) or less so the clock is disciplined at least every 24 hours. When time sync is missing, too sparsely polled, or the clock drifts, log timestamps become unreliable and time-sensitive security features such as Kerberos and TLS can fail.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-ntp/ck-ntp.ksh"
 }

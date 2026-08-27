@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-efs-encrypt-user",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_efs_encrypt_user"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l",
+    "lsfs -q /fs2_mnt"
+  ],
+  "tags": [
+    "stig:V-215283"
+  ],
+  "severity": "high",
+  "blurb": "AIX must encrypt user data at rest using the AIX Encrypted File System (EFS) when the organization requires encryption at rest. EFS needs the clic.rte.lib and clic.rte.kernext filesets and an EFS-enabled jfs2 filesystem; a data filesystem reported as \"EFS: no\" or a host missing the clic filesets leaves user data at rest unencrypted.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-efs-encrypt-user/ck-stig-efs-encrypt-user.ksh"
+}

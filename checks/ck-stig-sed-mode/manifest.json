@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-sed-mode",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sed_mode"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sedmgr"
+  ],
+  "tags": [
+    "stig:V-215398"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must set the Stack Execution Disable (SED) system-wide mode to all. A system-wide SED mode other than all is a finding; a determinate absence of the SED subject is the compliant state (prohibition convention), never a refusal.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sed-mode/ck-stig-sed-mode.ksh"
+}

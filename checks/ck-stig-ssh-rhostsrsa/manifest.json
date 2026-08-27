@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-ssh-rhostsrsa",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_rhostsrsa"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i RhostsRSAAuthentication /etc/ssh/sshd_config | grep -v '^#'"
+  ],
+  "tags": [
+    "stig:V-215305"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon does not allow RhostsRSAAuthentication. That obsolete OpenSSH 7.4 directive trusts rhosts plus RSA host keys, which weakens SSH authentication. If any uncommented setting is yes, this is a finding; absence or a syntactically valid non-yes value is the compliant prohibition state. A matching directive with no parseable value is not assessed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-rhostsrsa/ck-stig-ssh-rhostsrsa.ksh"
+}

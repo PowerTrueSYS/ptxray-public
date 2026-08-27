@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-ssh-revokedkeys",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_revokedkeys"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep \"^RevokedKeys\" /etc/ssh/sshd_config",
+    "grep \"^PubkeyAuthentication\" /etc/ssh/sshd_config",
+    "ls -ld /root/.ssh/authorized_keys"
+  ],
+  "tags": [
+    "stig:V-215293"
+  ],
+  "severity": "medium",
+  "blurb": "The check reads the RevokedKeys setting in /etc/ssh/sshd_config. A finding is raised when that setting is missing, empty, or unset, so revoked public keys are not disabled. That matters because a revoked key that was stolen or compromised keeps working, letting an attacker authenticate.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-revokedkeys/ck-stig-ssh-revokedkeys.ksh"
+}

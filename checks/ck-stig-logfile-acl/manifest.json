@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-logfile-acl",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_logfile_acl"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find /var/log /var/adm -type f",
+    "aclget"
+  ],
+  "tags": [
+    "stig:V-215324"
+  ],
+  "severity": "medium",
+  "blurb": "AIX log files must not have extended ACLs except as needed to support authorized software. This check verifies the decidable sub-condition: aclget of files under /var/log and /var/adm shows extended permissions disabled. Whether every system log file was identified, and whether an enabled ACL is documented with the ISSO as needed for authorized software, is the site/ISSO manual portion.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-logfile-acl/ck-stig-logfile-acl.ksh"
+}

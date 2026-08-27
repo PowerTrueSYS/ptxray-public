@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-ssh-gssapi",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_gssapi"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "test -r /etc/ssh/sshd_config",
+    "sh -c \"grep -i GSSAPIAuthentication /etc/ssh/sshd_config | grep -v '^#'\""
+  ],
+  "tags": [
+    "stig:V-215292"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the SSH daemon disables GSSAPIAuthentication when GSSAPI authentication is not required. The SA or ISSO must confirm whether GSSAPI is used for SSH authentication; PTxray reports that manual portion as not assessed when it is not supplied.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-gssapi/ck-stig-ssh-gssapi.ksh"
+}

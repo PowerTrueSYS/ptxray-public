@@ -1,0 +1,26 @@
+{
+  "id": "ck-stig-hosts-lpd-plus",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_hosts_lpd_plus"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find /etc -name hosts.lpd -print",
+    "find /etc -name Systems -print",
+    "find /etc -name printers.conf",
+    "more /etc/hosts.lpd",
+    "more /etc/Systems",
+    "more /etc/printers.conf"
+  ],
+  "tags": [
+    "stig:V-215343"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX print-service access files \u2014 /etc/hosts.lpd, or the equivalent Systems and printers.conf \u2014 contain no line consisting only of a \"+\" character. A bare \"+\" grants print access to every host, so an unauthorized host could submit print jobs to the LP subsystem; when none of the three files exists the rule is not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-hosts-lpd-plus/ck-stig-hosts-lpd-plus.ksh"
+}

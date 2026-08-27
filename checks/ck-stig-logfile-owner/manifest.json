@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-logfile-owner",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_logfile_owner"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -lL /var/log /var/log/syslog /var/adm"
+  ],
+  "tags": [
+    "stig:V-215266"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX log files under /var/log, /var/log/syslog, and /var/adm are owned by a system account. A log file owned by some other account can be altered or truncated to hide activity.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-logfile-owner/ck-stig-logfile-owner.ksh"
+}

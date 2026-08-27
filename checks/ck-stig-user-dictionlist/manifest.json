@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-dictionlist",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_dictionlist"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a dictionlist",
+    "lsuser -a dictionlist ALL"
+  ],
+  "tags": [
+    "stig:V-215229"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the default stanza and every user have a non-empty dictionlist so AIX rejects dictionary-word passwords. An empty dictionlist on default or any account lets users choose common words as passwords.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-dictionlist/ck-stig-user-dictionlist.ksh"
+}

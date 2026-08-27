@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-bootlist-modes-use-removable",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_bootlist_modes_use_removable"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "bootlist -m normal -o",
+    "bootlist -m service -o"
+  ],
+  "tags": [
+    "stig:V-215411"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that neither the normal nor service AIX bootlist uses removable media as its boot loader.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-bootlist-modes-use-removable/ck-stig-bootlist-modes-use-removable.ksh"
+}

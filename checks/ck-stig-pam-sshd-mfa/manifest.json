@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-pam-sshd-mfa",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_pam_sshd_mfa"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "awk '/^sshd/ { n++; if (n <= 3) print } END { if (n == 0) print \"ABSENT\" }' /etc/pam.conf"
+  ],
+  "tags": [
+    "stig:V-215438"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX remote sshd uses the PowerSC PAM MFA stack (pam_ckfile, pam_permission, pam_pmfa). When the first three sshd lines of /etc/pam.conf do not match that stack, remote connections can authenticate without Multi Factor Authentication.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-pam-sshd-mfa/ck-stig-pam-sshd-mfa.ksh"
+}

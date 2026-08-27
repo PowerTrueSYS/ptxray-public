@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-ssh-tcpwrappers",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_tcpwrappers"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep sshd /etc/hosts.deny",
+    "grep sshd /etc/hosts.allow",
+    "sh -c 'sshd -V 2>&1'"
+  ],
+  "tags": [
+    "stig:V-215295"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH daemon is configured for IP filtering through TCP wrappers. OpenSSH 6.7 and later do not use TCP wrappers, so the requirement does not apply on those releases. On older OpenSSH, missing sshd entries in /etc/hosts.allow and /etc/hosts.deny leave the daemon unfiltered by source address.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-tcpwrappers/ck-stig-ssh-tcpwrappers.ksh"
+}

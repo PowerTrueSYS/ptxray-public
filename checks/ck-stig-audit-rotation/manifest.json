@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-audit-rotation",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_rotation"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "crontab -l",
+    "ls -1 /audit",
+    "date '+%Y-%m-%d'"
+  ],
+  "tags": [
+    "stig:V-215256"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX audit logs are rotated daily so trails are archived instead of growing unbounded.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-rotation/ck-stig-audit-rotation.ksh"
+}

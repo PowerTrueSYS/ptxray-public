@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-sshd-active-protect-confidentiality",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_sshd_active_protect_confidentiality"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -L openssh.base.server",
+    "lssrc -s sshd"
+  ],
+  "tags": [
+    "stig:V-215284"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that OpenSSH server is installed and sshd is active so AIX can protect the confidentiality and integrity of transmitted information and so non-encryption network access methods stay disabled.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-sshd-active-protect-confidentiality/ck-stig-sshd-active-protect-confidentiality.ksh"
+}

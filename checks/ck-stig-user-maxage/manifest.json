@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-maxage",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_maxage"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a maxage",
+    "lsuser -a maxage ALL"
+  ],
+  "tags": [
+    "stig:V-215223"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the default stanza and every account have maxage set between 1 and 8 weeks so passwords cannot live longer than 60 days. An unset, 0, or greater-than-8 maxage on default or any account leaves a password valid indefinitely or well past that lifetime.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-maxage/ck-stig-user-maxage.ksh"
+}

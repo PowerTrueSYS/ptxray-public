@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-audit-config-perms",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_config_perms"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -ldn /etc/security/audit/*"
+  ],
+  "tags": [
+    "stig:V-215315"
+  ],
+  "severity": "medium",
+  "blurb": "The AIX audit configuration files under /etc/security/audit define what the AIX audit subsystem records. If a non-root account owns one it can edit or truncate that policy and quietly stop events from being recorded, defeating the audit trail.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-config-perms/ck-stig-audit-config-perms.ksh"
+}

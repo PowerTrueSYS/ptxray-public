@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-loginretries",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_loginretries"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a loginretries",
+    "lsuser -a loginretries ALL"
+  ],
+  "tags": [
+    "stig:V-215171"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the default stanza and every user have loginretries set between 1 and 3 so AIX locks an account after three consecutive invalid logins. A value of 0 or greater than 3 on default or any account leaves the account unlocked after repeated failed passwords, so an attacker can keep guessing.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-loginretries/ck-stig-user-loginretries.ksh"
+}

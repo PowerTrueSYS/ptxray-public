@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-globalinit-path",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_globalinit_path"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep -i PATH /etc/profile /etc/bashrc /etc/csh.login /etc/csh.cshrc /etc/environment /etc/.login /etc/security/environ"
+  ],
+  "tags": [
+    "stig:V-215416"
+  ],
+  "severity": "medium",
+  "blurb": "The check reads the PATH assignments in the global initialization files, the login and non-login shell startup files along with the environment and security files. A finding is any PATH entry that is relative, meaning it does not begin with a slash, or empty, meaning a leading, trailing, or doubled colon. A relative or empty entry lets a shell resolve a command from the current directory or another attacker-writable directory ahead of trusted system directories, so a malicious binary placed there runs with the privileges of the user who invokes the command.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-globalinit-path/ck-stig-globalinit-path.ksh"
+}

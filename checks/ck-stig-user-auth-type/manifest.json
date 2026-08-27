@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-auth-type",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_auth_type"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep auth_type /etc/security/login.cfg |grep AUTH",
+    "lssec -f /etc/security/login.cfg -susw -a auth_type"
+  ],
+  "tags": [
+    "stig:V-215437"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX authenticates through PAM: the usw stanza auth_type in /etc/security/login.cfg must be PAM_AUTH so multi-factor authentication can be configured. Any other value, or a missing auth_type subject, is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-auth-type/ck-stig-user-auth-type.ksh"
+}

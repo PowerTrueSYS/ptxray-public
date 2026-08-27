@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-rds-unloaded",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_rds_unloaded"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "genkex | grep rds"
+  ],
+  "tags": [
+    "stig:V-215394"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the Reliable Datagram Sockets (RDS) protocol is not loaded on the system. RDS is a kernel-level datagram transport loaded as a kernel extension; DISA requires it to be disabled because it is not needed for normal operation and adds to the local attack surface. Any RDS line in the loaded kernel extension list is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-rds-unloaded/ck-stig-rds-unloaded.ksh"
+}

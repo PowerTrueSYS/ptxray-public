@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lsitab-lpd",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lsitab_lpd"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsitab lpd"
+  ],
+  "tags": [
+    "stig:V-215349"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that no lpd entry exists in /etc/inittab. When the AIX system does not act as a remote print server for other servers, an lpd entry is a finding because the line printer daemon would start and accept remote print jobs, exposing an unnecessary network service.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lsitab-lpd/ck-stig-lsitab-lpd.ksh"
+}

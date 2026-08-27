@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-userinit-libpath",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_userinit_libpath"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/passwd",
+    "ls -ld \"$SIL_PATH\"",
+    "cat \"$SIL_PATH\""
+  ],
+  "tags": [
+    "stig:V-215424"
+  ],
+  "severity": "medium",
+  "blurb": "Local init-file library search paths must contain only absolute entries. Relative paths, empty colon slots, and a missing required init file are findings. History files are not init files and are not scanned.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-userinit-libpath/ck-stig-userinit-libpath.ksh"
+}

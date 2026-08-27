@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-user-herald",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_herald"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/login.cfg -s default -a herald"
+  ],
+  "tags": [
+    "stig:V-215203"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the default login herald displays the Standard Mandatory DoD Notice and Consent Banner before access. When the herald is unset or omits that notice, a publicly reachable login proceeds without the required warning and consent text.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-herald/ck-stig-user-herald.ksh"
+}

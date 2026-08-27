@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-samba-absent",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_samba_absent"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lslpp -l samba*"
+  ],
+  "tags": [
+    "stig:V-215280"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that Samba packages are absent from AIX, as required by DISA STIG V-215280.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-samba-absent/ck-stig-samba-absent.ksh"
+}

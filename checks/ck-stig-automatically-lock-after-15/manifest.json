@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-automatically-lock-after-15",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_automatically_lock_after_15"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c 'ls /usr/dt/config/*/sys.resources 2>&1'",
+    "sh -c 'grep dtsession /etc/dt/config/*/sys.resources 2>&1'"
+  ],
+  "tags": [
+    "stig:V-215318"
+  ],
+  "severity": "medium",
+  "blurb": "This check reads the CDE dtsession saverTimeout and lockTimeout values in each locale sys.resources file on the box. A value above 15 minutes, or a missing timeout, is a finding. An idle CDE session that stays unlocked leaves the console open to anyone who walks up to it.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-automatically-lock-after-15/ck-stig-automatically-lock-after-15.ksh"
+}

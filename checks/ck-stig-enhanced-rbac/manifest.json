@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-enhanced-rbac",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_enhanced_rbac"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsattr -E -l sys0 -a enhanced_RBAC"
+  ],
+  "tags": [
+    "stig:V-215404"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX runs with enhanced Role-Based Access Control (RBAC) enabled, so the sys0 enhanced_RBAC attribute is true. Enhanced RBAC isolates security functions from nonsecurity functions, grants system privileges to operating system admins through RBAC roles, and prohibits unprivileged users from installing system software. When enhanced RBAC is off or unconfigured, security functions are not isolated and system privilege is not gated through RBAC.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-enhanced-rbac/ck-stig-enhanced-rbac.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-nosuid-option-enabled-nfs",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_nosuid_option_enabled_nfs"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsfs -v nfs"
+  ],
+  "tags": [
+    "stig:V-215210"
+  ],
+  "severity": "medium",
+  "blurb": "This check reads the nosuid mount option on every NFS client mount and reports a finding when a mount lacks it, because a setuid binary on a remote export could then run with local privileges.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-nosuid-option-enabled-nfs/ck-stig-nosuid-option-enabled-nfs.ksh"
+}

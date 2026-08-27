@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-nfs-nosuid",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_nfs_nosuid"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "mount | grep -E \"options|nfs|---\""
+  ],
+  "tags": [
+    "stig:V-215234"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that every NFS file system is mounted with the nosuid option so setuid programs from an NFS server cannot run with local privilege. NFS mounts that omit nosuid are a finding. Whether a missing nosuid is allowed because the file system contains ISSO-approved setuid or setgid programs remains a typed site review and is never treated as a silent pass.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-nfs-nosuid/ck-stig-nfs-nosuid.ksh"
+}

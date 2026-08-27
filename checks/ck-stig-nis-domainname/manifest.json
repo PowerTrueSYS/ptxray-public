@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-nis-domainname",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_nis_domainname"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "domainname"
+  ],
+  "tags": [
+    "stig:V-215418"
+  ],
+  "severity": "medium",
+  "blurb": "This check fails when no NIS domain name is configured and refuses (does not PASS) a configured name so site/ISSO can judge whether it is difficult to guess.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-nis-domainname/ck-stig-nis-domainname.ksh"
+}

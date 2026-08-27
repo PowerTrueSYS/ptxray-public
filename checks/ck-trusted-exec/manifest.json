@@ -12,9 +12,10 @@
     "trustchk -p TE"
   ],
   "tags": [
-    "cis-l2"
+    "cis-l2",
+    "stig:V-215335"
   ],
-  "blurb": "Trusted Execution (TE) makes AIX check the integrity of every program before it runs, so a tampered or malicious binary is refused. When TE is off, the kernel runs any executable without that check, and an attacker who can place a modified binary can run it without detection.",
+  "blurb": "Trusted Execution (TE) makes AIX check the integrity of every program before it runs, so a tampered or malicious binary is refused. When TE is off, the kernel runs any executable without that check, and an attacker who can place a modified binary can run it without detection. DISA STIG V-215335 requires TE to be enabled.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-trusted-exec/ck-trusted-exec.ksh"
 }

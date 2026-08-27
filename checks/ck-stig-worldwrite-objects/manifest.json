@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-worldwrite-objects",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_worldwrite_objects"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find / -perm -2 -a \\( -type d -o -type f \\) -exec ls -ld {} \\;"
+  ],
+  "tags": [
+    "stig:V-215409"
+  ],
+  "severity": "medium",
+  "blurb": "Public directories must be the only world-writable directories, and world-writable files must live only in public directories (V-215409). World-writable objects outside /tmp and /dev/null are a finding; whether additional objects are required for system or application operation is an ISSO judgement and is never a silent PASS.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-worldwrite-objects/ck-stig-worldwrite-objects.ksh"
+}

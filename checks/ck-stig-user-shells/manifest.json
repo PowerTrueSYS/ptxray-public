@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-user-shells",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_shells"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls -la /etc/shells",
+    "cat /etc/shells",
+    "lssec -f /etc/security/login.cfg -s usw -a shells"
+  ],
+  "tags": [
+    "stig:V-215408"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that /etc/shells exists and that the login.cfg usw shells attribute is a non-empty subset of it (V-215408). A missing file or empty shells attribute is unmet required configuration. Whether a listed shell is ISSO-approved is site judgement and is never silently passed.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-shells/ck-stig-user-shells.ksh"
+}

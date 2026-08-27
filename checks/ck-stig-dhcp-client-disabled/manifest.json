@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-dhcp-client-disabled",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_dhcp_client_disabled"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ps -ef",
+    "cat /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215355"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies the AIX DHCP client (dhcpcd) is disabled: no dhcpcd process runs and /etc/rc.tcpip has no uncommented \"start /usr/sbin/dhcpcd\" line; a commented-out \"#start /usr/sbin/dhcpcd\" line is the normal \"chrctcp -d dhcpcd\" disabled state, not documentation of a needed client. A running DHCP client can silently obtain network configuration from an untrusted DHCP server. DISA STIG V-215355 requires the client disabled, Not Applicable unless needed by the system and documented; recognized only via an operator-written \"# PTXRAY-EXEMPT: V-215355 <justification>\" marker in /etc/rc.tcpip.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-dhcp-client-disabled/ck-stig-dhcp-client-disabled.ksh"
+}

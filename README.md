@@ -1,8 +1,8 @@
 # PTxray: read-only IBM AIX and IBM i health, risk, and security assessment
 
-PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. The published PTxray 1.5.0 release uses inspectable ksh runners for AIX `/bin/sh` and IBM i PASE ksh plus a separate signed-definitions downloader. Assessment probes read system state, change no system configuration, make no network calls, send no assessment data or telemetry away from the host, and do not remediate findings.
+PTxray is an open-source IBM AIX and IBM i health check and posture assessment for administrators who need evidence before they change a system. The published PTxray 1.6.0 release uses inspectable ksh runners for AIX `/bin/sh` and IBM i PASE ksh plus a separate signed-definitions downloader. Assessment probes read system state, change no system configuration, make no network calls, send no assessment data or telemetry away from the host, and do not remediate findings.
 
-> **Release status:** The current published release is PTxray 1.5.0. Download
+> **Release status:** The current published release is PTxray 1.6.0. Download
 > the complete asset set from `releases/latest`, verify the signed checksum
 > manifest, and confirm the release-key fingerprint through the independent
 > PowerTrue security channel before privileged execution.
@@ -11,9 +11,9 @@ PTxray is an open-source IBM AIX and IBM i health check and posture assessment f
 
 **Download:** [powertruesystems.com/ptxray/](https://powertruesystems.com/ptxray/)
 
-Version: 1.5.0
+Version: 1.6.0
 
-**Direct release downloads:** [AIX runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh) · [IBM i runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh) · [signed checksums](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/SHA256SUMS)
+**Direct release downloads:** [AIX report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-report-aix-1.6.0.tar) · [IBM i report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-report-ibmi-1.6.0.tar) · [AIX runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-aix.sh) · [IBM i runner](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/ptxray-ibmi.sh) · [signed checksums](https://github.com/PowerTrueSYS/ptxray-public/releases/latest/download/SHA256SUMS)
 
 **Source:** [github.com/PowerTrueSYS/ptxray-public](https://github.com/PowerTrueSYS/ptxray-public)
 
@@ -36,12 +36,14 @@ PTxray is useful for:
 
 ## What is included?
 
-- `ptxray-aix.sh` — the AIX assessment runner. PTxray 1.5 requires root before definitions selection or assessment begins. Its VIOS lane remains disabled pending live VIOS acceptance.
-- `ptxray-ibmi.sh` — the IBM i assessment runner, graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. PTxray 1.5 requires both the signed-on and system user to be QSECOFR.
+- `ptxray-report-aix-1.6.0.tar` — the AIX report bundle: the report runner `dist/tools/aixray-scan.ksh`, the tool tree and data it calls, and `README-REPORT.md`. This is the AIX product entry point.
+- `ptxray-report-ibmi-1.6.0.tar` — the IBM i report bundle: the report runner `dist/tools/ibmi-scan.ksh`, the tool tree and data it calls, and `README-REPORT.md`. This is the IBM i product entry point.
+- `ptxray-aix.sh` — the one-file AIX assessment runner, kept for compatibility. PTxray 1.6 requires root before definitions selection or assessment begins. Its VIOS lane remains disabled pending live VIOS acceptance.
+- `ptxray-ibmi.sh` — the one-file IBM i assessment runner, kept for compatibility, graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5. PTxray 1.6 requires both the signed-on and system user to be QSECOFR.
 - `ptxray-defs.sh` — the separate, adjacent signed-definitions downloader and verifier. It is the only assessment component permitted to make a network request.
 - [`ptxray-review-pack.sh`](ptxray-review-pack.sh) — the offline helper that creates a pseudonymized review copy and a separate local decoding key
 - `aixray-aix.sh` — a release-asset-only compatibility name that must be byte-identical to `ptxray-aix.sh`. It is not a second implementation, product name, report prefix, or documentation namespace.
-- [`checks/`](checks/) — 387 standalone ksh check tools, each paired with its `manifest.json`
+- [`checks/`](checks/) — 585 standalone ksh check tools, each paired with its `manifest.json`
 - [`catalog.json`](catalog.json) — the generated, sorted manifest catalog with SHA-256 hashes and the declared check count
 - [`SECURITY.md`](SECURITY.md) and [`docs/VERIFY.md`](docs/VERIFY.md) — the trust boundary, caveats, and repeatable public-repository verification commands
 - [`site/index.html`](site/index.html) — the public download page for `powertruesystems.com/ptxray/`
@@ -49,22 +51,48 @@ PTxray is useful for:
 
 The standalone tools are independently callable check modules. Their inventory count is not a numerical claim about every finding produced by the larger assembled assessment.
 
-## PTxray 1.5 release
+## PTxray 1.6 release
 
-PTxray 1.5.0 is the current published release. The AIX runner requires root, and
-the IBM i runner requires QSECOFR. Before assessment probes begin,
-the runner verifies and invokes the separate, adjacent, same-release
-digest-bound `ptxray-defs.sh`; a missing, replaced, or mismatched downloader is
-not executed.
+PTxray 1.6.0 is the current published release. The AIX runner requires root, and
+the IBM i runner requires QSECOFR. Before assessment probes begin, the runner
+verifies and invokes the separate, adjacent, same-release digest-bound
+`ptxray-defs.sh`; a missing, replaced, or mismatched downloader is not executed.
+
+### The report runners are the product entry points
+
+The product entry points are the report runners inside the two versioned report
+bundles. Extract the bundle for your platform and run its runner with these
+exact commands.
+
+AIX (`ptxray-report-aix-1.6.0.tar`):
+
+```sh
+dist/tools/aixray-scan.ksh --html --json --compliance <std> --definitions-bundle F --out DIR
+```
+
+IBM i (`ptxray-report-ibmi-1.6.0.tar`):
+
+```sh
+dist/tools/ibmi-scan.ksh --html --json --compliance cis-l1|cis-l2 --out DIR --monolith ./ptxray-ibmi.sh
+```
+
+A runner writes `report.html`, its print form, `report.json`, and the Blueprint
+feed — `scan.ptx` on AIX and `ptxray-ibmi.json` on IBM i. The one-file scripts
+`ptxray-aix.sh` and `ptxray-ibmi.sh` remain in the release set for
+compatibility and do not produce the report; they are scheduled to retire in
+1.7 in favour of the report runners.
+
+### Definitions acquisition
 
 In a non-interactive run, connected mode is the default and attempts to
 download the current signed definitions. In an interactive run, the menu
 prompts the operator to update, use the last valid signed cache, import a local
 signed bundle, or continue without definitions. `--offline` selects the signed
-cache without a network request. `--definitions-bundle SIGNED_FILE` verifies a
-local signed bundle and its adjacent `SIGNED_FILE.sig` before it becomes the
-current cache generation. Old or stale definitions produce an explicit age
-warning; they are not silently described as current.
+cache without a network request. `--definitions-bundle FILE` verifies a
+local signed bundle and its adjacent `FILE.sig` before it becomes the
+current cache generation, which is how an air-gapped machine is assessed. Old
+or stale definitions produce an explicit age warning; they are not silently
+described as current.
 
 The network and write boundaries are deliberately separated. Before a
 connected update, `ptxray-defs.sh` discloses its two fixed HTTPS GET requests,
@@ -75,6 +103,14 @@ assessment probes make no network calls, send no assessment data or telemetry,
 change no system configuration, and perform no remediation. This supports an
 air-gapped assessment run with a previously populated signed cache or a locally
 transferred signed bundle.
+
+### Not assessed in 1.6
+
+IBM i firmware currency, PTF group currency, and Security/HIPER group currency
+are `NOT_ASSESSED` in this release. The IBM `SYSTOOLS` currency views they need
+make outbound calls to IBM, which the assessment boundary bans, so the IBM i
+overall grade is computed from the Security pillar and the Currency pillar is
+shown as not scored. An explicit `--allow-ibm-lookup` opt-in arrives in 1.7.
 
 ## Standards coverage
 
@@ -97,7 +133,7 @@ PTxray evaluates selected controls against observed system state. Coverage is pa
 | No fabricated assessment result | `NOT_ASSESSED` is a first-class output state. Missing, unreadable, malformed, ambiguous, or unsupported evidence is reported as unavailable rather than silently converted to `PASS`. Search the assembled source for `NOT_ASSESSED` to inspect each branch. |
 | Declared standalone inventory | [`catalog.json`](catalog.json) records `check_count`; each entry resolves to one paired script and manifest under [`checks/`](checks/), and the public tests require all three counts to agree. |
 | Exact artifact identity | Each catalog entry carries the SHA-256 digest of its referenced standalone shell artifact. The catalog is sorted by check ID for deterministic review. |
-| Signed published release | PTxray 1.5.0 publishes the exact nine-asset allowlist, including six payloads, `SHA256SUMS`, its detached signature, and the release public key. [`docs/VERIFY.md`](docs/VERIFY.md) gives the signature-first verification order and independently published key fingerprint. |
+| Signed published release | PTxray 1.6.0 publishes the exact eleven-asset allowlist: eight payloads recorded in `SHA256SUMS`, that manifest, its detached signature, and the release public key. [`docs/VERIFY.md`](docs/VERIFY.md) gives the signature-first verification order and independently published key fingerprint. |
 
 “Read-only” describes the assessment probes' effect on target system
 configuration. PTxray still writes output explicitly requested by the operator,
@@ -111,19 +147,23 @@ of local inputs.
 
 - IBM AIX 7.2 or 7.3; the IBM i assessment runs on IBM i 7.4 or 7.5 through PASE. The VIOS lane remains disabled pending live acceptance.
 - AIX `/bin/sh` and standard AIX userland; bash, Python, GNU userland, and package installation are not required
-- PTxray 1.5 AIX requires root; the runner refuses before definitions selection or assessment when that requirement is not met.
-- PTxray 1.5 IBM i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`.
+- PTxray 1.6 AIX requires root; the runner refuses before definitions selection or assessment when that requirement is not met.
+- PTxray 1.6 IBM i requires both `SESSION_USER=QSECOFR` and `SYSTEM_USER=QSECOFR`.
 - Keep the same-release `ptxray-defs.sh` adjacent to the runner. Signed-definitions verification needs OpenSSL at a supported fixed path; connected updates also need curl at a supported fixed path.
 - Plan for several minutes; runtime varies by system size and optional locally supplied FLRTVC data
 - No package or agent is installed. The downloader may create the documented persistent definitions cache. Assessment probes make no network calls, and no assessment data or telemetry leaves the host. Use `--offline` with a valid signed cache or `--definitions-bundle` with a transferred signed bundle for an air-gapped assessment run.
 
 ## How do I run PTxray?
 
-Download the complete signed 1.5 release asset set from
-the [download page](https://powertruesystems.com/ptxray/), verify it, and keep
-`ptxray-aix.sh` and `ptxray-defs.sh` together. The bare run uses the interactive
-definitions menu when a terminal is available; otherwise it attempts a
-connected signed-definitions update before assessment:
+Download the complete signed 1.6 release asset set from
+the [download page](https://powertruesystems.com/ptxray/) and verify it. For
+the full report, extract `ptxray-report-aix-1.6.0.tar` and run
+`dist/tools/aixray-scan.ksh` as shown above.
+
+The compatibility one-file run below produces verdict output rather than the
+report. Keep `ptxray-aix.sh` and `ptxray-defs.sh` together. The bare run uses
+the interactive definitions menu when a terminal is available; otherwise it
+attempts a connected signed-definitions update before assessment:
 
 ```sh
 chmod 700 ptxray-aix.sh
@@ -193,6 +233,15 @@ SHA-256 values for the artifacts in this repository revision are published in
 [`SHA256SUMS`](SHA256SUMS), one line per released file, rather than pasted into
 this page where they would rot. Verify every release payload against it.
 
+The published 1.6 release is eleven assets: eight payloads — `ptxray-aix.sh`,
+its byte-identical `aixray-aix.sh` alias, `ptxray-defs.sh`, `ptxray-ibmi.sh`,
+`ptxray-review-pack.sh`, `ptxray-review-validate.awk`, and the two report
+bundles `ptxray-report-aix-1.6.0.tar` and `ptxray-report-ibmi-1.6.0.tar` —
+plus `SHA256SUMS`, its detached signature `SHA256SUMS.sig`, and the release
+public key `POWERTRUE-RELEASE-PUBLIC.pem`. `SHA256SUMS` holds exactly eight
+records, one per payload; it does not hash itself, its signature, or the key.
+[`docs/VERIFY.md`](docs/VERIFY.md) gives the signature-first order.
+
 When verifying a full repository tree (a `git clone` or tag archive), use:
 
 ```sh
@@ -258,3 +307,23 @@ Machine-readable license expression: `Apache-2.0`.
 The assembled report includes IBM Plex font data under the SIL Open Font License 1.1. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 Copyright © 2026 CJDM LLC, doing business as PowerTrue Systems.
+
+<!-- ptxray-release-artifacts:begin -->
+## Release artifacts
+
+The product entry points are the report runners inside the versioned report bundles, with these exact commands:
+
+AIX (`ptxray-report-aix-1.6.0.tar`):
+
+```sh
+dist/tools/aixray-scan.ksh --html --json --compliance <std> --definitions-bundle F --out DIR
+```
+
+IBM i (`ptxray-report-ibmi-1.6.0.tar`):
+
+```sh
+dist/tools/ibmi-scan.ksh --html --json --compliance cis-l1|cis-l2 --out DIR --monolith ./ptxray-ibmi.sh
+```
+
+The one-file scripts (`ptxray-aix.sh`, `ptxray-ibmi.sh`) do not produce the report. Extract the matching bundle and run the runner above.
+<!-- ptxray-release-artifacts:end -->

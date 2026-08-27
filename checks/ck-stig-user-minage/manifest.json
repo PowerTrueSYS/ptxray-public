@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-minage",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_minage"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssec -f /etc/security/user -s default -a minage",
+    "lsuser -a minage ALL"
+  ],
+  "tags": [
+    "stig:V-215222"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the /etc/security/user default stanza and every account have minage set to at least 1 so a password cannot be changed within 24 hours. A missing or sub-1 default, or any account with minage less than 1, lets a newly set password be replaced immediately.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-minage/ck-stig-user-minage.ksh"
+}

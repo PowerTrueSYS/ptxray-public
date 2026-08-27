@@ -1,0 +1,26 @@
+{
+  "id": "ck-stig-plus-entries",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_plus_entries"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "sh -c \"cat /etc/passwd | grep -v \\\"^#\\\" | grep \\\"\\\\+\\\"\"",
+    "sh -c \"cat /etc/security/passwd | grep -v \\\"^#\\\" | grep \\\"\\\\+\\\"\"",
+    "sh -c \"cat /etc/group | grep -v \\\"^#\\\" | grep \\\"\\\\+\\\"\"",
+    "cat /etc/netgroup",
+    "lsldap -a netgroup",
+    "niscat netgroup.org_dir"
+  ],
+  "tags": [
+    "stig:V-215206"
+  ],
+  "severity": "medium",
+  "blurb": "This check looks for a plus character in /etc/passwd, /etc/security/passwd, and /etc/group. A plus without defined NIS+ or LDAP netgroup entries lets network-defined users and groups take part in local authentication. Mid-line pluses and /etc/security/passwd are in scope.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-plus-entries/ck-stig-plus-entries.ksh"
+}

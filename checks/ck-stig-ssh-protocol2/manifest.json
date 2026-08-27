@@ -1,0 +1,23 @@
+{
+  "id": "ck-stig-ssh-protocol2",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_ssh_protocol2"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "test -f /etc/ssh/sshd_config",
+    "grep -i '^[[:space:]]*Protocol' /etc/ssh/sshd_config",
+    "sshd -V"
+  ],
+  "tags": [
+    "stig:V-215289"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the AIX SSH server uses SSH Protocol 2 only. An absent Protocol directive is accepted only when sshd reports OpenSSH 7.4 or later, because those releases removed the directive and support Protocol 2 only.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-ssh-protocol2/ck-stig-ssh-protocol2.ksh"
+}

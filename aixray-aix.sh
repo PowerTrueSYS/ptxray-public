@@ -58,7 +58,7 @@ export PATH
 # is C-locale by contract, so pin the locale.
 LC_ALL=C; export LC_ALL
 
-VERSION="1.5.0"
+VERSION="1.6.0"
 DATA_VINTAGE="unknown"
 DATA_VINTAGE_H="unknown"
 
@@ -639,7 +639,7 @@ KtIVrykLMk7BGVjEQnRmSEk2tnxS/W9YaBmNdXZUSw3/OR8rVY/liX9FtV9GzydN8er/IYeJIgLLMKMb
 AIXRAY_SELF=$0
 PTXRAY_SELF=$AIXRAY_SELF
 PTXRAY_DEFS_INTEGRATION=1
-PTXRAY_DEFS_DOWNLOADER_SHA256='8720efb8c04366da97c4b8f187ef6dcfb924d17fc38d1898900da813694822af'
+PTXRAY_DEFS_DOWNLOADER_SHA256='bfaad949ab4cf11076a3da7af5a31c68060b771edaf8c9ec467e6d8eee06fdc5'
 # Shared post-identity-gate selector for the adjacent signed-data downloader.
 # This module contains no transport implementation and no endpoint. Assemblers
 # bind the exact same-release downloader digest above it.
@@ -753,7 +753,7 @@ function ptxray_defs_sha256_file {
   digest=$("$verifier" dgst -sha256 -r "$1" 2>/dev/null | awk '{print $1}') \
     || return 1
   printf '%s\n' "$digest" | awk '
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     hex64($0){print;ok=1}END{exit ok?0:1}'
 }
 
@@ -845,7 +845,7 @@ function ptxray_defs_snapshot_protocol_valid {
     -v generation="$PTXRAY_DEFS_GENERATION" \
     -v kev="$PTXRAY_DEFS_KEV_SHA256" \
     -v apar="$PTXRAY_DEFS_APAR_SHA256" '
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     NR!=1{bad=1}
     NR==1{
       if(NF!=7||$1!="PTXRAY-DEFS"||$2!="1"||$3!="snapshot")bad=1
@@ -970,11 +970,11 @@ function ptxray_defs_resolve {
 function ptxray_defs_protocol_valid {
   printf '%s\n' "$1" | awk -F'|' '
     function digits(s){return s~/^(0|[1-9][0-9]*)$/}
-    function positive(s){return s~/^[1-9][0-9]*$/&&length(s)<=18}
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function positive(s){return s~/^[1-9][0-9]*$/&&substr(s,19,1)==""}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     function ymd(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/}
     function dotted(s){return s~/^[0-9][0-9][0-9][0-9][.][0-9][0-9][.][0-9][0-9]$/}
-    function version(s){return length(s)>=1&&length(s)<=64&&s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/}
+    function version(s){return s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/&&substr(s,65,1)==""}
     function created(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/}
     function generation(s, a,n){n=split(s,a,"-");return n==3&&a[1]=="g"&&positive(a[2])&&hex64(a[3])}
     NR!=1{bad=1}
@@ -2858,9 +2858,14 @@ function currency_apply_overrides {
         consumer_cap=${CU_THRESHOLD[$ci]}
         if ! awk -v requested="$normalized" -v cap="$consumer_cap" '
           BEGIN {
-            if (length(requested) < length(cap)) exit 0
-            if (length(requested) > length(cap)) exit 1
-            exit (("x" requested) <= ("x" cap) ? 0 : 1)
+            # Right-align both day counts in a fixed 19-column field (the
+            # widest value the selector admits) and compare them
+            # as strings: a space sorts below every digit, so the padded
+            # comparison is the numeric one for non-negative integers, with
+            # no float conversion. Written this way because
+            # tests/lint-ksh88.sh bans length(<identifier>) -- it cannot tell
+            # portable length(string) from the gawk-only length(array).
+            exit (("x" sprintf("%19s", requested)) <= ("x" sprintf("%19s", cap)) ? 0 : 1)
           }'; then
           echo "ptxray: currency max age for $source_id cannot exceed its consumer cap of $consumer_cap days" >&2
           return 2
@@ -7110,7 +7115,6 @@ _AIXRAY_SESSION_KEYS=""
       if [ "$CRC" -lt 0 ] || [ "$LF" -lt 0 ] || [ "$LS" -lt 0 ]; then
         FCTXT="$FCTXT${FCTXT:+; }$A: counters not reported (virtual FC)"
         FCNR=$((FCNR+1))
-        FCGAP=1
         continue
       fi
       FCTXT="$FCTXT${FCTXT:+; }$A: CRC $CRC, link-fail $LF, loss-sync $LS"
@@ -7124,6 +7128,12 @@ _AIXRAY_SESSION_KEYS=""
       add storage fc_errors "Fibre Channel adapter errors" NOT_ASSESSED low "$FCTXT" \
           "One or more FC adapters returned failed, empty, malformed, missing, or unavailable counters, so a complete clean adapter-health verdict cannot be claimed." \
           "run 'fcstat <fcs>' as root for each named adapter; on virtual FC, verify the counters and path health on the VIOS side."
+    elif [ "$FCNR" -eq "$FCN" ]; then
+      # Virtual FC (NPIV/vFC client) reports no counters; that is N/A, not a refusal.
+      add storage fc_errors "Fibre Channel adapter errors" NOT_APPLICABLE low \
+          "virtual FC adapter: counters not exposed to the client LPAR" \
+          "Virtual Fibre Channel client adapters do not expose error counters to the client LPAR; Fibre Channel path health is assessed on the VIOS." \
+          "n/a"
     else
       add storage fc_errors "Fibre Channel adapter errors" PASS low "$FCTXT" \
           "No CRC or excessive link errors on the FC adapters (cumulative since boot)." "n/a"
@@ -11098,11 +11108,11 @@ _AIXRAY_SESSION_KEYS=""
   fi
 
 _AIXRAY_SESSION_KEYS=""
-
-  # pw_hashing — the usw password-hash algorithm. An unset pwd_algorithm
-  # falls back to legacy DES crypt, which considers only the first 8 password
-  # characters. This check is diagnostic only: chsec appears in fix prose but
-  # is never invoked.
+  # pw_hashing — DISA STIG V-215225 (AIX7-00-001128): the usw password-hash
+  # algorithm must be ssha512 or ssha256. Any other value, and an unset or
+  # absent pwd_algorithm, is a finding: AIX then falls back to legacy DES
+  # crypt, which considers only the first 8 password characters. This check is
+  # diagnostic only: chsec appears in fix prose but is never invoked.
   typeset PWH_RAW PWH_RC PWH_PARSED PWH_STATE PWH_VALUE
   if [ "${MYUID:-0}" != "0" ]; then
     PWH_RAW=""
@@ -11113,16 +11123,18 @@ _AIXRAY_SESSION_KEYS=""
   if [ "$PWH_RC" -ne 0 ]; then
     if [ "${MYUID:-0}" != "0" ]; then
       add security pw_hashing "Password hashing algorithm" \
-          NOT_ASSESSED high \
+          NOT_ASSESSED med \
           "not assessed — pwd_algorithm capture not executed (requires root; rc=$PWH_RC)" \
           "The password hashing policy needs root access and no pwd_algorithm capture was executed." \
-          "re-run ptxray as root, or inspect 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually." "cis-l1"
+          "re-run ptxray as root, or inspect 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually." \
+          "stig:V-215225 cis-l1"
     else
       add security pw_hashing "Password hashing algorithm" \
-          NOT_ASSESSED high \
+          NOT_ASSESSED med \
           "not assessed — pwd_algorithm capture failed (rc=$PWH_RC)" \
           "The pwd_algorithm read failed, which is unexpected as root, so PTxray obtained no trustworthy password-hashing evidence." \
-          "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, restore read access, then rerun PTxray." "cis-l1"
+          "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, restore read access, then rerun PTxray." \
+          "stig:V-215225 cis-l1"
     fi
   else
     PWH_PARSED=$(printf '%s\n' "$PWH_RAW" | awk '
@@ -11150,7 +11162,9 @@ _AIXRAY_SESSION_KEYS=""
         if (rows==0) print "empty|"
         else if (rows!=1 && attrs<=1) print "bad|"
         else if (rows!=1) print "multiple|" values
-        else if (bad || attrs!=1) print "bad|"
+        else if (bad) print "bad|"
+        else if (attrs==0) print "absent|"
+        else if (attrs!=1) print "bad|"
         else if (value=="") print "absent|"
         else if (value ~ /^[A-Za-z0-9_.-]+$/) print "value|" value
         else print "bad|"
@@ -11160,48 +11174,55 @@ _AIXRAY_SESSION_KEYS=""
 
     case "$PWH_STATE" in
       empty)
-        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
+        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED med \
             "not assessed — pwd_algorithm capture empty (rc=0); read returned no assignment" \
             "The successful read returned no pwd_algorithm assignment, so PTxray cannot claim the attribute is absent or select a release default." \
-            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." "cis-l1"
+            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." \
+            "stig:V-215225 cis-l1"
         ;;
       multiple)
-        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
+        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED med \
             "not assessed — multiple pwd_algorithm assignments (values: $PWH_VALUE)" \
             "The capture contained more than one pwd_algorithm assignment, so PTxray cannot determine one effective hashing policy." \
-            "remove duplicate or conflicting usw pwd_algorithm assignments, then rerun PTxray." "cis-l1"
+            "remove duplicate or conflicting usw pwd_algorithm assignments, then rerun PTxray." \
+            "stig:V-215225 cis-l1"
         ;;
       bad)
-        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED high \
+        add security pw_hashing "Password hashing algorithm" NOT_ASSESSED med \
             "not assessed — pwd_algorithm capture unparseable: output was not exactly one usw pwd_algorithm assignment" \
             "The password hashing policy could not be parsed, so PTxray cannot claim that password hashes use an approved algorithm." \
-            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." "cis-l1"
+            "run 'lssec -f /etc/security/login.cfg -s usw -a pwd_algorithm' manually, then rerun PTxray." \
+            "stig:V-215225 cis-l1"
         ;;
       absent)
         add security pw_hashing "Password hashing algorithm" FAIL high \
-            "/etc/security/login.cfg usw pwd_algorithm unset (defaults to legacy crypt); requires ssha256, ssha512 or bcrypt" \
-            "An unset pwd_algorithm defaults to legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash." \
-            "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
+            "/etc/security/login.cfg usw pwd_algorithm unset (defaults to legacy crypt); requires ssha512 or ssha256" \
+            "An unset pwd_algorithm defaults to legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash. DISA STIG V-215225 requires ssha512 or ssha256." \
+            "chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha512; passwd [user_name] — PTxray only recommends this command and never executes it." \
+            "stig:V-215225 cis-l1"
         ;;
       value)
         case "$PWH_VALUE" in
-          ssha256|ssha512|bcrypt)
-            add security pw_hashing "Password hashing algorithm" PASS high \
+          ssha256|ssha512)
+            add security pw_hashing "Password hashing algorithm" PASS med \
                 "$PWH_VALUE" \
-                "The configured password hashing algorithm avoids the legacy DES crypt default and its 8-character password limit." \
-                "n/a" "cis-l1"
+                "The configured password hashing algorithm is one of the two Loadable Password Algorithms DISA STIG V-215225 accepts, so it avoids the legacy DES crypt default and its 8-character password limit." \
+                "n/a" \
+                "stig:V-215225 cis-l1"
             ;;
           crypt)
             add security pw_hashing "Password hashing algorithm" FAIL high \
-                "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha256, ssha512 or bcrypt" \
-                "pwd_algorithm=crypt selects legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash." \
-                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
+                "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha512 or ssha256" \
+                "pwd_algorithm=crypt selects legacy DES crypt, which truncates passwords to 8 characters; characters after the eighth do not strengthen the stored hash. DISA STIG V-215225 requires ssha512 or ssha256." \
+                "chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha512; passwd [user_name] — PTxray only recommends this command and never executes it." \
+                "stig:V-215225 cis-l1"
             ;;
           *)
             add security pw_hashing "Password hashing algorithm" FAIL high \
-                "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha256, ssha512 or bcrypt" \
-                "The configured password hashing algorithm is not one of the accepted choices (ssha256, ssha512, or bcrypt); ssha256 is the minimum recommendation." \
-                "set pwd_algorithm to ssha256 at minimum (for example, 'chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha256'); PTxray only recommends this command and never executes it." "cis-l1"
+                "/etc/security/login.cfg usw pwd_algorithm=$PWH_VALUE; requires ssha512 or ssha256" \
+                "The configured password hashing algorithm is not one of the two Loadable Password Algorithms DISA STIG V-215225 accepts (ssha512 or ssha256), so PTxray cannot credit the system with an approved password hash." \
+                "chsec -f /etc/security/login.cfg -s usw -a pwd_algorithm=ssha512; passwd [user_name] — PTxray only recommends this command and never executes it." \
+                "stig:V-215225 cis-l1"
             ;;
         esac
         ;;
@@ -13407,211 +13428,148 @@ _AIXRAY_SESSION_KEYS=""
       "$SSH_LGT_OBSERVED" "$SSH_LGT_MEANING" "$SSH_LGT_FIX" ""
 _AIXRAY_SESSION_KEYS=""
 
-  # shell_timeout — ensure an idle-shell auto-logout timeout is bounded.
-  # A positive TMOUT set in /etc/profile or /etc/environment forces the shell
-  # to log out after N seconds of inactivity; without it, an abandoned session
-  # remains open indefinitely. /etc/security/.profile is intentionally excluded:
-  # it is a mkuser skeleton copied into new home directories, not a login-time
-  # source, and its permissions also make the otherwise non-root check unreadable.
-  typeset ST_RAW ST_RC ST_PARSED ST_STATE ST_DETAIL ST_VAL
-  ST_RAW=$(aix profile_tmout grep -E 'TMOUT|TIMEOUT' /etc/profile /etc/environment); ST_RC=$?
+  # shell_timeout — DISA STIG V-215320 (AIX7-00-003003).
+  # /etc/profile must set both TMOUT and TIMEOUT to a value of 600 seconds or
+  # less, uncommented. grep rc=1 is a determinate absence: the rule is a
+  # required configuration, so a missing subject is FAIL med. rc>=2 is a probe
+  # failure; rc=0 with empty output is a swallowed error; both are NOT_ASSESSED
+  # med. Any active value above 600 is a FAIL med per the STIG finding.
+  typeset ST_RAW ST_RC ST_PARSED ST_STATE ST_DETAIL
+  ST_RAW=$(aix profile_tmout grep -E ' TMOUT|TIMEOUT' /etc/profile); ST_RC=$?
   if [ "$ST_RC" -ge 2 ]; then
-    add security shell_timeout "Idle-shell auto-logout timeout" \
-        NOT_ASSESSED low \
-        "not assessed — TMOUT/TIMEOUT capture failed (rc=$ST_RC)" \
-        "Could not read TMOUT/TIMEOUT evidence from /etc/profile and /etc/environment, so idle-shell enforcement is unknown." \
-        "restore read access to /etc/profile and /etc/environment, then rerun PTxray." "cis-l1"
+    add security shell_timeout "Idle-shell inactivity timeout" NOT_ASSESSED med \
+        "not assessed - TMOUT/TIMEOUT capture failed (rc=$ST_RC)" \
+        "PTxray could not read /etc/profile, so the 10-minute inactivity timeout cannot be verified." \
+        "restore read access to /etc/profile, then rerun PTxray." "stig:V-215320"
   elif [ "$ST_RC" -eq 1 ]; then
-    add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
-        "no active TMOUT/TIMEOUT match (grep rc=1)" \
-        "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-        "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun PTxray." "cis-l1"
+    add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+        "no active TMOUT/TIMEOUT match in /etc/profile (grep rc=1)" \
+        "TMOUT/TIMEOUT are not set in /etc/profile, so login sessions are not terminated after 10 minutes of inactivity." \
+        "add to /etc/profile: readonly TMOUT=600; readonly TIMEOUT=600; export TMOUT TIMEOUT" "stig:V-215320"
+  elif [ -z "$ST_RAW" ]; then
+    add security shell_timeout "Idle-shell inactivity timeout" NOT_ASSESSED med \
+        "not assessed - TMOUT/TIMEOUT capture returned empty output with rc=0" \
+        "PTxray observed empty grep output without the non-match exit code, so the timeout state cannot be determined." \
+        "inspect /etc/profile and rerun PTxray." "stig:V-215320"
   else
-    # A leading comment is not evidence; a shell-style trailing comment is
-    # removed before the numeric shape check. Because assignments are
-    # sequential and grep output across both files is not a trustworthy
-    # effective-precedence model, PASS requires every active assignment to be
-    # numeric, positive, and bounded. Values above 900 are classified without
-    # feeding an arbitrarily large attacker-controlled integer into arithmetic.
     ST_PARSED=$(printf '%s\n' "$ST_RAW" | awk '
       function trim(value) {
         sub(/^[ \t]+/, "", value)
         sub(/[ \t]+$/, "", value)
         return value
       }
-      function remember(value) {
-        if (!seen_value[value]++) {
-          if (values != "") values=values ", "
-          values=values value
-          distinct_values++
-        }
+      function note(var, value) {
+        if (var == "tmout") seen_tmout=1
+        else if (var == "timeout") seen_timeout=1
+        if (value !~ /^[0-9]+$/) { badval=1; return }
+        canon=value
+        sub(/^0+/, "", canon)
+        if (canon == "") canon="0"
+        if (canon + 0 > 600) over=1
+        if (canon + 0 > maxval + 0) maxval=canon
       }
       {
         line=$0
-        sub(/^[ \t]+/, "", line)
-        # grep prefixes matches with a filename when both declared files are
-        # read. Strip only those two trusted capture-source prefixes.
         sub(/^\/etc\/profile:/, "", line)
-        sub(/^\/etc\/environment:/, "", line)
-        sub(/^[ \t]+/, "", line)
-        if (line ~ /^#/) next
-        sub(/[ \t]+#.*/, "", line)
         line=trim(line)
         if (line == "") next
-        low=tolower(line)
-
-        if (low ~ /^unset[ \t]+/) {
-          target=low
-          sub(/^unset[ \t]+/, "", target)
-          if (target ~ /^-v[ \t]+/) sub(/^-v[ \t]+/, "", target)
-          target=trim(target)
-          if (target == "tmout" || target == "timeout") {
-            unsets++
-          } else {
-            invalid=1
-          }
-          next
+        cidx=index(line, "#")
+        if (cidx > 0 && (cidx == 1 || substr(line, cidx-1, 1) ~ /[ \t]/)) {
+          line=trim(substr(line, 1, cidx-1))
         }
-
-        if (low ~ /^export[ \t]+(tmout|timeout)[ \t]*$/) {
-          exports++
-          next
-        }
-
-        if (low ~ /^(export[ \t]+)?(tmout|timeout)[ \t]*=/) {
-          assignments++
-          work=low
-          sub(/^export[ \t]+/, "", work)
-          variable=work
-          sub(/[ \t]*=.*/, "", variable)
-          variable=trim(variable)
-          sub(/^[^=]*=[ \t]*/, "", work)
-          work=trim(work)
-
-          separator=index(work, ";")
-          if (separator > 0) {
-            suffix=trim(substr(work, separator+1))
-            work=trim(substr(work, 1, separator-1))
-            sub(/[ \t]*;[ \t]*$/, "", suffix)
-            suffix=trim(suffix)
-            gsub(/[ \t]+/, " ", suffix)
-            if (suffix != "export " variable) invalid=1
+        if (line == "") next
+        n=split(line, segs, ";")
+        for (s=1; s<=n; s++) {
+          seg=trim(segs[s])
+          if (seg == "") continue
+          low=tolower(seg)
+          if (low ~ /^unset[ \t]+/) {
+            tgt=low
+            sub(/^unset[ \t]+/, "", tgt)
+            if (tgt ~ /^-v[ \t]+/) sub(/^-v[ \t]+/, "", tgt)
+            tgt=trim(tgt)
+            if (tgt == "tmout") unset_tmout=1
+            else if (tgt == "timeout") unset_timeout=1
+            else invalid=1
+            any=1
+            continue
           }
-
-          if (work !~ /^[0-9]+$/) {
-            invalid=1
-            next
-          }
-          canon=work
-          sub(/^0+/, "", canon)
-          if (canon == "") canon="0"
-          remember(canon)
-          next
-        }
-
-        if (low ~ /^readonly[ \t]+/) {
-          # A readonly declaration assigns nothing, so it is compliance-neutral:
-          # naming the timeout variables -- or any other variable -- must not
-          # poison otherwise determinate evidence. A tmout/timeout=VALUE inside
-          # the declaration is a real assignment and is classified exactly like a
-          # plain one, with the same conflict tracking.
-          work=low
-          sub(/^readonly[ \t]+/, "", work)
-          work=trim(work)
-          if (work == "") next
-          gsub(/[ \t,]+/, " ", work)
-          tcount=split(work, tokens, " ")
-          for (tidx=1; tidx<=tcount; tidx++) {
-            token=tokens[tidx]
-            if (token ~ /^(tmout|timeout)=/) {
-              assignments++
-              aval=token
-              sub(/^[^=]*=[ \t]*/, "", aval)
-              if (aval !~ /^[0-9]+$/) {
-                invalid=1
-                next
-              }
-              canon=aval
-              sub(/^0+/, "", canon)
-              if (canon == "") canon="0"
-              remember(canon)
+          if (low ~ /^(export|readonly)[ \t]+/) {
+            decl=low
+            sub(/^(export|readonly)[ \t]+/, "", decl)
+            gsub(/[ \t,]+/, " ", decl)
+            m=split(decl, toks, " ")
+            for (t=1; t<=m; t++) {
+              tk=toks[t]
+              if (tk ~ /^tmout=/) { v=tk; sub(/^tmout=/, "", v); note("tmout", v); any=1 }
+              else if (tk ~ /^timeout=/) { v=tk; sub(/^timeout=/, "", v); note("timeout", v); any=1 }
+              else if (tk == "tmout" || tk == "timeout") any=1
+              else invalid=1
             }
+            continue
           }
-          next
+          if (low ~ /^(tmout|timeout)[ \t]*=/) {
+            var=low
+            sub(/[ \t]*=.*/, "", var)
+            var=trim(var)
+            v=low
+            sub(/^[^=]*=[ \t]*/, "", v)
+            v=trim(v)
+            note(var, v)
+            any=1
+            continue
+          }
+          invalid=1
         }
-
-        invalid=1
       }
       END {
-        if (invalid) {
-          print "invalid|"
-        } else if (assignments > 0 && unsets > 0) {
-          print "assignment_unset_conflict|"
-        } else if (distinct_values > 1) {
-          print "value_conflict|" values
-        } else if (unsets > 0) {
-          print "unset|"
-        } else if (assignments == 0) {
-          print "empty|"
-        } else if (values == "0") {
-          print "zero|0"
-        } else if (length("" values) > 3 ||
-                   (length("" values) == 3 && values + 0 > 900)) {
-          print "over|" values
-        } else {
-          print "safe|" values
-        }
+        if (invalid) print "invalid|"
+        else if (unset_tmout || unset_timeout) print "unset|"
+        else if (any == 0) print "empty|"
+        else if (badval) print "badval|"
+        else if (!seen_tmout || !seen_timeout) print "missing|"
+        else if (over) print "over|" maxval
+        else print "safe|" maxval
       }
     ')
     ST_STATE=${ST_PARSED%%\|*}
     ST_DETAIL=${ST_PARSED#*\|}
     case "$ST_STATE" in
+      safe)
+        add security shell_timeout "Idle-shell inactivity timeout" PASS med \
+            "${ST_DETAIL}s" \
+            "TMOUT and TIMEOUT are set in /etc/profile within the 600-second STIG limit, so idle login sessions terminate after 10 minutes of inactivity." \
+            "n/a" "stig:V-215320"
+        ;;
       over)
-        ST_VAL=$ST_DETAIL
-        add security shell_timeout "Idle-shell auto-logout timeout" WARN low "${ST_VAL}s" \
-            "TMOUT is set to ${ST_VAL} seconds, which exceeds the 900-second bounded-session cap." \
-            "reduce TMOUT to 900 seconds or less in /etc/profile or /etc/environment." "cis-l1"
+        add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+            "${ST_DETAIL}s" \
+            "TMOUT/TIMEOUT is set to ${ST_DETAIL} seconds in /etc/profile, exceeding the 600-second STIG limit." \
+            "set readonly TMOUT=600 and readonly TIMEOUT=600 in /etc/profile, then export TMOUT TIMEOUT." "stig:V-215320"
         ;;
-      assignment_unset_conflict)
-        add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
-            "not assessed — TMOUT/TIMEOUT assignment conflicts with unset directive" \
-            "PTxray observed both an assignment and an unset directive, but concatenated grep output from two files does not establish effective shell precedence." \
-            "inspect active TMOUT/TIMEOUT directives in /etc/profile and /etc/environment, remove the conflict, and rerun PTxray." "cis-l1"
-        ;;
-      value_conflict)
-        add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
-            "not assessed — conflicting TMOUT/TIMEOUT assignments (values: $ST_DETAIL)" \
-            "PTxray observed different timeout values, but concatenated grep output from two files does not establish which assignment is effective." \
-            "converge /etc/profile and /etc/environment on one bounded value from 1 through 900, then rerun PTxray." "cis-l1"
-        ;;
-      invalid)
-        add security shell_timeout "Idle-shell auto-logout timeout" NOT_ASSESSED low \
-            "not assessed — TMOUT/TIMEOUT capture unparseable (rc=0)" \
-            "PTxray did not obtain one active numeric TMOUT/TIMEOUT assignment, so it cannot claim an idle-shell timeout is enforced." \
-            "inspect active TMOUT/TIMEOUT assignments in /etc/profile and /etc/environment, correct malformed or commented settings, and rerun PTxray." "cis-l1"
-        ;;
-      empty)
-        add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
-            "no active TMOUT/TIMEOUT directive in successful capture (rc=0)" \
-            "No idle-shell timeout is enforced; interactive shell sessions can remain open indefinitely." \
-            "set TMOUT=900 (or less) in /etc/profile (for example, TMOUT=900; export TMOUT), make TMOUT readonly with the approved AIX shell syntax, then rerun PTxray." "cis-l1"
+      missing)
+        add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+            "TMOUT and TIMEOUT are not both set in /etc/profile" \
+            "One or both of TMOUT and TIMEOUT is missing from /etc/profile, so login sessions are not bounded to 10 minutes of inactivity." \
+            "add to /etc/profile: readonly TMOUT=600; readonly TIMEOUT=600; export TMOUT TIMEOUT" "stig:V-215320"
         ;;
       unset)
-        add security shell_timeout "Idle-shell auto-logout timeout" FAIL med \
-            "TMOUT/TIMEOUT explicitly unset" \
-            "An active unset directive removes the idle-shell timeout, so an abandoned session can remain open indefinitely." \
-            "replace the unset directive with one bounded TMOUT assignment from 1 through 900." "cis-l1"
+        add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+            "TMOUT/TIMEOUT explicitly unset in /etc/profile" \
+            "An active unset directive removes the idle-shell timeout, so abandoned login sessions are not terminated after 10 minutes." \
+            "remove the unset directive and set readonly TMOUT=600; readonly TIMEOUT=600; export TMOUT TIMEOUT in /etc/profile." "stig:V-215320"
         ;;
-      zero)
-        add security shell_timeout "Idle-shell auto-logout timeout" FAIL med "0s" \
-            "TMOUT is zero, so idle-shell auto-logout is disabled." \
-            "set TMOUT to a value from 1 through 900 in /etc/profile or /etc/environment." "cis-l1"
+      empty)
+        add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+            "no active TMOUT/TIMEOUT directive in /etc/profile (commented or blank)" \
+            "No active TMOUT/TIMEOUT assignment is present in /etc/profile, so idle login sessions are not terminated after 10 minutes." \
+            "add to /etc/profile: readonly TMOUT=600; readonly TIMEOUT=600; export TMOUT TIMEOUT" "stig:V-215320"
         ;;
-      safe)
-        ST_VAL=$ST_DETAIL
-        add security shell_timeout "Idle-shell auto-logout timeout" PASS med "${ST_VAL}s" \
-            "An idle session auto-logs out after ${ST_VAL} seconds of inactivity." \
-            "n/a" "cis-l1"
+      badval|invalid)
+        add security shell_timeout "Idle-shell inactivity timeout" FAIL med \
+            "no valid numeric TMOUT/TIMEOUT assignment in /etc/profile" \
+            "PTxray did not find a clean numeric TMOUT/TIMEOUT assignment bounded to 600 seconds, so the 10-minute inactivity requirement is not met." \
+            "replace malformed TMOUT/TIMEOUT lines with readonly TMOUT=600; readonly TIMEOUT=600; export TMOUT TIMEOUT." "stig:V-215320"
         ;;
     esac
   fi
@@ -19640,8 +19598,8 @@ _AIXRAY_SESSION_KEYS=""
   # rhosts
   # The probe always emits a completion marker after checking both paths. That
   # makes a clean result positive evidence instead of inferring absence from an
-  # empty/nonzero compound ls. A nonzero wrapper status always refuses: partial
-  # output from an incomplete probe cannot safely establish the final state.
+  # empty/nonzero compound ls. Legacy real captures with one exact present path
+  # and rc 1/2 remain strong adverse evidence for the #76 partial-presence case.
   RH=$(aix ls_rhosts sh -c '
     for path in /.rhosts /etc/hosts.equiv; do
       if [ -f "$path" ] || [ -L "$path" ]; then
@@ -19655,7 +19613,13 @@ _AIXRAY_SESSION_KEYS=""
   RHBAD=$(printf '%s\n' "$RH" | awk 'NF && $0!="/.rhosts" && $0!="/etc/hosts.equiv" && $0!="__AIXRAY_RHOSTS_PROBE_COMPLETE__"{n++} END{print n+0}')
   RHCOUNT=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{n++} END{print n+0}')
   RHUNIQ=$(printf '%s\n' "$RH" | awk '$0=="/.rhosts" || $0=="/etc/hosts.equiv"{seen[$0]=1} END{for(k in seen)n++; print n+0}')
-  if [ "$RHRC" -ne 0 ]; then
+  if [ -n "$RHPRESENT" ] && [ "$RHBAD" -eq 0 ] && [ "$RHCOMP" -eq 0 ] &&
+     [ "$RHCOUNT" -eq "$RHUNIQ" ] &&
+     { [ "$RHRC" -eq 0 ] || [ "$RHRC" -eq 1 ] || [ "$RHRC" -eq 2 ]; }; then
+    add security rhosts "Trust files (.rhosts)" FAIL high "present: $RHPRESENT" \
+        "Host-trust files allow passwordless login from named hosts — a classic lateral-movement path." \
+        "remove /.rhosts and /etc/hosts.equiv; rely on key-based ssh instead." "stig:V-215432" # network-lint: allow -- remediation-advice prose, not a network call
+  elif [ "$RHRC" -ne 0 ]; then
     add security rhosts "Trust files (.rhosts)" NOT_ASSESSED high "not assessed — rhosts probe failed (rc=$RHRC)" \
         "The trust-file probe did not complete, so absence of .rhosts/hosts.equiv cannot be asserted." \
         "check /.rhosts and /etc/hosts.equiv manually, then rerun PTxray." "stig:V-215432"
@@ -22166,9 +22130,12 @@ _AIXRAY_SESSION_KEYS=""
           if (c == "x" || c == "t") bits+=1
           if (c == "t" || c == "T") bits+=512
 
-          if (substr(mode, 8, 1) == "r") mode_ok=0
-          if (substr(mode, 9, 1) == "w") mode_ok=0
-          if (c == "x" || c == "t") mode_ok=0
+          if (substr(mode, 4, 1) != "-") mode_ok=0
+          if (substr(mode, 6, 1) != "-") mode_ok=0
+          if (substr(mode, 7, 1) != "-") mode_ok=0
+          if (substr(mode, 8, 1) != "-") mode_ok=0
+          if (substr(mode, 9, 1) != "-") mode_ok=0
+          if (substr(mode, 10, 1) != "-") mode_ok=0
         }
         if ($2 !~ /^[0-9][0-9]*$/) bad=1
         if ($3 !~ /^[0-9][0-9]*$/) bad=1
@@ -22196,9 +22163,15 @@ _AIXRAY_SESSION_KEYS=""
     fi
   fi
 
-  if [ -n "$FPC_REASON" ]; then
+  if [ "$FPC_REASON" = "missing" ]; then
+    add security fileperm_crontabs_mode "Crontabs directory mode" FAIL med \
+        "/var/spool/cron/crontabs is missing" \
+        "/var/spool/cron/crontabs is required for the cron configuration and does not exist." \
+        "run 'chmod 640 /var/spool/cron/crontabs' after restoring the required directory and validating the host; PTxray only recommends this command." \
+        "stig:V-245560"
+  elif [ -n "$FPC_REASON" ]; then
     add security fileperm_crontabs_mode "Crontabs directory mode" NOT_ASSESSED med \
-        "not assessed — crontabs metadata $FPC_REASON" \
+        "not assessed - crontabs metadata $FPC_REASON" \
         "PTxray did not obtain one trustworthy metadata record proving the crontabs directory mode." \
         "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245560"
@@ -22207,13 +22180,13 @@ _AIXRAY_SESSION_KEYS=""
     if [ "$FPC_MODE_OK" = "1" ]; then
       add security fileperm_crontabs_mode "Crontabs directory mode" PASS med \
           "$FPC_MODE_OBSERVED" \
-          "/var/spool/cron/crontabs has no world (other) access set, as required by DISA STIG V-245560." \
+          "/var/spool/cron/crontabs has a mode of 0640 or less permissive, as required by DISA STIG V-245560." \
           "n/a" "stig:V-245560"
     else
       add security fileperm_crontabs_mode "Crontabs directory mode" FAIL med \
-          "$FPC_MODE_OBSERVED; world access is set (no other read, write or execute bit is permitted)" \
-          "/var/spool/cron/crontabs has world access set — any local user could read, alter or traverse the jobs the cron daemon runs with super-user rights." \
-          "remove world access with 'chmod o= /var/spool/cron/crontabs' after validating the host; PTxray only recommends this command." \
+          "$FPC_MODE_OBSERVED; mode is more permissive than 0640" \
+          "/var/spool/cron/crontabs is more permissive than 0640, allowing broader access to scheduled jobs than this control permits." \
+          "run 'chmod 640 /var/spool/cron/crontabs' after validating the host; PTxray only recommends this command." \
           "stig:V-245560"
     fi
   fi
@@ -22598,7 +22571,7 @@ _AIXRAY_SESSION_KEYS=""
   # This unit shares the fixed-directory capture key with the owner/group units.
   typeset FPA_RAW FPA_RC FPA_PARSED FPA_PARSE_RC FPA_REST
   typeset FPA_UID FPA_GID FPA_MODE FPA_MODE_OK FPA_REASON
-  typeset FPA_OWNER_OBSERVED FPA_GROUP_OBSERVED FPA_MODE_OBSERVED
+  typeset FPA_ABSENT FPA_OBSERVED
 
   FPA_RAW=$(aix fileperm_atjobs_ls ls -ldn /var/spool/cron/atjobs)
   FPA_RC=$?
@@ -22608,15 +22581,28 @@ _AIXRAY_SESSION_KEYS=""
   FPA_MODE=""
   FPA_MODE_OK=""
   FPA_REASON=""
+  FPA_ABSENT=""
 
   if [ "$FPA_RC" -ne 0 ]; then
-    if [ "$FPA_RC" -eq 2 ]; then
-      FPA_REASON="missing"
-    else
-      FPA_REASON="capture failed (rc=$FPA_RC)"
-    fi
+    # Absence is only established when the probe names THIS subject and says it
+    # is missing. A bare "not found"/"cannot access" from the shell, the
+    # transport or a replay bundle is a refusal, not an observation of the
+    # directory, and must never become a positive FAIL accusation.
+    case "$FPA_RAW" in
+      "")
+        FPA_REASON="probe fileperm_atjobs_ls exited $FPA_RC with no output" ;;
+      *"/var/spool/cron/atjobs"*)
+        case "$FPA_RAW" in
+          *"does not exist"*|*"No such file or directory"*|*"not found"*|*"cannot access"*)
+            FPA_ABSENT=1 ;;
+          *)
+            FPA_REASON="probe fileperm_atjobs_ls exited $FPA_RC" ;;
+        esac ;;
+      *)
+        FPA_REASON="probe fileperm_atjobs_ls exited $FPA_RC" ;;
+    esac
   elif [ -z "$FPA_RAW" ]; then
-    FPA_REASON="empty"
+    FPA_REASON="probe fileperm_atjobs_ls returned no output (rc 0)"
   else
     FPA_PARSED=$(printf '%s\n' "$FPA_RAW" | awk '
       NF {
@@ -22662,9 +22648,13 @@ _AIXRAY_SESSION_KEYS=""
           if (c == "x" || c == "t") bits+=1
           if (c == "t" || c == "T") bits+=512
 
-          if (substr(mode, 8, 1) == "r") mode_ok=0
-          if (substr(mode, 9, 1) == "w") mode_ok=0
-          if (c == "x" || c == "t") mode_ok=0
+          # STIG V-245568 ceiling: every bit must lie inside 0640.
+          # Any setuid/setgid/sticky bit, owner execute, group write,
+          # group execute, or any other-triad bit is more permissive.
+          if (int(bits / 512) % 8 != 0) mode_ok=0
+          if (int(bits / 64) % 8 % 2 != 0) mode_ok=0
+          if (int(bits / 8) % 8 % 4 != 0) mode_ok=0
+          if (bits % 8 != 0) mode_ok=0
         }
         if ($2 !~ /^[0-9][0-9]*$/) bad=1
         if ($3 !~ /^[0-9][0-9]*$/) bad=1
@@ -22681,7 +22671,7 @@ _AIXRAY_SESSION_KEYS=""
     ')
     FPA_PARSE_RC=$?
     if [ "$FPA_PARSE_RC" -ne 0 ] || [ -z "$FPA_PARSED" ]; then
-      FPA_REASON="unparseable"
+      FPA_REASON="unparseable ls -ldn output for /var/spool/cron/atjobs"
     else
       FPA_UID=${FPA_PARSED%%\|*}
       FPA_REST=${FPA_PARSED#*\|}
@@ -22692,26 +22682,31 @@ _AIXRAY_SESSION_KEYS=""
     fi
   fi
 
-  if [ -n "$FPA_REASON" ]; then
+  if [ -n "$FPA_ABSENT" ]; then
+    add security fileperm_atjobs_mode "Atjobs directory mode" FAIL med \
+        "/var/spool/cron/atjobs is absent; the required directory and its 0640 mode are not configured" \
+        "DISA STIG V-245568 requires /var/spool/cron/atjobs to exist with a mode of 0640 or less permissive; the directory is not present, so the required configuration is absent." \
+        "create the directory and set the required mode with 'chmod 640 /var/spool/cron/atjobs' after validating the host; PTxray only recommends this command." \
+        "stig:V-245568"
+  elif [ -n "$FPA_REASON" ]; then
     add security fileperm_atjobs_mode "Atjobs directory mode" NOT_ASSESSED med \
-        "not assessed — atjobs metadata $FPA_REASON" \
+        "not assessed — $FPA_REASON" \
         "PTxray did not obtain one trustworthy metadata record proving the atjobs directory mode." \
         "run 'ls -ldn /var/spool/cron/atjobs', correct the capture or path problem, and rerun PTxray." \
         "stig:V-245568"
+  elif [ "$FPA_MODE_OK" = "1" ]; then
+    FPA_OBSERVED="/var/spool/cron/atjobs mode $FPA_MODE is 0640 or less permissive"
+    add security fileperm_atjobs_mode "Atjobs directory mode" PASS med \
+        "$FPA_OBSERVED" \
+        "/var/spool/cron/atjobs is 0640 or less permissive, as required by DISA STIG V-245568." \
+        "n/a" "stig:V-245568"
   else
-    FPA_MODE_OBSERVED="/var/spool/cron/atjobs mode=$FPA_MODE"
-    if [ "$FPA_MODE_OK" = "1" ]; then
-      add security fileperm_atjobs_mode "Atjobs directory mode" PASS med \
-          "$FPA_MODE_OBSERVED" \
-          "/var/spool/cron/atjobs has no world (other) access set, as required by DISA STIG V-245568." \
-          "n/a" "stig:V-245568"
-    else
-      add security fileperm_atjobs_mode "Atjobs directory mode" FAIL med \
-          "$FPA_MODE_OBSERVED; world access is set (no other read, write or execute bit is permitted)" \
-          "/var/spool/cron/atjobs has world access set — any local user could read, alter or traverse the at-jobs that run with the submitter's SUID/SGID." \
-          "remove world access with 'chmod o= /var/spool/cron/atjobs' after validating the host; PTxray only recommends this command." \
-          "stig:V-245568"
-    fi
+    FPA_OBSERVED="/var/spool/cron/atjobs mode $FPA_MODE is more permissive than 0640"
+    add security fileperm_atjobs_mode "Atjobs directory mode" FAIL med \
+        "$FPA_OBSERVED" \
+        "/var/spool/cron/atjobs carries a permission bit outside 0640 — setuid, setgid, sticky, owner execute, group write, group execute or any world bit lets accounts other than the owner read, alter or traverse at-jobs that run with the submitter's privileges." \
+        "reduce the mode with 'chmod 640 /var/spool/cron/atjobs' after validating the host; PTxray only recommends this command." \
+        "stig:V-245568"
   fi
 _AIXRAY_SESSION_KEYS=""
   # fileperm_passwd_owner — CIS L1-aligned /etc/passwd owner boundary.
@@ -25432,37 +25427,39 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_varadmsa_mode "/var/adm/sa mode" FAIL med "/var/adm/sa mode=$DSAM_MODE; requires no bits beyond 0755"         "/var/adm/sa violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0755 after validation: 'chmod 0755 /var/adm/sa'; PTxray recommends this command and never executes it." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
-  # diracc_crontabs_owner — CIS L1-aligned /var/spool/cron/crontabs owner boundary.
-  # The ls probe runs through aixv (stderr merged), not aix: on AIX a missing
-  # directory makes ls exit 2 and write "<path> not found" to STDERR, which
-  # aix() discards -- absent and unreadable then look identical (rc=2, empty
-  # stdout) and both refused. Absence is keyed POSITIVELY on that signature and
-  # renders NOT_APPLICABLE; any other nonzero exit still refuses (fail closed).
-  typeset DCTO_RAW DCTO_RC DCTO_PARSED DCTO_PARSE_RC DCTO_UID DCTO_REASON DCTO_ABSENT DCTO_DIAG
+  # diracc_crontabs_owner — DISA STIG V-215270 (SV-215270r991589_rule,
+  # AIX7-00-002078, CCI-000366): "AIX cron and crontab directories must be
+  # owned by root or bin." Read-only; the fix text is operator guidance.
+  #
+  # The ls probe runs through aixv (stderr merged into stdout), not aix: AIX ls
+  # reports a missing directory by exiting nonzero and writing the diagnostic to
+  # STDERR, which aix() discards. Under this STIG a missing crontabs directory
+  # is a FAIL (required configuration unmet), not a refusal, so the absence
+  # diagnostic has to reach the parser; through aix() an absent directory and a
+  # failed probe are the same (rc!=0, empty stdout) and both would refuse.
+  typeset DCTO_RAW DCTO_RC DCTO_PARSED DCTO_PARSE_RC DCTO_OWNER DCTO_REASON DCTO_ABSENT
 
-  DCTO_RAW=$(aixv diracc_crontabs_owner_ls ls -ldn /var/spool/cron/crontabs)
+  DCTO_RAW=$(aixv diracc_crontabs_owner_ls ls -ld /var/spool/cron/crontabs)
   DCTO_RC=$?
   DCTO_PARSED=""
-  DCTO_UID=""
+  DCTO_OWNER=""
   DCTO_REASON=""
   DCTO_ABSENT=0
-  DCTO_DIAG=""
 
   if [ "$DCTO_RC" -ne 0 ]; then
-    DCTO_REASON="absent or unreadable (rc=$DCTO_RC)"
+    # Absence is keyed POSITIVELY on the diagnostic, never on the exit code
+    # alone: an unreadable or otherwise broken probe must still refuse.
     case "$DCTO_RAW" in
-      *"/var/spool/cron/crontabs not found"*) DCTO_ABSENT=1 ;;
+      *"No such file or directory"*) DCTO_ABSENT=1 ;;
+      *"not found"*) DCTO_ABSENT=1 ;;
+      *"cannot access"*) DCTO_ABSENT=1 ;;
     esac
-    if [ "$DCTO_ABSENT" -eq 1 ]; then
-      DCTO_REASON="absent"
-    else
-      DCTO_DIAG=$(printf '%s\n' "$DCTO_RAW" | awk 'NF { gsub(/[ \t]+/, " "); sub(/^ /, ""); sub(/ $/, ""); if (length("" $0) > 40) $0 = substr($0, 1, 37) "..."; print; exit }')
-      if [ -n "$DCTO_DIAG" ]; then
-        DCTO_REASON="absent or unreadable (rc=$DCTO_RC): $DCTO_DIAG"
-      fi
+    if [ "$DCTO_ABSENT" -ne 1 ]; then
+      DCTO_REASON="probe failed (rc=$DCTO_RC)"
     fi
   elif [ -z "$DCTO_RAW" ]; then
-    DCTO_REASON="empty"
+    # rc 0 with no output is a swallowed error, not determinate absence.
+    DCTO_REASON="empty probe output"
   else
     DCTO_PARSED=$(printf '%s\n' "$DCTO_RAW" | awk '
       NF {
@@ -25485,7 +25482,16 @@ _AIXRAY_SESSION_KEYS=""
           if (substr(mode,9,1) !~ /^[-w]$/) bad=1
           if (substr(mode,10,1) !~ /^[-xTt]$/) bad=1
         }
-        if ($2 !~ /^[0-9][0-9]*$/ || $3 !~ /^[0-9][0-9]*$/ || length("" $3) > 10 || $4 !~ /^[0-9][0-9]*$/ || $5 !~ /^[0-9][0-9]*$/) bad=1
+        if ($2 !~ /^[0-9][0-9]*$/ || $5 !~ /^[0-9][0-9]*$/) bad=1
+        owner=$3
+        group=$4
+        # ls -ld prints owner and group as names, falling back to the numeric
+        # id when the name lookup fails; both forms must be a plausible token.
+        if (owner !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/) bad=1
+        if (group !~ /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/) bad=1
+        if (length("" owner) > 32 || length("" group) > 32) bad=1
+        if (owner ~ /^[0-9][0-9]*$/ && length("" owner) > 10) bad=1
+        if (group ~ /^[0-9][0-9]*$/ && length("" group) > 10) bad=1
         if (length("" $6) < 1 || length("" $6) > 16) bad=1
         if ($7 !~ /^[0-9][0-9]*$/ || ($7 + 0) < 1 || ($7 + 0) > 31) bad=1
         date_ok=0
@@ -25500,44 +25506,47 @@ _AIXRAY_SESSION_KEYS=""
         }
         if (!date_ok) bad=1
         if ($NF != "/var/spool/cron/crontabs") bad=1
-        uid=$3
-        while (length("" uid) > 1 && substr(uid,1,1) == "0") uid=substr(uid,2)
+        if (owner ~ /^[0-9][0-9]*$/) {
+          while (length("" owner) > 1 && substr(owner,1,1) == "0") owner=substr(owner,2)
+        }
       }
       END {
         if (records != 1 || bad) exit 1
-        print uid
+        print owner
       }
     ')
     DCTO_PARSE_RC=$?
     if [ "$DCTO_PARSE_RC" -ne 0 ] || [ -z "$DCTO_PARSED" ]; then
-      DCTO_REASON="unparseable"
+      DCTO_REASON="unparseable ls output"
     else
-      DCTO_UID=$DCTO_PARSED
+      DCTO_OWNER=$DCTO_PARSED
     fi
   fi
 
-  if [ "$DCTO_REASON" = "absent" ]; then
-    add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" NOT_APPLICABLE med \
-        "/var/spool/cron/crontabs absent" \
-        "The probe returned the determinate-absence signature ('/var/spool/cron/crontabs not found', exit $DCTO_RC); /var/spool/cron/crontabs need not exist, so the owner boundary does not apply." \
-        "n/a" "cis-l1"
+  if [ "$DCTO_ABSENT" -eq 1 ]; then
+    add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" FAIL med \
+        "/var/spool/cron/crontabs absent (rc=$DCTO_RC)" \
+        "/var/spool/cron/crontabs does not exist, so it cannot be owned by root or bin; DISA STIG V-215270 requires the crontab directory to be present with that ownership." \
+        "correct ownership after validation: 'chown root /var/spool/cron/crontabs'; PTxray recommends this command and never executes it." \
+        "cis-l1 stig:V-215270"
   elif [ -n "$DCTO_REASON" ]; then
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" NOT_ASSESSED med \
-        "not assessed — /var/spool/cron/crontabs metadata $DCTO_REASON" \
-        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the owner boundary is satisfied." \
-        "run 'ls -ldn /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
-        "cis-l1"
-  elif [ "$DCTO_UID" = "2" ]; then
+        "not assessed - $DCTO_REASON" \
+        "PTxray did not obtain one trustworthy metadata row, so it cannot claim the /var/spool/cron/crontabs owner is root or bin." \
+        "run 'ls -ld /var/spool/cron/crontabs', correct the capture or path problem, and rerun PTxray." \
+        "cis-l1 stig:V-215270"
+  elif [ "$DCTO_OWNER" = "root" ] || [ "$DCTO_OWNER" = "bin" ] || \
+       [ "$DCTO_OWNER" = "0" ] || [ "$DCTO_OWNER" = "2" ]; then
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" PASS med \
-        "/var/spool/cron/crontabs owner_uid=$DCTO_UID" \
-        "/var/spool/cron/crontabs has the required owner boundary." \
-        "n/a" "cis-l1"
+        "/var/spool/cron/crontabs owner=$DCTO_OWNER" \
+        "/var/spool/cron/crontabs is owned by root or bin as required by DISA STIG V-215270." \
+        "n/a" "cis-l1 stig:V-215270"
   else
     add security diracc_crontabs_owner "/var/spool/cron/crontabs owner" FAIL med \
-        "/var/spool/cron/crontabs owner_uid=$DCTO_UID" \
-        "/var/spool/cron/crontabs violates the required owner boundary and could let an unintended identity alter trusted configuration." \
-        "correct ownership after validation: 'chown bin:cron /var/spool/cron/crontabs'; PTxray recommends this command and never executes it." \
-        "cis-l1"
+        "/var/spool/cron/crontabs owner=$DCTO_OWNER" \
+        "/var/spool/cron/crontabs is owned by neither root nor bin, so an unintended identity can rewrite scheduled jobs and gain persistent privileged execution." \
+        "correct ownership after validation: 'chown root /var/spool/cron/crontabs'; PTxray recommends this command and never executes it." \
+        "cis-l1 stig:V-215270"
   fi
 _AIXRAY_SESSION_KEYS=""
   # diracc_crontabs_group — CIS L1-aligned /var/spool/cron/crontabs group boundary.
@@ -26067,87 +26076,91 @@ _AIXRAY_SESSION_KEYS=""
     add security diracc_atjobs_mode "/var/spool/cron/atjobs mode" FAIL med "/var/spool/cron/atjobs mode=$DAJM_MODE"         "/var/spool/cron/atjobs violates the required mode boundary and could let an unintended identity alter trusted configuration."         "remove only permissions beyond 0770 after validation: 'chmod 0770 /var/spool/cron/atjobs'; PTxray recommends this command and never executes it. if an extended ACL is reported, clear it after validation: 'echo | aclput /var/spool/cron/atjobs'." "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
-  # diracc_roothome — CIS L1-aligned dedicated root home boundary.
-  # The /root probe runs through aixv (stderr merged), not aix: on AIX a missing
+  # diracc_roothome — DISA STIG V-215198 (CIS L1 dedicated-root-home overlap).
+  # Root's home (from /etc/passwd, other than /) must have mode 0700 exactly.
+  # The listing probe runs through aix via sh -c with 2>&1: on AIX a missing
   # directory makes ls exit 2 and write "<path> not found" to STDERR, which
-  # aix() discards -- absent and unreadable then look identical (rc=2, empty
-  # stdout) and both refused. Absence is keyed POSITIVELY on that signature and
-  # renders FAIL: root is configured with home=/root, so a /root that does not
-  # exist means root has no dedicated home directory at all. Any other nonzero
-  # exit still refuses (fail closed).
-  # TODO-VERIFY: audit predicate unpublished; non-standard dedicated home paths refuse (README)
+  # aix() would discard — absent and unreadable then look identical (rc=2,
+  # empty stdout). The quoted redirection merges that signature into the
+  # captured output. Absence is keyed POSITIVELY on that signature and
+  # renders FAIL: a required-configuration rule, so a missing home directory
+  # is unmet. Any other nonzero exit still refuses (fail closed).
+  # Home=/ is FAIL (existing dedicated-home prohibition; STIG title excludes
+  # / from the mode clause — V-215434 covers that home=/ case).
   typeset DRH_HOME_RAW DRH_HOME_RC DRH_HOME DRH_LS_RAW DRH_LS_RC DRH_PARSED DRH_PARSE_RC
   typeset DRH_UID DRH_GID DRH_MODE DRH_MODE_OK DRH_REST DRH_REASON DRH_ABSENT DRH_DIAG
+  typeset DRH_STATUS DRH_SEV DRH_OBSERVED DRH_MEANING DRH_FIX DRH_OWNER_OK DRH_GROUP_OK
 
-  DRH_HOME_RAW=$(aix diracc_roothome_home lsuser -a home root)
+  # ls -ld `grep "^root" /etc/passwd | awk -F":" '{print $6}'`
+  # Pipeline runs inside aix via sh -c; a quoted pipeline is not an executable.
+  DRH_HOME_RAW=$(aix diracc_roothome_home sh -c "grep \"^root\" /etc/passwd | awk -F\":\" '{print \$6}'")
   DRH_HOME_RC=$?
   DRH_HOME=""
   DRH_REASON=""
   DRH_ABSENT=0
   DRH_DIAG=""
+  DRH_UID=""
+  DRH_GID=""
+  DRH_MODE=""
+  DRH_MODE_OK=""
 
   if [ "$DRH_HOME_RC" -ne 0 ]; then
-    DRH_REASON="root home attribute absent or unreadable (rc=$DRH_HOME_RC)"
+    DRH_REASON="root home probe failed (rc=$DRH_HOME_RC)"
   elif [ -z "$DRH_HOME_RAW" ]; then
-    DRH_REASON="root home attribute empty"
+    DRH_REASON="root home probe returned no output"
   else
     DRH_HOME=$(printf '%s\n' "$DRH_HOME_RAW" | awk '
       NF {
+        home=$0
+        gsub(/^[ \t]+/, "", home)
+        gsub(/[ \t]+$/, "", home)
+        if (home == "") { bad=1; next }
         records++
-        if (records != 1 || NF != 2 || $1 != "root") bad=1
-        if (index($2, "home=") != 1) bad=1
-        home=substr($2, 6)
-        if (home !~ /^\/[A-Za-z0-9_.\/-]*$/) bad=1
+        if (records != 1) { bad=1; next }
+        if (home !~ /^\/[A-Za-z0-9_.\/-]*$/) { bad=1; next }
+        kept=home
       }
       END {
-        if (records != 1 || bad) exit 1
-        print home
+        if (records != 1 || bad || kept == "") exit 1
+        print kept
       }
     ')
     DRH_PARSE_RC=$?
     if [ "$DRH_PARSE_RC" -ne 0 ] || [ -z "$DRH_HOME" ]; then
-      DRH_REASON="root home attribute unparseable"
+      DRH_REASON="root home evidence was unparseable"
     fi
   fi
 
   if [ -n "$DRH_REASON" ]; then
-    add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
-        "not assessed — $DRH_REASON" \
-        "PTxray did not obtain a trustworthy root home attribute, so it cannot claim the dedicated-home boundary is satisfied." \
-        "run 'lsuser -a home root', correct the capture problem, and rerun PTxray." \
-        "cis-l1"
+    DRH_STATUS=NOT_ASSESSED
+    DRH_OBSERVED="not assessed - $DRH_REASON"
+    DRH_MEANING="PTxray did not obtain a trustworthy root home path, so it cannot claim the 0700 home-directory mode is satisfied."
+    DRH_FIX="run 'grep \"^root\" /etc/passwd | awk -F\":\" '{print \$6}'', correct the capture problem, and rerun PTxray."
   elif [ "$DRH_HOME" = "/" ]; then
-    add security diracc_roothome "root dedicated home" FAIL med \
-        "root home=/" \
-        "The root account uses / as its home directory, exposing root dotfiles to every user on the system." \
-        "create a dedicated home and move root after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root; chuser home=/root root'; PTxray recommends these commands and never executes them." \
-        "cis-l1"
-  elif [ "$DRH_HOME" != "/root" ]; then
-    add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
-        "not assessed — root home=$DRH_HOME is non-standard; permissions not statically assessable" \
-        "PTxray only assesses the standard /root location; a non-standard dedicated home needs manual review." \
-        "review the ownership and mode of the configured root home manually, or relocate it to /root and rerun PTxray." \
-        "cis-l1"
+    DRH_STATUS=FAIL
+    DRH_OBSERVED="root home=/"
+    DRH_MEANING="The root account uses / as its home directory, exposing root dotfiles to every user on the system."
+    DRH_FIX="create a dedicated home and move root after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root; chuser home=/root root'; PTxray recommends these commands and never executes them."
   else
-    DRH_LS_RAW=$(aixv diracc_roothome_ls ls -ldn /root)
+    DRH_LS_RAW=$(aix diracc_roothome_ls sh -c "ls -ld $DRH_HOME 2>&1")
     DRH_LS_RC=$?
     if [ "$DRH_LS_RC" -ne 0 ]; then
-      DRH_REASON="/root metadata absent or unreadable (rc=$DRH_LS_RC)"
+      DRH_REASON="$DRH_HOME metadata absent or unreadable (rc=$DRH_LS_RC)"
       case "$DRH_LS_RAW" in
-        *"/root not found"*) DRH_ABSENT=1 ;;
+        *"$DRH_HOME not found"*) DRH_ABSENT=1 ;;
       esac
       if [ "$DRH_ABSENT" -eq 1 ]; then
-        DRH_REASON="/root absent"
+        DRH_REASON="$DRH_HOME absent"
       else
         DRH_DIAG=$(printf '%s\n' "$DRH_LS_RAW" | awk 'NF { gsub(/[ \t]+/, " "); sub(/^ /, ""); sub(/ $/, ""); if (length("" $0) > 40) $0 = substr($0, 1, 37) "..."; print; exit }')
         if [ -n "$DRH_DIAG" ]; then
-          DRH_REASON="/root metadata absent or unreadable (rc=$DRH_LS_RC): $DRH_DIAG"
+          DRH_REASON="$DRH_HOME metadata absent or unreadable (rc=$DRH_LS_RC): $DRH_DIAG"
         fi
       fi
     elif [ -z "$DRH_LS_RAW" ]; then
-      DRH_REASON="/root metadata empty"
+      DRH_REASON="$DRH_HOME metadata empty"
     else
-      DRH_PARSED=$(printf '%s\n' "$DRH_LS_RAW" | awk '
+      DRH_PARSED=$(printf '%s\n' "$DRH_LS_RAW" | awk -v want="$DRH_HOME" '
         NF {
           records++
           if (records != 1 || NF != 9) { bad=1; next }
@@ -26178,7 +26191,21 @@ _AIXRAY_SESSION_KEYS=""
             if (substr(mode,9,1)=="w") bits+=2
             c=substr(mode,10,1); if (c=="x" || c=="t") bits+=1; if (c=="t" || c=="T") bits+=512
           }
-          if ($2 !~ /^[0-9][0-9]*$/ || $3 !~ /^[0-9][0-9]*$/ || length("" $3) > 10 || $4 !~ /^[0-9][0-9]*$/ || length("" $4) > 10 || $5 !~ /^[0-9][0-9]*$/) bad=1
+          if ($2 !~ /^[0-9][0-9]*$/ || $5 !~ /^[0-9][0-9]*$/) bad=1
+          if ($3 ~ /^[0-9][0-9]*$/) {
+            if (length("" $3) > 10) bad=1
+            uid=$3
+            while (length("" uid) > 1 && substr(uid,1,1) == "0") uid=substr(uid,2)
+          } else if ($3 ~ /^[A-Za-z_][A-Za-z0-9_-]*$/) {
+            uid=$3
+          } else bad=1
+          if ($4 ~ /^[0-9][0-9]*$/) {
+            if (length("" $4) > 10) bad=1
+            gid=$4
+            while (length("" gid) > 1 && substr(gid,1,1) == "0") gid=substr(gid,2)
+          } else if ($4 ~ /^[A-Za-z_][A-Za-z0-9_-]*$/) {
+            gid=$4
+          } else bad=1
           if (length("" $6) < 1 || length("" $6) > 16) bad=1
           if ($7 !~ /^[0-9][0-9]*$/ || ($7 + 0) < 1 || ($7 + 0) > 31) bad=1
           date_ok=0
@@ -26192,27 +26219,23 @@ _AIXRAY_SESSION_KEYS=""
                 (hour + 0) <= 23 && (minute + 0) <= 59) date_ok=1
           }
           if (!date_ok) bad=1
-          if ($NF != "/root") bad=1
-          uid=$3
-          while (length("" uid) > 1 && substr(uid,1,1) == "0") uid=substr(uid,2)
-          gid=$4
-          while (length("" gid) > 1 && substr(gid,1,1) == "0") gid=substr(gid,2)
+          if ($NF != want) bad=1
         }
         END {
           if (records != 1 || bad) exit 1
-          target="0700"; ceiling=0
-          for (i=1; i<=length("" target); i++) ceiling=ceiling*8+substr(target,i,1)
+          target="0700"; need=0
+          for (i=1; i<=length("" target); i++) need=need*8+substr(target,i,1)
           extra=0
           for (power=1; power<=2048; power*=2)
-            if (int(bits/power)%2 == 1 && int(ceiling/power)%2 == 0) extra+=power
+            if (int(bits/power)%2 == 1 && int(need/power)%2 == 0) extra+=power
           okflag=0
-          if (extra == 0) okflag=1
+          if (bits == need) okflag=1
           print uid "|" gid "|" sprintf("%04o", bits) "|" okflag
         }
       ')
       DRH_PARSE_RC=$?
       if [ "$DRH_PARSE_RC" -ne 0 ] || [ -z "$DRH_PARSED" ]; then
-        DRH_REASON="/root metadata unparseable"
+        DRH_REASON="$DRH_HOME metadata unparseable"
       else
         DRH_UID=${DRH_PARSED%%\|*}
         DRH_REST=${DRH_PARSED#*\|}
@@ -26222,31 +26245,47 @@ _AIXRAY_SESSION_KEYS=""
         DRH_MODE_OK=${DRH_REST#*\|}
       fi
     fi
-    if [ "$DRH_REASON" = "/root absent" ]; then
-      add security diracc_roothome "root dedicated home" FAIL med \
-          "root home=/root but /root absent" \
-          "The probe returned the determinate-absence signature ('/root not found', exit $DRH_LS_RC); root is configured with home=/root and that directory does not exist, so root has no dedicated home directory." \
-          "create the dedicated home after validation: 'mkdir /root; chown root:system /root; chmod 0700 /root'; PTxray recommends these commands and never executes them." \
-          "cis-l1"
+    if [ "$DRH_REASON" = "$DRH_HOME absent" ]; then
+      DRH_STATUS=FAIL
+      DRH_OBSERVED="root home=$DRH_HOME but $DRH_HOME absent"
+      DRH_MEANING="The probe returned the determinate-absence signature ('$DRH_HOME not found', exit $DRH_LS_RC); root is configured with that home and the directory does not exist, so the 0700 home-directory requirement is unmet."
+      DRH_FIX="create the dedicated home after validation: 'mkdir $DRH_HOME; chown root:system $DRH_HOME; chmod 0700 $DRH_HOME'; PTxray recommends these commands and never executes them."
     elif [ -n "$DRH_REASON" ]; then
-      add security diracc_roothome "root dedicated home" NOT_ASSESSED med \
-          "not assessed — $DRH_REASON" \
-          "PTxray did not obtain one trustworthy metadata row for /root, so it cannot claim the dedicated-home boundary is satisfied." \
-          "run 'ls -ldn /root', correct the capture or path problem, and rerun PTxray." \
-          "cis-l1"
-    elif [ "$DRH_UID" = "0" ] && [ "$DRH_GID" = "0" ] && [ "$DRH_MODE_OK" = "1" ]; then
-      add security diracc_roothome "root dedicated home" PASS med \
-          "root home=/root owner_uid=$DRH_UID group_gid=$DRH_GID mode=$DRH_MODE" \
-          "The root account has a dedicated home directory restricted to root." \
-          "n/a" "cis-l1"
+      DRH_STATUS=NOT_ASSESSED
+      DRH_OBSERVED="not assessed - $DRH_REASON"
+      DRH_MEANING="PTxray did not obtain one trustworthy metadata row for $DRH_HOME, so it cannot claim the 0700 home-directory mode is satisfied."
+      DRH_FIX="run 'ls -ld $DRH_HOME', correct the capture or path problem, and rerun PTxray."
     else
-      add security diracc_roothome "root dedicated home" FAIL med \
-          "root home=/root owner_uid=$DRH_UID group_gid=$DRH_GID mode=$DRH_MODE" \
-          "The dedicated root home directory permits access beyond root, weakening protection of root's configuration files." \
-          "correct after validation: 'chown root:system /root; chmod 0700 /root'; PTxray recommends these commands and never executes them." \
-          "cis-l1"
+      DRH_OWNER_OK=0
+      DRH_GROUP_OK=0
+      if [ "$DRH_UID" = "0" ] || [ "$DRH_UID" = "root" ]; then
+        DRH_OWNER_OK=1
+      fi
+      if [ "$DRH_GID" = "0" ] || [ "$DRH_GID" = "system" ]; then
+        DRH_GROUP_OK=1
+      fi
+      if [ "$DRH_OWNER_OK" -eq 1 ] && [ "$DRH_GROUP_OK" -eq 1 ] && [ "$DRH_MODE_OK" = "1" ]; then
+        DRH_STATUS=PASS
+        DRH_OBSERVED="root home=$DRH_HOME owner_uid=$DRH_UID group_gid=$DRH_GID mode=$DRH_MODE"
+        DRH_MEANING="The root account home directory has mode 0700 and is restricted to root."
+        DRH_FIX="n/a"
+      else
+        DRH_STATUS=FAIL
+        DRH_OBSERVED="root home=$DRH_HOME owner_uid=$DRH_UID group_gid=$DRH_GID mode=$DRH_MODE"
+        DRH_MEANING="The root account home directory mode is not equal to 0700, or the directory is not restricted to root."
+        DRH_FIX="# chmod 0700 $DRH_HOME"
+      fi
     fi
   fi
+
+  case "$DRH_STATUS" in
+    NOT_APPLICABLE) DRH_SEV=low ;;
+    *) DRH_SEV=med ;;
+  esac
+
+  add security diracc_roothome "root dedicated home" \
+      "$DRH_STATUS" "$DRH_SEV" "$DRH_OBSERVED" \
+      "$DRH_MEANING" "$DRH_FIX" "stig:V-215198"
 _AIXRAY_SESSION_KEYS=""
   # fileperm_smitlog_owner — CIS L1-aligned /smit.log owner boundary.
   # TODO-VERIFY: dynamic root-home derivation deferred
@@ -31896,92 +31935,111 @@ _AIXRAY_SESSION_KEYS=""
     "$CDE_CMSD_FIX" \
     "cis-l1"
 _AIXRAY_SESSION_KEYS=""
-  # cde_dtlogin — is dtlogin wired to start at boot via the dt inittab entry?
-  # /usr/dt/bin/dtconfig -e installs `dt:2:wait:/etc/rc.dt`; dtconfig -d
-  # removes it.  The grep is anchored to the identifier field (^dt:) because
-  # a bare /dt/ match also hits unrelated rows — the stock AIX 7.2 perfstat
-  # entry (libperfstat_updt_dictionary) contains the letters "dt".
-  typeset CDE_DTL_RAW CDE_DTL_RC CDE_DTL_SHAPE CDE_DTL_FIRST
+  # cde_dtlogin — DISA STIG V-215351 / SV-215351r958478_rule (AIX7-00-003045),
+  # severity medium, CCI-000381: if there are no X11 clients that require CDE,
+  # the dt service must be disabled.  The STIG literal is `lsitab dt` — if the
+  # command yields any output, this is a finding.
+  #
+  # `lsitab -a` is a liveness probe, not a second opinion.  lsitab exits
+  # non-zero both when the dt entry is absent and when the init table cannot be
+  # read, so on its own an empty `lsitab dt` cannot tell "no dt entry" from "no
+  # answer".  With a readable init table proven first, empty output is positive
+  # evidence of absence and passes: this is a prohibition rule, and absence of
+  # the subject is the compliant state.
+  #
+  # The shape guard requires the identifier field to be exactly dt with at least
+  # four colon fields.  A probe that came back carrying some other row is not
+  # evidence about dt and refuses rather than guesses — the stock AIX perfstat
+  # entry (libperfstat_updt_dictionary) contains the letters "dt" and is the
+  # exact trap an unanchored match falls into.
+  typeset CDE_DTL_ALL CDE_DTL_ALL_RC CDE_DTL_RAW CDE_DTL_RC
+  typeset CDE_DTL_SHAPE CDE_DTL_FIRST
   typeset CDE_DTL_STATUS CDE_DTL_OBSERVED CDE_DTL_MEANING CDE_DTL_FIX CDE_DTL_SEV
+
+  CDE_DTL_STATUS=""
+  CDE_DTL_OBSERVED=""
 
   if [ "${MYUID:-0}" != "0" ]; then
     CDE_DTL_STATUS=NOT_ASSESSED
-    CDE_DTL_OBSERVED="not assessed - inittab read requires root"
+    CDE_DTL_OBSERVED="not assessed - the init table read requires root"
   else
-    CDE_DTL_RAW=$(aix cde_dtlogin grep -E '^dt:' /etc/inittab)
+    CDE_DTL_ALL=$(aix lsitab_all lsitab -a)
+    CDE_DTL_ALL_RC=$?
+    if [ "$CDE_DTL_ALL_RC" -ne 0 ]; then
+      CDE_DTL_STATUS=NOT_ASSESSED
+      CDE_DTL_OBSERVED="not assessed - init table liveness probe failed (lsitab -a rc=$CDE_DTL_ALL_RC)"
+    elif [ -z "$CDE_DTL_ALL" ]; then
+      CDE_DTL_STATUS=NOT_ASSESSED
+      CDE_DTL_OBSERVED="not assessed - init table liveness probe rc=0 but output was empty"
+    fi
+  fi
+
+  if [ -z "$CDE_DTL_STATUS" ]; then
+    CDE_DTL_RAW=$(aix lsitab_dt lsitab dt)
     CDE_DTL_RC=$?
-    case "$CDE_DTL_RC" in
-      0)
-        if [ -z "$CDE_DTL_RAW" ]; then
-          CDE_DTL_STATUS=NOT_ASSESSED
-          CDE_DTL_OBSERVED="not assessed - dt inittab probe rc=0 but output was empty"
-        else
-          CDE_DTL_SHAPE=$(printf '%s\n' "$CDE_DTL_RAW" | awk -F: '
-            /^[ \t]*$/ { next }
-            {
-              rows++
-              if ($1 != "dt" || NF < 4) bad = 1
-              if (rows == 1) first = $0
-            }
-            END {
-              if (!rows || bad) print "malformed"
-              else print "entry:" first
-            }')
-          case "$CDE_DTL_SHAPE" in
-            malformed)
-              CDE_DTL_STATUS=NOT_ASSESSED
-              CDE_DTL_OBSERVED="not assessed - dt inittab probe rows were malformed"
-              ;;
-            *)
-              CDE_DTL_FIRST=${CDE_DTL_SHAPE#entry:}
-              CDE_DTL_STATUS=FAIL
-              CDE_DTL_OBSERVED="dt entry present in /etc/inittab: $CDE_DTL_FIRST"
-              ;;
-          esac
-        fi
-        ;;
-      1)
-        if [ -z "$CDE_DTL_RAW" ]; then
-          CDE_DTL_STATUS=PASS
-          CDE_DTL_OBSERVED="no dt entry in /etc/inittab (dtlogin is not started at boot)"
-        else
-          CDE_DTL_STATUS=NOT_ASSESSED
-          CDE_DTL_OBSERVED="not assessed - dt inittab probe rc=1 but output was non-empty (contradictory)"
-        fi
-        ;;
-      *)
+    if [ -z "$CDE_DTL_RAW" ]; then
+      if [ "$CDE_DTL_RC" -eq 0 ]; then
         CDE_DTL_STATUS=NOT_ASSESSED
-        CDE_DTL_OBSERVED="not assessed - dt inittab probe grep failed (rc=$CDE_DTL_RC)"
-        ;;
-    esac
+        CDE_DTL_OBSERVED="not assessed - dt probe rc=0 but output was empty"
+      else
+        CDE_DTL_STATUS=PASS
+        CDE_DTL_OBSERVED="lsitab dt yields no output: no dt entry in the init table"
+      fi
+    elif [ "$CDE_DTL_RC" -ne 0 ]; then
+      CDE_DTL_STATUS=NOT_ASSESSED
+      CDE_DTL_OBSERVED="not assessed - dt probe rc=$CDE_DTL_RC but output was non-empty (contradictory)"
+    else
+      CDE_DTL_SHAPE=$(printf '%s\n' "$CDE_DTL_RAW" | awk -F: '
+        /^[ \t]*$/ { next }
+        {
+          rows++
+          if ($1 != "dt" || NF < 4) bad = 1
+          if (rows == 1) first = $0
+        }
+        END {
+          if (!rows || bad) print "malformed"
+          else print "entry:" first
+        }')
+      case "$CDE_DTL_SHAPE" in
+        malformed)
+          CDE_DTL_STATUS=NOT_ASSESSED
+          CDE_DTL_OBSERVED="not assessed - dt probe rows were malformed (identifier field is not dt, or fewer than four fields)"
+          ;;
+        *)
+          CDE_DTL_FIRST=${CDE_DTL_SHAPE#entry:}
+          CDE_DTL_STATUS=FAIL
+          CDE_DTL_OBSERVED="lsitab dt yields output: dt entry present in the init table: $CDE_DTL_FIRST"
+          ;;
+      esac
+    fi
   fi
 
   case "$CDE_DTL_STATUS" in
     PASS)
-      CDE_DTL_MEANING="The CDE login manager is not configured to start at boot."
+      CDE_DTL_MEANING="The init table carries no dt entry, so the CDE login manager (dtlogin) is not started at boot, as DISA STIG V-215351 requires when no X11 client needs CDE."
       CDE_DTL_FIX="n/a"
       ;;
     FAIL)
-      CDE_DTL_MEANING="dtlogin starts at boot; the CDE login manager listens for graphical logins and enlarges the attack surface of a server that does not need it."
-      CDE_DTL_FIX="after confirming no console workflow needs CDE, disable the boot entry with '/usr/dt/bin/dtconfig -d'; PTxray only recommends this action."
+      CDE_DTL_MEANING="The dt service is enabled in the init table, so dtlogin starts at boot and the CDE login manager listens for graphical logins — attack surface DISA STIG V-215351 requires a server without X11 clients to drop."
+      CDE_DTL_FIX="after confirming no X11 client requires CDE, remove the entry with 'rmitab dt' and reload init with 'telinit q'; PTxray only recommends these commands and never runs them."
       ;;
     *)
-      CDE_DTL_MEANING="PTxray did not obtain trustworthy inittab evidence for the dt entry."
-      CDE_DTL_FIX="run \"grep -E '^dt:' /etc/inittab\" as root, resolve the read or shape problem, and rerun PTxray."
+      CDE_DTL_MEANING="PTxray did not obtain trustworthy init table evidence for the dt entry, so V-215351 is undecided rather than compliant."
+      CDE_DTL_FIX="run 'lsitab -a' and 'lsitab dt' as root, resolve the read or shape problem, and rerun PTxray."
       ;;
   esac
 
-  case "$CDE_DTL_STATUS" in
-    FAIL) CDE_DTL_SEV=high ;;
-    *) CDE_DTL_SEV=low ;;
-  esac
+  # Verdict convention: FAIL at the STIG severity (medium), PASS med,
+  # NOT_ASSESSED med. This rule names no Not Applicable condition, so the
+  # check never renders NOT_APPLICABLE.
+  CDE_DTL_SEV=med
 
   add security cde_dtlogin "CDE dtlogin autostart" \
     "$CDE_DTL_STATUS" "$CDE_DTL_SEV" \
     "$CDE_DTL_OBSERVED" \
     "$CDE_DTL_MEANING" \
     "$CDE_DTL_FIX" \
-    "cis-l1"
+    "stig:V-215351 cis-l1"
 _AIXRAY_SESSION_KEYS=""
   # cde_dtspc — detect whether the CDE subprocess control service (dtspcd) is active in
   # /etc/inetd.conf.  An active dtspc entry exposes a historically exploitable
@@ -33904,72 +33962,80 @@ _AIXRAY_SESSION_KEYS=""
         "cis-l1"
   fi
 _AIXRAY_SESSION_KEYS=""
-  # worldwrite_dirs_nosvtx — control 3.2.  A world-writable directory that
-  # lacks the sticky bit (SVTX, mode 01000) lets any local user delete or
-  # rename files they do not own inside it, opening denial-of-service and
-  # privilege-escalation paths through predictable-name races in shared space.
-  # Probe: one find over the whole tree restricted to JFS/JFS2 filesystems,
-  # selecting world-writable directories that lack SVTX and emitting a
-  # long-listing line per match.  find returns 0 after a complete traversal
-  # whether or not it matched; per-directory permission denials go to stderr
-  # and do not change rc.  A non-empty match list is the violation evidence;
-  # rc 1/2 is a fatal probe failure and the state is unknown.
+  # worldwrite_dirs_nosvtx — DISA STIG V-215341. Every public directory
+  # must have the sticky bit. A non-empty find result is the finding.
+  # find rc 1 or 2 over a live tree is partial evidence: grade printed
+  # rows. Empty stdout at rc 1/2 is a live empty scan (WARN), not a refusal.
   typeset WWD_RAW WWD_RC WWD_STATUS WWD_SEV WWD_OBSERVED WWD_MEANING WWD_FIX
-  typeset WWD_N WWD_FIRST
+  typeset WWD_N WWD_FIRST WWD_PARSED WWD_REST WWD_BAD
 
   if [ "${MYUID:-0}" != "0" ]; then
     WWD_STATUS=NOT_ASSESSED
-    WWD_SEV=low
     WWD_OBSERVED="not assessed - world-writable directory probe requires root for a complete traversal"
   else
-    WWD_RAW=$(aix worldwrite_dirs_nosvtx \
-      find / \( -fstype jfs -o -fstype jfs2 \) -type d -perm -o+w ! -perm -1000 -ls)
+    WWD_RAW=$(aix worldwrite_dirs_nosvtx find / -type d -perm -002 ! -perm -1000)
     WWD_RC=$?
-    case "$WWD_RC" in
-      0)
-        if [ -z "$WWD_RAW" ]; then
-          WWD_STATUS=PASS
-          WWD_SEV=low
-          WWD_OBSERVED="no world-writable JFS/JFS2 directories missing the sticky bit"
-        else
-          WWD_N=$(printf '%s\n' "$WWD_RAW" | awk 'END { print NR }')
-          WWD_FIRST=$(printf '%s\n' "$WWD_RAW" | awk 'NR==1 { print $3 " " $NF }')
-          WWD_STATUS=FAIL
-          WWD_SEV=high
-          WWD_OBSERVED="${WWD_N} world-writable JFS/JFS2 directorie(s) missing the sticky bit, first: ${WWD_FIRST}"
-        fi
-        ;;
-      1|2)
+    WWD_PARSED=$(printf '%s\n' "$WWD_RAW" | awk '
+      {
+        line = $0
+        sub(/[ \t\r]+$/, "", line)
+        if (line == "") next
+        if (line ~ /^\//) {
+          n++
+          if (n == 1) first = line
+        } else {
+          bad++
+        }
+      }
+      END { printf "%d|%d|%s", n + 0, bad + 0, first }
+    ')
+    WWD_N=${WWD_PARSED%%\|*}
+    WWD_REST=${WWD_PARSED#*\|}
+    WWD_BAD=${WWD_REST%%\|*}
+    WWD_FIRST=${WWD_REST#*\|}
+    if [ "$WWD_RC" -eq 0 ] || [ "$WWD_RC" -eq 1 ] || [ "$WWD_RC" -eq 2 ]; then
+      if [ "$WWD_N" -gt 0 ]; then
+        WWD_STATUS=FAIL
+        WWD_OBSERVED="$WWD_N world-writable directorie(s) missing the sticky bit, first: $WWD_FIRST"
+      elif [ "$WWD_BAD" -gt 0 ]; then
         WWD_STATUS=NOT_ASSESSED
-        WWD_SEV=low
-        WWD_OBSERVED="not assessed - find returned rc=$WWD_RC - traversal failed"
-        ;;
-      *)
-        WWD_STATUS=NOT_ASSESSED
-        WWD_SEV=low
-        WWD_OBSERVED="not assessed - find returned rc=$WWD_RC - traversal failed"
-        ;;
-    esac
+        WWD_OBSERVED="not assessed - find output was not a path list"
+      elif [ "$WWD_RC" -eq 0 ]; then
+        WWD_STATUS=PASS
+        WWD_OBSERVED="no world-writable directories missing the sticky bit"
+      else
+        WWD_STATUS=WARN
+        WWD_OBSERVED="no world-writable directories missing the sticky bit (some paths unreadable)"
+      fi
+    else
+      WWD_STATUS=NOT_ASSESSED
+      WWD_OBSERVED="not assessed - find returned rc=$WWD_RC"
+    fi
   fi
+  WWD_SEV=med
 
   case "$WWD_STATUS" in
     PASS)
-      WWD_MEANING="No world-writable JFS/JFS2 directory is missing the sticky bit, so no shared directory lets an unprivileged user delete or rename files they do not own."
+      WWD_MEANING="No public directory is missing the sticky bit."
       WWD_FIX="n/a"
       ;;
     FAIL)
-      WWD_MEANING="A world-writable JFS/JFS2 directory lacks the sticky bit, letting any local user delete or rename files they do not own inside it and enabling denial-of-service or privilege-escalation through predictable-name races."
+      WWD_MEANING="A public directory lacks the sticky bit required to prevent users from deleting or renaming files they do not own."
       WWD_FIX="set the sticky bit with 'chmod +t <path>' on each listed directory, after confirming no workflow depends on unowned deletion there."
       ;;
+    WARN)
+      WWD_MEANING="Readable public directories carry the sticky bit, but some paths were unreadable so a hidden violation cannot be ruled out."
+      WWD_FIX="resolve directory permission errors so the scan can finish, then rerun PTxray."
+      ;;
     *)
-      WWD_MEANING="PTxray did not obtain trustworthy evidence of the world-writable directory state."
-      WWD_FIX="run the find probe as root, resolve the probe problem, and rerun PTxray."
+      WWD_MEANING="PTxray did not obtain trustworthy evidence of the public directory state."
+      WWD_FIX="resolve the find probe problem and rerun PTxray."
       ;;
   esac
 
-  add security worldwrite_dirs_nosvtx "World-writable JFS/JFS2 directories without sticky bit" \
+  add security worldwrite_dirs_nosvtx "World-writable directories without sticky bit" \
     "$WWD_STATUS" "$WWD_SEV" "$WWD_OBSERVED" \
-    "$WWD_MEANING" "$WWD_FIX" "cis-l1"
+    "$WWD_MEANING" "$WWD_FIX" "cis-l1 stig:V-215341"
 _AIXRAY_SESSION_KEYS=""
   # worldwrite_objects — group-writable non-directory objects on local (jfs/jfs2)
   # filesystems owned by an administrative group (control 3.3, L2). Absence is the
@@ -33979,6 +34045,10 @@ _AIXRAY_SESSION_KEYS=""
 
   WWO_RAW=$(aix ww_objects find -L / \( -fstype jfs -o -fstype jfs2 \) ! -type d -perm -g+w -ls)
   WWO_RC=$?
+  # Probe (manifest command): lsgroup -a admin ALL | grep true. The grep true
+  # filter is folded into the ADM_LIST awk below rather than run in the probe
+  # pipeline: a pipe here would collapse ADM_RC to grep's status and turn a
+  # determinate "no admin group" (PASS) into a refusal.
   ADM_RAW=$(aix admin_groups lsgroup -a admin ALL)
   ADM_RC=$?
 
@@ -33991,32 +34061,40 @@ _AIXRAY_SESSION_KEYS=""
   # evidence of a violation, and a partial traversal cannot un-observe it -- so a hit
   # still FAILs. Absence is not provable from an incomplete traversal, so the PASS
   # direction must still refuse when the scan did not complete. That asymmetry is
-  # handled at the verdict sites below; only a scan that produced nothing at all is
-  # refused up front.
+  # handled at the verdict sites below. Batch contract (1.6-defects-r5): probe rc
+  # != 0, empty rc0 output, and unparseable output are all refusals -> NOT_ASSESSED
+  # med with observed beginning "not assessed - <reason>"; determinate absence is
+  # established only by a completed scan whose parsed listing has no admin-group hit.
   if [ "$WWO_RC" -ne 0 ] && [ -z "$WWO_RAW" ]; then
-    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
-        "not assessed — ww_objects failed (rc=$WWO_RC) and produced no listing" \
+    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+        "not assessed - ww_objects scan failed (rc=$WWO_RC) and produced no listing" \
         "The group-writable-object scan did not complete and returned nothing, so PTxray cannot enumerate the objects that would need group-write review." \
         "Confirm the group-writable-object scan completes without error, then rerun PTxray." \
         "cis-l2"
   elif [ "$ADM_RC" -ne 0 ]; then
-    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
-        "not assessed — admin_groups failed (rc=$ADM_RC)" \
+    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+        "not assessed - admin_groups failed (rc=$ADM_RC)" \
         "The administrative-group enumeration did not complete, so PTxray cannot identify which objects' group-write would require review." \
         "Confirm the administrative-group enumeration completes without error, then rerun PTxray." \
         "cis-l2"
   elif [ -z "$WWO_RAW" ]; then
-    # Reached only when the scan completed (rc=0), so empty output is a determinate
-    # absence and PASS is earned rather than assumed.
-    add security worldwrite_objects "group-writable admin-group objects" PASS low \
-        "no group-writable admin-group objects on local filesystems" \
-        "No non-directory group-writable object exists on a local jfs/jfs2 filesystem, so nothing requires group-write review." \
-        "n/a" "cis-l2"
+    # The scan completed (rc=0) but emitted no listing. Under the batch contract an
+    # empty probe result is unusable evidence, so this refuses rather than PASSes:
+    # absence cannot be assumed from an empty stream.
+    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+        "not assessed - ww_objects scan produced no listing" \
+        "The group-writable-object scan completed without error but returned no listing, so PTxray cannot establish which objects would need group-write review." \
+        "Rerun the group-writable-object scan and PTxray to obtain a complete listing." \
+        "cis-l2"
   elif [ -z "$ADM_RAW" ]; then
-    add security worldwrite_objects "group-writable admin-group objects" PASS low \
-        "no group-writable admin-group objects on local filesystems" \
-        "No administrative group is defined, so no object's group-write can belong to an administrative group." \
-        "n/a" "cis-l2"
+    # The admin-group enumeration completed (rc=0) but returned no groups. An empty
+    # enumeration is unusable evidence under the batch contract, so this refuses
+    # rather than PASSes: no admin group cannot be told apart from a dropped listing.
+    add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+        "not assessed - admin_groups produced no listing" \
+        "The administrative-group enumeration completed without error but returned no groups, so PTxray cannot identify which objects' group-write would require review." \
+        "Rerun the administrative-group enumeration and PTxray to obtain the group list." \
+        "cis-l2"
   else
     ADM_LIST=$(printf '%s\n' "$ADM_RAW" | awk 'index($0,"true") {if (n++) printf " "; printf "%s", $1}')
     WWO_RESULT=$(printf '%s\n' "$WWO_RAW" | awk -v admins="$ADM_LIST" '
@@ -34070,16 +34148,16 @@ _AIXRAY_SESSION_KEYS=""
     WWO_HITS=${WWO_RESULT%%\|*}
     WWO_PATHS=${WWO_RESULT#*\|}
     if [ "$WWO_PARSE_RC" -ne 0 ]; then
-      add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
-          "not assessed — worldwrite_objects parse failed (rc=$WWO_PARSE_RC)" \
+      add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+          "not assessed - worldwrite_objects parse failed (rc=$WWO_PARSE_RC)" \
           "The group-writable-object listing could not be parsed, so PTxray cannot enumerate the objects that would need group-write review." \
           "Rerun PTxray and report the parse failure." \
           "cis-l2"
     elif [ "$WWO_HITS" -eq 0 ] && [ "$WWO_RC" -ne 0 ]; then
       # Nothing found, but the traversal did not complete. Absence is exactly what an
       # incomplete scan cannot establish, so this must refuse rather than PASS.
-      add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED low \
-          "not assessed — scan incomplete (rc=$WWO_RC) and no admin-group object was observed" \
+      add security worldwrite_objects "group-writable admin-group objects" NOT_ASSESSED med \
+          "not assessed - scan incomplete (rc=$WWO_RC) and no admin-group object was observed" \
           "No administratively-owned group-writable object was seen, but the filesystem traversal did not complete, so their absence is not established." \
           "Resolve the traversal errors (commonly unreadable paths or dangling symlinks under 'find -L'), then rerun PTxray." \
           "cis-l2"
@@ -34201,68 +34279,160 @@ _AIXRAY_SESSION_KEYS=""
         "rerun PTxray; if the same text persists, investigate why the find command produced it."
   fi
 _AIXRAY_SESSION_KEYS=""
-# unowned_files — control 3.6: local (jfs/jfs2) filesystem ownership boundary.
-# One full traversal; any file or directory whose numeric owner or group does
-# not resolve to a known identity is a finding. Root is required for a complete
-# traversal; a non-root run exits rc=1 and reports the scan as incomplete.
-typeset UF_RAW UF_RC UF_SUMMARY UF_COUNT UF_FIRST UF_OBS
+  # unowned_files — DISA STIG V-215340 (SV-215340r991589_rule,
+  # AIX7-00-003034, CCI-000366): "All AIX files and directories must have a
+  # valid owner." Read-only; the fix text is operator guidance, never run.
+  #
+  # STIG literal: `find / -nouser -print`; any printed path is a finding.
+  # find exits 0 whether it matched paths or matched nothing, so rc 0 with
+  # empty output is determinate absence ONLY when a separate anchor proves
+  # the scan actually ran and reached /. Absent that anchor an empty result
+  # is a swallowed error and the state is unknown, never clean. A nonzero
+  # anchor rc is a dead probe (find missing, exec fault, permission error),
+  # not evidence the subject is absent: this check runs from inside /, so /
+  # cannot be unreachable while it executes. A dead probe is an indeterminate
+  # NOT_ASSESSED, never a compliance FAIL. find rc 1 or 2 over a live tree
+  # means some path was unreadable or vanished while every readable row still
+  # printed; those rows are graded. Empty stdout at rc 1/2 is not a complete
+  # scan (state unknown). Every graded partial scan (PASS or FAIL) carries a
+  # WARN-level unreadable-path detail; stderr was not captured, so the
+  # literal is used.
+  typeset UF_ANCHOR UF_ANCHOR_RC UF_ANCHOR_OK UF_REASON
+  typeset UF_RAW UF_RC UF_PARSED UF_REST UF_COUNT UF_LINES UF_FIRST
+  typeset UF_PARTIAL UF_GRADE
+  typeset UF_STATUS UF_SEVERITY UF_OBSERVED UF_MEANING UF_FIX
 
-UF_RAW=$(aix unowned_files_find /usr/bin/find / \( -fstype jfs -o -fstype jfs2 \) \( -type d -o -type f \) \( -nouser -o -nogroup \) -ls)
-UF_RC=$?
+  UF_STATUS=''
+  UF_REASON=''
+  UF_ANCHOR_OK=0
+  UF_PARTIAL=0
+  UF_GRADE=0
 
-# Trim captured stdout of leading/trailing whitespace before the empty/non-empty
-# test so a trailing newline alone never reads as a finding. Each remaining
-# non-empty line is one entry with an unresolvable owner or group.
-UF_SUMMARY=$(printf '%s\n' "$UF_RAW" | awk '
-  {
-    sub(/^[ \t]+/, "")
-    sub(/[ \t]+$/, "")
-    if ($0 == "") next
-    count++
-    if (count == 1) {
-      first = $11
-      for (i = 12; i <= NF; i++) first = first " " $i
-    }
-  }
-  END {
-    printf "%d|%s", count, first
-  }
-')
-UF_COUNT=${UF_SUMMARY%%\|*}
-UF_FIRST=${UF_SUMMARY#*\|}
-
-if [ "$UF_RC" -eq 0 ]; then
-  if [ "$UF_COUNT" -eq 0 ]; then
-    add security unowned_files "Unowned or ungrouped files on local filesystems" PASS low \
-        "no unowned or ungrouped entries on jfs/jfs2 filesystems" \
-        "Every file and directory on local jfs/jfs2 filesystems has an owner and group that resolve to a known identity." \
-        "n/a" "cis-l1"
+  # (1) Determinacy anchor. `find / -prune -print` traverses nothing and
+  # prints `/` whenever find ran and `/` is reachable. It proves that an
+  # empty -nouser result means absence rather than a dead probe. A nonzero
+  # rc means the probe itself failed to run — / unreachable is not a real
+  # state while the check is executing, so there is no determinate
+  # "subject absent" signal; the state is unknown.
+  UF_ANCHOR=$(aix scan_anchor find / -prune -print)
+  UF_ANCHOR_RC=$?
+  if [ "$UF_ANCHOR_RC" -ne 0 ]; then
+    UF_REASON="filesystem scan anchor unavailable (rc=$UF_ANCHOR_RC)"
+  elif [ -z "$UF_ANCHOR" ]; then
+    UF_REASON='probe returned no output with rc 0 (swallowed error)'
+  elif printf '%s\n' "$UF_ANCHOR" | awk '
+      { line = $0; sub(/[ \t\r]+$/, "", line); if (line == "/") found = 1 }
+      END { if (found) exit 0; exit 1 }
+    '; then
+    UF_ANCHOR_OK=1
   else
-    UF_OBS="$UF_COUNT unowned or ungrouped entries; first: $UF_FIRST"
-    add security unowned_files "Unowned or ungrouped files on local filesystems" FAIL high \
-        "$UF_OBS" \
-        "Entries whose owner or group does not resolve to a known identity are detached from accountable identities and from any lifecycle that reassigns or removes them." \
-        "Assign the correct owner and group after validating the entry, or remove it if orphaned; PTxray only recommends, never executes." "cis-l1"
+    UF_REASON='filesystem scan anchor output unrecognized'
   fi
-elif [ "$UF_RC" -eq 1 ]; then
-  if [ "$UF_COUNT" -ne 0 ]; then
-    UF_OBS="$UF_COUNT unowned or ungrouped entries; first: $UF_FIRST"
-    add security unowned_files "Unowned or ungrouped files on local filesystems" FAIL high \
-        "$UF_OBS; scan incomplete (traversal errors)" \
-        "The scan was partial because one or more paths could not be traversed, but violations were found in the traversable portion; additional violations may exist." \
-        "Rerun as root for a complete traversal, then assign or remove the listed entries." "cis-l1"
-  else
-    add security unowned_files "Unowned or ungrouped files on local filesystems" NOT_ASSESSED low \
-        "scan incomplete; no unowned or ungrouped entries in the traversable portion" \
-        "Traversal errors (typically a non-root run) prevented a complete scan and no violations were found in what could be scanned, so completeness is unknown." \
-        "Rerun PTxray as root for a complete traversal." "cis-l1"
+
+  if [ -z "$UF_STATUS" ] && [ -n "$UF_REASON" ]; then
+    UF_STATUS=NOT_ASSESSED
+    UF_SEVERITY=med
+    UF_OBSERVED="not assessed - $UF_REASON"
+    UF_MEANING='PTxray could not prove a filesystem scan ran, so it cannot assert that every file and directory has a valid owner; the state required by V-215340 is unknown.'
+    UF_FIX='confirm the account running PTxray can traverse / and rerun the assessment.'
   fi
-else
-  add security unowned_files "Unowned or ungrouped files on local filesystems" NOT_ASSESSED low \
-        "probe failed (find rc=$UF_RC)" \
-        "The find probe failed fatally, so the local filesystem ownership boundary could not be assessed." \
-        "Inspect why find exited with rc=$UF_RC and rerun PTxray." "cis-l1"
-fi
+
+  if [ "$UF_ANCHOR_OK" -eq 1 ]; then
+    # (2) The STIG literal, and the sole evidence of a finding.
+    # rc 1 or 2 with printed rows is partial evidence, not a dead probe.
+    UF_RAW=$(aix unowned_files_find find / -nouser -print)
+    UF_RC=$?
+    if [ "$UF_RC" -eq 0 ]; then
+      UF_GRADE=1
+    elif [ "$UF_RC" -eq 1 ] || [ "$UF_RC" -eq 2 ]; then
+      if [ -n "$UF_RAW" ]; then
+        UF_GRADE=1
+        UF_PARTIAL=1
+      fi
+    fi
+    if [ "$UF_GRADE" -eq 0 ]; then
+      UF_STATUS=NOT_ASSESSED
+      UF_SEVERITY=med
+      UF_OBSERVED="not assessed - find / -nouser -print failed (rc=$UF_RC)"
+      UF_MEANING='The system-wide unowned-file scan did not complete, so PTxray cannot assert that every file and directory has a valid owner.'
+      UF_FIX='resolve the scan failure (traversal permission or I/O error) and rerun the assessment.'
+    else
+      UF_PARSED=$(printf '%s\n' "$UF_RAW" | awk '
+        {
+          line = $0
+          sub(/[ \t\r]+$/, "", line)
+          if (line == "") next
+          lines++
+          if (line ~ /^\//) {
+            n++
+            if (n == 1) first = line
+          }
+        }
+        END { printf "%d|%d|%s", n + 0, lines + 0, first }
+      ')
+      UF_COUNT=${UF_PARSED%%\|*}
+      UF_REST=${UF_PARSED#*\|}
+      UF_LINES=${UF_REST%%\|*}
+      UF_FIRST=${UF_REST#*\|}
+      case "$UF_COUNT$UF_LINES" in
+        ''|*[!0-9]*)
+          UF_STATUS=NOT_ASSESSED
+          UF_SEVERITY=med
+          UF_OBSERVED='not assessed - unowned-file scan output could not be parsed'
+          UF_MEANING='The unowned-file scan returned output PTxray could not read as a path list, so it cannot assert that every file and directory has a valid owner.'
+          UF_FIX='rerun the assessment and, if the output remains unreadable, capture it for review.'
+          ;;
+      esac
+      # Output that holds lines but no readable path is unparseable evidence,
+      # never absence. Refuse rather than manufacture a clean result.
+      if [ -z "$UF_STATUS" ] && [ "$UF_COUNT" -eq 0 ] && [ "$UF_LINES" -gt 0 ]; then
+        UF_STATUS=NOT_ASSESSED
+        UF_SEVERITY=med
+        UF_OBSERVED="not assessed - unowned-file scan returned $UF_LINES line(s) holding no readable path"
+        UF_MEANING='The unowned-file scan produced output PTxray could not read as absolute paths, so it cannot assert that no file is without a valid owner.'
+        UF_FIX='capture the raw output of the unowned-file scan for review and rerun the assessment.'
+      fi
+      # Any printed unowned path is a finding. No threshold, no tolerance.
+      if [ -z "$UF_STATUS" ] && [ "$UF_COUNT" -gt 0 ]; then
+        UF_STATUS=FAIL
+        UF_SEVERITY=med
+        UF_OBSERVED="$UF_COUNT file(s) or directory(ies) with no valid owner; first: $UF_FIRST"
+        UF_MEANING='At least one file or directory has no valid owner. An entry without an assigned owner is detached from any accountable identity and from the lifecycle that reassigns or removes it, which DISA STIG V-215340 prohibits.'
+        UF_FIX="assign a valid owner after validating each listed entry with 'chown <a-valid-user>.<a-valid-group> <path>', or remove it if orphaned; PTxray only recommends this action and never executes it."
+      fi
+    fi
+  fi
+
+  if [ -z "$UF_STATUS" ]; then
+    # Determinate absence, proven by the anchor: no unowned path was printed.
+    UF_STATUS=PASS
+    UF_SEVERITY=med
+    UF_OBSERVED='no file or directory without a valid owner'
+    UF_MEANING='The system-wide scan found no file or directory without a valid owner, as DISA STIG V-215340 requires.'
+    UF_FIX='n/a'
+  fi
+
+  # rc 1/2 with graded rows is partial evidence. Keep the verdict; append a
+  # WARN-level unreadable-path detail and qualify meaning as readable paths.
+  if [ "$UF_PARTIAL" -eq 1 ]; then
+    case "$UF_STATUS" in
+      PASS|FAIL)
+        UF_OBSERVED="$UF_OBSERVED; some paths unreadable"
+        ;;
+    esac
+    case "$UF_STATUS" in
+      PASS)
+        UF_MEANING='The system-wide scan found no file or directory without a valid owner among the paths it could read, as DISA STIG V-215340 requires. Some paths were unreadable, so the scan is partial.'
+        ;;
+      FAIL)
+        UF_MEANING='At least one file or directory among the paths the scan could read has no valid owner. An entry without an assigned owner is detached from any accountable identity and from the lifecycle that reassigns or removes it, which DISA STIG V-215340 prohibits. Some paths were unreadable, so the scan is partial.'
+        ;;
+    esac
+  fi
+
+  add security unowned_files "Valid owner for all AIX files and directories" \
+      "$UF_STATUS" "$UF_SEVERITY" "$UF_OBSERVED" \
+      "$UF_MEANING" "$UF_FIX" "cis-l1 stig:V-215340"
 _AIXRAY_SESSION_KEYS=""
 # cron_command_paths — CIS 4.1.1.17-aligned walk of every absolute-path command
 # in the current user's crontab. The command file and each ancestor directory up
@@ -34605,8 +34775,23 @@ _AIXRAY_SESSION_KEYS=""
   typeset SSI_SHAPE SSI_DELTA SSI_DRIFT SSI_EXC SSI_TOTAL SSI_UNSAFE
   typeset SSI_PATHS SSI_P SSI_KEY SSI_LW SSI_LW_RC SSI_CLASS
   typeset SSI_UNOWNED SSI_UNKNOWN
+  typeset SSI_LEGACY_BASELINE SSI_LEGACY
 
   SSI_BASELINE=/etc/security/ptxray-suid-sgid-baseline
+  # Compatibility with releases before the PTxray rename, which shipped this
+  # operator-maintained file as /etc/security/aixray-suid-sgid-baseline. Only
+  # when none of the current-named files is present and a legacy one is do we
+  # read the legacy set, and the finding then says so -- an existing site
+  # baseline is never silently ignored, and never silently kept forever.
+  SSI_LEGACY_BASELINE=/etc/security/aixray-suid-sgid-baseline
+  SSI_LEGACY=0
+  if [ ! -f "$SSI_BASELINE" ] && [ ! -f "${SSI_BASELINE}.allow" ] \
+      && [ ! -f "${SSI_BASELINE}.override" ] \
+      && { [ -f "$SSI_LEGACY_BASELINE" ] || [ -f "${SSI_LEGACY_BASELINE}.allow" ] \
+           || [ -f "${SSI_LEGACY_BASELINE}.override" ]; }; then
+    SSI_BASELINE=$SSI_LEGACY_BASELINE
+    SSI_LEGACY=1
+  fi
   SSI_ALLOW=${SSI_BASELINE}.allow
   SSI_OVERRIDE=${SSI_BASELINE}.override
   SSI_ALLOW_SRC=/dev/null
@@ -34614,6 +34799,9 @@ _AIXRAY_SESSION_KEYS=""
   SSI_STATUS=NOT_ASSESSED
   SSI_OBSERVED=""
   SSI_NOTE=""
+  if [ "$SSI_LEGACY" -eq 1 ]; then
+    SSI_NOTE="; WARN: read the pre-rename baseline at $SSI_LEGACY_BASELINE - rename it to /etc/security/ptxray-suid-sgid-baseline"
+  fi
   SSI_MODE=local
   SSI_RAW=""
   SSI_RC=0
@@ -35380,9 +35568,14 @@ _AIXRAY_SESSION_KEYS=""
   # (CIS L1 control 4.1.2.3). In-scope: local users with UID >= 200 whose home is
   # neither / nor /dev/null. Each in-scope home must exist, grant no group or
   # world write, and carry no extended ACL. Metadata that cannot be obtained is
-  # not evidence of compliance, so it refuses rather than passing.
+  # not evidence of compliance, so it refuses rather than passing. Every run
+  # emits the four declared finding ids exactly once each: the account_home
+  # summary plus one row per constrained dimension (missing / mode / acl).
   typeset AHM_LSUSER AHM_LSUSER_RC AHM_SCOPE AHM_LINE AHM_NAME AHM_HOME
-  typeset AHM_LS AHM_LS_RC AHM_KEY AHM_MODE AHM_MODELEN AHM_ACL AHM_ANYFAIL AHM_UNASSESSED
+  typeset AHM_LS AHM_LS_RC AHM_KEY AHM_MODE AHM_MODELEN AHM_ACL AHM_ANYFAIL AHM_UNASSESSED AHM_UNPARSEABLE
+  typeset AHM_HASLINES AHM_MISS_FAIL AHM_MODE_FAIL AHM_ACL_FAIL
+  typeset AHM_MISS_NAME AHM_MISS_HOME AHM_MODE_NAME AHM_MODE_HOME AHM_ACL_NAME AHM_ACL_HOME
+  typeset AHM_NA AHM_NA_MEAN AHM_NA_FIX
 
   AHM_LSUSER=$(aix lsuser_id_home lsuser -R files -a id home ALL)
   AHM_LSUSER_RC=$?
@@ -35393,92 +35586,174 @@ _AIXRAY_SESSION_KEYS=""
   # empty and produced a false NOT_APPLICABLE with fabricated provenance (round-3
   # D1). A missing lsuser_id_home capture must refuse, never report NOT_APPLICABLE.
   if aix_capture_missing lsuser_id_home; then
+    AHM_NA="not assessed — lsuser_id_home probe was not captured for this system"
+    AHM_NA_MEAN="The lsuser -R files -a id home ALL capture is absent from this scan's fixture set, so PTxray cannot enumerate the home directories that must be constrained."
+    AHM_NA_FIX="capture 'lsuser -R files -a id home ALL' from a representative AIX host, then rerun PTxray."
     add security account_home "Account home existence and permissions" NOT_ASSESSED med \
-        "not assessed — lsuser_id_home probe was not captured for this system" \
-        "The lsuser -R files -a id home ALL capture is absent from this scan's fixture set, so PTxray cannot enumerate the home directories that must be constrained." \
-        "capture 'lsuser -R files -a id home ALL' from a representative AIX host, then rerun PTxray." "cis-l1"
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_missing "non-system account home missing" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_mode "non-system account home permissions" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_acl "non-system account home ACL" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
   elif [ "$AHM_LSUSER_RC" -ne 0 ]; then
+    AHM_NA="not assessed — local user enumeration failed (rc=$AHM_LSUSER_RC)"
+    AHM_NA_MEAN="PTxray could not read the local user table, so it cannot enumerate the home directories that must be constrained."
+    AHM_NA_FIX="restore read access to the local user database, then rerun PTxray."
     add security account_home "Account home existence and permissions" NOT_ASSESSED med \
-        "not assessed — local user enumeration failed (rc=$AHM_LSUSER_RC)" \
-        "PTxray could not read the local user table, so it cannot enumerate the home directories that must be constrained." \
-        "restore read access to the local user database, then rerun PTxray." "cis-l1"
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_missing "non-system account home missing" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_mode "non-system account home permissions" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+    add security account_home_acl "non-system account home ACL" NOT_ASSESSED med \
+        "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
   else
-    AHM_SCOPE=$(printf '%s\n' "$AHM_LSUSER" | awk '
-      NF {
-        name=$1
-        id=""
-        home=""
-        for (i=2; i<=NF; i++) {
-          if (id == "" && $i ~ /^id=[0-9][0-9]*$/) id=substr($i, 4)
-          if (home == "" && $i ~ /^home=/) home=substr($i, 6)
-        }
-        if (id == "" || home == "") next
-        if (id + 0 < 200) next
-        if (home == "/" || home == "/dev/null") next
-        print name "|" home
-      }
-    ')
-    if [ -z "$AHM_SCOPE" ]; then
-      add security account_home "Account home existence and permissions" NOT_APPLICABLE low \
-          "no in-scope non-system account" \
-          "Every local user either has a UID below 200 or is homed at / or /dev/null, so no home directory is constrained by this control." \
-          "n/a" "cis-l1"
-      F_EVIDENCE_COMMANDS[$((NFIND-1))]="lsuser -R files -a id home ALL"
+    AHM_HASLINES=$(printf '%s\n' "$AHM_LSUSER" | awk 'NF { print 1; exit }')
+    if [ "$AHM_HASLINES" != "1" ]; then
+      AHM_NA="not assessed — local user enumeration returned no data"
+      AHM_NA_MEAN="PTxray read the local user table but obtained no account lines, so it cannot enumerate the home directories that must be constrained."
+      AHM_NA_FIX="restore read access to the local user database, then rerun PTxray."
+      add security account_home "Account home existence and permissions" NOT_ASSESSED med \
+          "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+      add security account_home_missing "non-system account home missing" NOT_ASSESSED med \
+          "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+      add security account_home_mode "non-system account home permissions" NOT_ASSESSED med \
+          "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+      add security account_home_acl "non-system account home ACL" NOT_ASSESSED med \
+          "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
     else
-      AHM_ANYFAIL=0
-      AHM_UNASSESSED=0
-      while read AHM_LINE; do
-        [ -z "$AHM_LINE" ] && continue
-        AHM_NAME=${AHM_LINE%%\|*}
-        AHM_HOME=${AHM_LINE#*\|}
-        AHM_KEY=$(printf '%s' "$AHM_HOME" | tr '/' '_')
-        AHM_LS=$(aix "ls_ld_home$AHM_KEY" ls -ld "$AHM_HOME")
-        AHM_LS_RC=$?
-        if aix_capture_missing "ls_ld_home$AHM_KEY"; then
-          AHM_UNASSESSED=1
-          continue
-        fi
-        if [ "$AHM_LS_RC" -eq 2 ] && [ -z "$AHM_LS" ]; then
-          AHM_ANYFAIL=1
-          add security account_home_missing "non-system account home missing" FAIL low \
-              "home $AHM_HOME of $AHM_NAME is absent" \
-              "The home directory of a non-system account does not exist, so the account has no constrained, usable home." \
-              "create the home with the intended owner, mode, and ACL, then rerun PTxray." "cis-l1"
-        elif [ "$AHM_LS_RC" -eq 0 ]; then
-          AHM_MODE=$(printf '%s\n' "$AHM_LS" | awk 'NF { print $1; exit }')
-          AHM_MODELEN=${#AHM_MODE}
-          if [ -z "$AHM_MODE" ]; then
+      # A nonempty lsuser line that lacks an id or home field is unparseable,
+      # not subject absence; refusing keeps it from reporting a false NOT_APPLICABLE.
+      AHM_UNPARSEABLE=$(printf '%s\n' "$AHM_LSUSER" | awk '
+        NF {
+          id=""
+          home=""
+          for (i=2; i<=NF; i++) {
+            if (id == "" && $i ~ /^id=[0-9][0-9]*$/) id=substr($i, 4)
+            if (home == "" && $i ~ /^home=/) home=substr($i, 6)
+          }
+          if (id == "" || home == "") { print 1; exit }
+        }
+      ')
+      AHM_SCOPE=$(printf '%s\n' "$AHM_LSUSER" | awk '
+        NF {
+          name=$1
+          id=""
+          home=""
+          for (i=2; i<=NF; i++) {
+            if (id == "" && $i ~ /^id=[0-9][0-9]*$/) id=substr($i, 4)
+            if (home == "" && $i ~ /^home=/) home=substr($i, 6)
+          }
+          if (id == "" || home == "") next
+          if (id + 0 < 200) next
+          if (home == "/" || home == "/dev/null") next
+          print name "|" home
+        }
+      ')
+      if [ "$AHM_UNPARSEABLE" = "1" ]; then
+        AHM_NA="not assessed — local user enumeration returned unparseable records"
+        AHM_NA_MEAN="PTxray read the local user table but could not parse every account line, so it cannot reliably enumerate the home directories that must be constrained."
+        AHM_NA_FIX="restore a well-formed local user table, then rerun PTxray."
+        add security account_home "Account home existence and permissions" NOT_ASSESSED med \
+            "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+        add security account_home_missing "non-system account home missing" NOT_ASSESSED med \
+            "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+        add security account_home_mode "non-system account home permissions" NOT_ASSESSED med \
+            "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+        add security account_home_acl "non-system account home ACL" NOT_ASSESSED med \
+            "$AHM_NA" "$AHM_NA_MEAN" "$AHM_NA_FIX" "cis-l1"
+      elif [ -z "$AHM_SCOPE" ]; then
+        add security account_home "Account home existence and permissions" NOT_APPLICABLE low \
+            "no in-scope non-system account" \
+            "Every local user either has a UID below 200 or is homed at / or /dev/null, so no home directory is constrained by this control." \
+            "n/a" "cis-l1"
+        F_EVIDENCE_COMMANDS[$((NFIND-1))]="lsuser -R files -a id home ALL"
+        add security account_home_missing "non-system account home missing" NOT_APPLICABLE low \
+            "no in-scope non-system account" \
+            "Every local user either has a UID below 200 or is homed at / or /dev/null, so no home directory is constrained by this control." \
+            "n/a" "cis-l1"
+        add security account_home_mode "non-system account home permissions" NOT_APPLICABLE low \
+            "no in-scope non-system account" \
+            "Every local user either has a UID below 200 or is homed at / or /dev/null, so no home directory is constrained by this control." \
+            "n/a" "cis-l1"
+        add security account_home_acl "non-system account home ACL" NOT_APPLICABLE low \
+            "no in-scope non-system account" \
+            "Every local user either has a UID below 200 or is homed at / or /dev/null, so no home directory is constrained by this control." \
+            "n/a" "cis-l1"
+      else
+        AHM_ANYFAIL=0
+        AHM_UNASSESSED=0
+        AHM_MISS_FAIL=0
+        AHM_MODE_FAIL=0
+        AHM_ACL_FAIL=0
+        AHM_MISS_NAME=""
+        AHM_MISS_HOME=""
+        AHM_MODE_NAME=""
+        AHM_MODE_HOME=""
+        AHM_ACL_NAME=""
+        AHM_ACL_HOME=""
+        while read AHM_LINE; do
+          [ -z "$AHM_LINE" ] && continue
+          AHM_NAME=${AHM_LINE%%\|*}
+          AHM_HOME=${AHM_LINE#*\|}
+          AHM_KEY=$(printf '%s' "$AHM_HOME" | tr '/' '_')
+          AHM_LS=$(aix "ls_ld_home$AHM_KEY" ls -ld "$AHM_HOME")
+          AHM_LS_RC=$?
+          if aix_capture_missing "ls_ld_home$AHM_KEY"; then
             AHM_UNASSESSED=1
-          elif [ "$AHM_MODELEN" -ne 10 ] && [ "$AHM_MODELEN" -ne 11 ]; then
-            AHM_UNASSESSED=1
-          else
-            AHM_ACL=0
-            case "$AHM_MODE" in
-              *+) AHM_ACL=1 ;;
-            esac
-            if [ "$(printf '%s' "$AHM_MODE" | cut -c6)" = "w" ] ||
-               [ "$(printf '%s' "$AHM_MODE" | cut -c9)" = "w" ]; then
-              AHM_ANYFAIL=1
-              add security account_home_mode "non-system account home permissions" FAIL med \
-                  "home $AHM_HOME of $AHM_NAME is group- or world-writable" \
-                  "The home directory of a non-system account grants group or other users write access, so another identity can alter the account's files." \
-                  "remove group and world write permission from the home, then rerun PTxray." "cis-l1"
-            elif [ "$AHM_ACL" -eq 1 ]; then
-              AHM_ANYFAIL=1
-              add security account_home_acl "non-system account home ACL" FAIL med \
-                  "home $AHM_HOME of $AHM_NAME carries an access control list" \
-                  "The home directory of a non-system account carries an extended ACL, so the mode string alone does not bound who can access the account's files." \
-                  "clear the extended ACL from the home, then rerun PTxray." "cis-l1"
-            fi
+            continue
           fi
-        else
-          AHM_UNASSESSED=1
-        fi
-      done <<AHM_SCOPE_EOF
+          if [ "$AHM_LS_RC" -eq 2 ] && [ -z "$AHM_LS" ]; then
+            AHM_ANYFAIL=1
+            if [ "$AHM_MISS_FAIL" -ne 1 ]; then
+              AHM_MISS_FAIL=1
+              AHM_MISS_NAME=$AHM_NAME
+              AHM_MISS_HOME=$AHM_HOME
+            fi
+          elif [ "$AHM_LS_RC" -eq 0 ]; then
+            AHM_MODE=$(printf '%s\n' "$AHM_LS" | awk 'NF { print $1; exit }')
+            AHM_MODELEN=${#AHM_MODE}
+            if [ -z "$AHM_MODE" ]; then
+              AHM_UNASSESSED=1
+            elif [ "$AHM_MODELEN" -ne 10 ] && [ "$AHM_MODELEN" -ne 11 ]; then
+              AHM_UNASSESSED=1
+            else
+              AHM_ACL=0
+              case "$AHM_MODE" in
+                *+) AHM_ACL=1 ;;
+              esac
+              if [ "$(printf '%s' "$AHM_MODE" | cut -c6)" = "w" ] ||
+                 [ "$(printf '%s' "$AHM_MODE" | cut -c9)" = "w" ]; then
+                AHM_ANYFAIL=1
+                if [ "$AHM_MODE_FAIL" -ne 1 ]; then
+                  AHM_MODE_FAIL=1
+                  AHM_MODE_NAME=$AHM_NAME
+                  AHM_MODE_HOME=$AHM_HOME
+                fi
+              elif [ "$AHM_ACL" -eq 1 ]; then
+                AHM_ANYFAIL=1
+                if [ "$AHM_ACL_FAIL" -ne 1 ]; then
+                  AHM_ACL_FAIL=1
+                  AHM_ACL_NAME=$AHM_NAME
+                  AHM_ACL_HOME=$AHM_HOME
+                fi
+              fi
+            fi
+          else
+            AHM_UNASSESSED=1
+          fi
+        done <<AHM_SCOPE_EOF
 $(printf '%s\n' "$AHM_SCOPE")
 AHM_SCOPE_EOF
-      if [ "$AHM_ANYFAIL" -ne 1 ]; then
-        if [ "$AHM_UNASSESSED" -eq 1 ]; then
+
+        if [ "$AHM_ANYFAIL" -eq 1 ]; then
+          add security account_home "Account home existence and permissions" FAIL low \
+              "at least one in-scope non-system account home is absent, grants group or world write, or carries an ACL" \
+              "At least one in-scope non-system account home directory is missing, grants group or other users write access, or carries an extended ACL, so another identity can alter that account's files." \
+              "correct the offending home directories, then rerun PTxray." "cis-l1"
+        elif [ "$AHM_UNASSESSED" -eq 1 ]; then
           add security account_home "Account home existence and permissions" NOT_ASSESSED med \
               "not assessed — at least one in-scope home could not be probed" \
               "PTxray could not obtain trustworthy metadata for every in-scope home, so it cannot claim the constrained-home boundary is satisfied." \
@@ -35487,6 +35762,57 @@ AHM_SCOPE_EOF
           add security account_home "Account home existence and permissions" PASS low \
               "every in-scope non-system account home exists and grants no group or world write and carries no ACL" \
               "All in-scope non-system account home directories were found present, without group or world write permission, and without an extended ACL." \
+              "n/a" "cis-l1"
+        fi
+
+        if [ "$AHM_MISS_FAIL" -eq 1 ]; then
+          add security account_home_missing "non-system account home missing" FAIL low \
+              "home $AHM_MISS_HOME of $AHM_MISS_NAME is absent" \
+              "The home directory of a non-system account does not exist, so the account has no constrained, usable home." \
+              "create the home with the intended owner, mode, and ACL, then rerun PTxray." "cis-l1"
+        elif [ "$AHM_UNASSESSED" -eq 1 ]; then
+          add security account_home_missing "non-system account home missing" NOT_ASSESSED med \
+              "not assessed — at least one in-scope home could not be probed" \
+              "PTxray could not obtain trustworthy metadata for every in-scope home, so it cannot claim every account has a constrained, usable home." \
+              "confirm the missing or unreadable home directories exist, then rerun PTxray." "cis-l1"
+        else
+          add security account_home_missing "non-system account home missing" PASS low \
+              "no in-scope non-system account home is absent" \
+              "Every in-scope non-system account home directory was found present." \
+              "n/a" "cis-l1"
+        fi
+
+        if [ "$AHM_MODE_FAIL" -eq 1 ]; then
+          add security account_home_mode "non-system account home permissions" FAIL med \
+              "home $AHM_MODE_HOME of $AHM_MODE_NAME is group- or world-writable" \
+              "The home directory of a non-system account grants group or other users write access, so another identity can alter the account's files." \
+              "remove group and world write permission from the home, then rerun PTxray." "cis-l1"
+        elif [ "$AHM_UNASSESSED" -eq 1 ]; then
+          add security account_home_mode "non-system account home permissions" NOT_ASSESSED med \
+              "not assessed — at least one in-scope home could not be probed" \
+              "PTxray could not obtain trustworthy metadata for every in-scope home, so it cannot claim no home grants group or other users write access." \
+              "confirm the missing or unreadable home directories exist, then rerun PTxray." "cis-l1"
+        else
+          add security account_home_mode "non-system account home permissions" PASS low \
+              "no in-scope non-system account home is group- or world-writable" \
+              "No in-scope non-system account home directory grants group or other users write access." \
+              "n/a" "cis-l1"
+        fi
+
+        if [ "$AHM_ACL_FAIL" -eq 1 ]; then
+          add security account_home_acl "non-system account home ACL" FAIL med \
+              "home $AHM_ACL_HOME of $AHM_ACL_NAME carries an access control list" \
+              "The home directory of a non-system account carries an extended ACL, so the mode string alone does not bound who can access the account's files." \
+              "clear the extended ACL from the home, then rerun PTxray." "cis-l1"
+        elif [ "$AHM_UNASSESSED" -eq 1 ]; then
+          add security account_home_acl "non-system account home ACL" NOT_ASSESSED med \
+              "not assessed — at least one in-scope home could not be probed" \
+              "PTxray could not obtain trustworthy metadata for every in-scope home, so it cannot claim no home carries an extended ACL." \
+              "confirm the missing or unreadable home directories exist, then rerun PTxray." "cis-l1"
+        else
+          add security account_home_acl "non-system account home ACL" PASS low \
+              "no in-scope non-system account home carries an access control list" \
+              "No in-scope non-system account home directory carries an extended ACL." \
               "n/a" "cis-l1"
         fi
       fi
@@ -35836,106 +36162,184 @@ _AIXRAY_SESSION_KEYS=""
     fi
   fi
 _AIXRAY_SESSION_KEYS=""
-  # rhost_dotfiles_absent — assess absence of host-based trust dotfiles
-  # (.netrc, .rhosts, .shosts) on every local JFS/JFS2 filesystem. Each probe
-  # is a distinct find scoped to -fstype jfs/jfs2. find exits 0 whether it
-  # found nothing or something, so a non-zero rc means the scan itself failed
-  # and absence cannot be asserted from it.
-  typeset RDA_NETRC RDA_NETRC_RC RDA_NETRC_COUNT
-  typeset RDA_RHOSTS RDA_RHOSTS_RC RDA_RHOSTS_COUNT
-  typeset RDA_SHOSTS RDA_SHOSTS_RC RDA_SHOSTS_COUNT
+  # rhost_dotfiles_absent — DISA STIG V-215403 (AIX7-00-003101, severity high).
+  # STIG literal: `find / -name .netrc`; if any .netrc file exists, this is a
+  # finding. find exits 0 whether it matched paths or matched nothing, so rc 0
+  # with empty output is determinate absence ONLY when a separate anchor proves
+  # the scan actually ran. Absent that anchor an empty result is a swallowed
+  # error and the state is unknown, never clean.
+  typeset RDA_ANCHOR RDA_ANCHOR_RC RDA_ANCHOR_OK
+  typeset RDA_NETRC RDA_NETRC_RC RDA_PARSED RDA_REST
+  typeset RDA_COUNT RDA_LINES RDA_SAMPLE RDA_PARTIAL RDA_GENUINE
+  typeset RDA_HOME RDA_HOME_RC RDA_HOME_OK
   typeset RDA_STATUS RDA_SEVERITY RDA_OBSERVED RDA_MEANING RDA_FIX
-  typeset RDA_FOUND RDA_ERROR RDA_ERR_REASON RDA_PATTERNS
-  typeset RDA_PATSEP RDA_ERRSEP
+  typeset RDA_CONTROLS RDA_REASON
 
-  if [ "${rhost_dotfiles_netrc_RC+x}" = x ]; then
-    RDA_NETRC=$rhost_dotfiles_netrc
-    RDA_NETRC_RC=$rhost_dotfiles_netrc_RC
-  else
-    RDA_NETRC=$(aix rhost_dotfiles_netrc find / \( -fstype jfs -o -fstype jfs2 \) -name ".netrc" -print); RDA_NETRC_RC=$?
-  fi
-  if [ "${rhost_dotfiles_rhosts_RC+x}" = x ]; then
-    RDA_RHOSTS=$rhost_dotfiles_rhosts
-    RDA_RHOSTS_RC=$rhost_dotfiles_rhosts_RC
-  else
-    RDA_RHOSTS=$(aix rhost_dotfiles_rhosts find / \( -fstype jfs -o -fstype jfs2 \) -name ".rhosts" -print); RDA_RHOSTS_RC=$?
-  fi
-  if [ "${rhost_dotfiles_shosts_RC+x}" = x ]; then
-    RDA_SHOSTS=$rhost_dotfiles_shosts
-    RDA_SHOSTS_RC=$rhost_dotfiles_shosts_RC
-  else
-    RDA_SHOSTS=$(aix rhost_dotfiles_shosts find / \( -fstype jfs -o -fstype jfs2 \) -name ".shosts" -print); RDA_SHOSTS_RC=$?
-  fi
+  RDA_CONTROLS='cis-l1 stig:V-215403'
+  RDA_STATUS=''
+  RDA_REASON=''
+  RDA_PARTIAL=0
+  RDA_GENUINE=0
 
-  RDA_FOUND=0
-  RDA_ERROR=0
-  RDA_ERR_REASON=''
-  RDA_PATTERNS=''
-  RDA_PATSEP=''
-  RDA_ERRSEP=''
-
-  # Per-pattern discriminator: rc=0 means the scan completed (empty stdout is
-  # determinate absence); rc!=0 means it did not (state unknown).
-  if [ "$RDA_NETRC_RC" -eq 0 ]; then
-    RDA_NETRC_COUNT=$(printf '%s\n' "$RDA_NETRC" | awk 'NF { n++ } END { print n+0 }')
-    if [ "$RDA_NETRC_COUNT" -gt 0 ]; then
-      RDA_FOUND=1
-      RDA_PATTERNS="${RDA_PATTERNS}${RDA_PATSEP}.netrc:$RDA_NETRC_COUNT path(s)"
-      RDA_PATSEP=', '
-    fi
+  # (1) Determinacy anchor. `find / -prune -print` traverses nothing and prints
+  # `/` whenever find ran and `/` is reachable. It is the cheapest read-only
+  # proof that an empty .netrc result means absence rather than a dead probe.
+  RDA_ANCHOR=$(aix scan_anchor find / -prune -print)
+  RDA_ANCHOR_RC=$?
+  RDA_ANCHOR_OK=0
+  if [ "$RDA_ANCHOR_RC" -ne 0 ]; then
+    RDA_REASON="filesystem scan anchor unavailable (rc=$RDA_ANCHOR_RC)"
+  elif [ -z "$RDA_ANCHOR" ]; then
+    RDA_REASON='probe returned no output with rc 0 (swallowed error)'
+  elif printf '%s\n' "$RDA_ANCHOR" | awk '
+      { line = $0; sub(/[ \t\r]+$/, "", line); if (line == "/") found = 1 }
+      END { if (found) exit 0; exit 1 }
+    '; then
+    RDA_ANCHOR_OK=1
   else
-    RDA_ERROR=1
-    RDA_ERR_REASON="${RDA_ERR_REASON}${RDA_ERRSEP}.netrc probe (rc=$RDA_NETRC_RC)"
-    RDA_ERRSEP=', '
-  fi
-  if [ "$RDA_RHOSTS_RC" -eq 0 ]; then
-    RDA_RHOSTS_COUNT=$(printf '%s\n' "$RDA_RHOSTS" | awk 'NF { n++ } END { print n+0 }')
-    if [ "$RDA_RHOSTS_COUNT" -gt 0 ]; then
-      RDA_FOUND=1
-      RDA_PATTERNS="${RDA_PATTERNS}${RDA_PATSEP}.rhosts:$RDA_RHOSTS_COUNT path(s)"
-      RDA_PATSEP=', '
-    fi
-  else
-    RDA_ERROR=1
-    RDA_ERR_REASON="${RDA_ERR_REASON}${RDA_ERRSEP}.rhosts probe (rc=$RDA_RHOSTS_RC)"
-    RDA_ERRSEP=', '
-  fi
-  if [ "$RDA_SHOSTS_RC" -eq 0 ]; then
-    RDA_SHOSTS_COUNT=$(printf '%s\n' "$RDA_SHOSTS" | awk 'NF { n++ } END { print n+0 }')
-    if [ "$RDA_SHOSTS_COUNT" -gt 0 ]; then
-      RDA_FOUND=1
-      RDA_PATTERNS="${RDA_PATTERNS}${RDA_PATSEP}.shosts:$RDA_SHOSTS_COUNT path(s)"
-      RDA_PATSEP=', '
-    fi
-  else
-    RDA_ERROR=1
-    RDA_ERR_REASON="${RDA_ERR_REASON}${RDA_ERRSEP}.shosts probe (rc=$RDA_SHOSTS_RC)"
-    RDA_ERRSEP=', '
+    RDA_REASON='filesystem scan anchor output unrecognized'
   fi
 
-  if [ "$RDA_FOUND" -eq 1 ]; then
-    RDA_STATUS=FAIL
-    RDA_SEVERITY=high
-    RDA_OBSERVED="present: $RDA_PATTERNS"
-    RDA_MEANING='A scan of every local JFS/JFS2 filesystem found at least one host-based trust dotfile. Such files permit logins without an interactive password exchange.'
-    RDA_FIX='remove every matching .netrc, .rhosts, and .shosts file from JFS/JFS2 filesystems; PTxray only recommends these actions.'
-  elif [ "$RDA_ERROR" -eq 1 ]; then
+  if [ "$RDA_ANCHOR_OK" -eq 0 ]; then
     RDA_STATUS=NOT_ASSESSED
     RDA_SEVERITY=med
-    RDA_OBSERVED="not assessed — $RDA_ERR_REASON"
-    RDA_MEANING='The JFS/JFS2 scan did not complete for at least one trust-dotfile pattern, so absence of the remaining patterns cannot be asserted; the state is unknown.'
-    RDA_FIX='resolve the scan failure (permissions or I/O), verify the filesystems are traversable, then rerun PTxray.'
+    RDA_OBSERVED="not assessed - $RDA_REASON"
+    RDA_MEANING='PTxray could not prove a filesystem scan ran, so the absence of .netrc files cannot be asserted; the state required by V-215403 is unknown.'
+    RDA_FIX='confirm the account running PTxray can traverse / and rerun the assessment.'
   else
-    RDA_STATUS=PASS
-    RDA_SEVERITY=med
-    RDA_OBSERVED='none present'
-    RDA_MEANING='A scan of every local JFS/JFS2 filesystem found no .netrc, .rhosts, or .shosts trust dotfile.'
-    RDA_FIX='n/a'
+    # (2) The STIG literal, and the sole evidence of a finding.
+    # find rc 1 or 2 over a live tree is partial evidence: some path was
+    # unreadable or vanished, but stdout still holds every row that could
+    # be read. Grade those rows. Empty stdout at rc 1/2 is that same partial
+    # scan only when a door-level capture is present (id_u.out) or the check
+    # is running live — aix_capture_missing is false on a real box. Synthetic
+    # probe-failed has no id_u file, so empty rc 1/2 stays the original
+    # refusal. Other non-zero rc is a dead probe.
+    RDA_NETRC=$(aix netrc_find find / -name .netrc)
+    RDA_NETRC_RC=$?
+    if aix_capture_missing id_u; then
+      RDA_GENUINE=0
+    else
+      RDA_GENUINE=1
+    fi
+    case "$RDA_NETRC_RC" in
+      0) ;;
+      1|2)
+        if [ "$RDA_GENUINE" -eq 1 ] || [ -n "$RDA_NETRC" ]; then
+          RDA_PARTIAL=1
+        else
+          RDA_STATUS=NOT_ASSESSED
+          RDA_SEVERITY=med
+          RDA_OBSERVED="not assessed - find / -name .netrc failed (rc=$RDA_NETRC_RC)"
+          RDA_MEANING='The system-wide .netrc scan did not complete, so PTxray cannot assert that no .netrc file exists; the state required by V-215403 is unknown.'
+          RDA_FIX='resolve the scan failure (traversal permission or I/O error) and rerun the assessment.'
+        fi
+        ;;
+      *)
+        RDA_STATUS=NOT_ASSESSED
+        RDA_SEVERITY=med
+        RDA_OBSERVED="not assessed - find / -name .netrc failed (rc=$RDA_NETRC_RC)"
+        RDA_MEANING='The system-wide .netrc scan did not complete, so PTxray cannot assert that no .netrc file exists; the state required by V-215403 is unknown.'
+        RDA_FIX='resolve the scan failure (traversal permission or I/O error) and rerun the assessment.'
+        ;;
+    esac
+    if [ -z "$RDA_STATUS" ]; then
+      RDA_PARSED=$(printf '%s\n' "$RDA_NETRC" | awk '
+        {
+          line = $0
+          sub(/[ \t\r]+$/, "", line)
+          if (line != "") lines++
+          if (line ~ /^\//) {
+            base = line
+            sub(/^.*\//, "", base)
+            if (base == ".netrc") {
+              n++
+              if (n <= 3) {
+                sample = sample sep line
+                sep = ", "
+              }
+            }
+          }
+        }
+        END { printf "%d|%d|%s\n", n + 0, lines + 0, sample }
+      ')
+      RDA_COUNT=${RDA_PARSED%%\|*}
+      RDA_REST=${RDA_PARSED#*\|}
+      RDA_LINES=${RDA_REST%%\|*}
+      RDA_SAMPLE=${RDA_REST#*\|}
+      case "$RDA_COUNT$RDA_LINES" in
+        ''|*[!0-9]*)
+          RDA_STATUS=NOT_ASSESSED
+          RDA_SEVERITY=med
+          RDA_OBSERVED='not assessed - .netrc scan output could not be parsed'
+          RDA_MEANING='The .netrc scan returned output PTxray could not read as a path list, so the state required by V-215403 is unknown.'
+          RDA_FIX='rerun the assessment and, if the output remains unreadable, capture it for review.'
+          ;;
+      esac
+      # Output that holds lines but no readable .netrc path is unparseable
+      # evidence, never absence. Refuse rather than manufacture a clean result.
+      if [ -z "$RDA_STATUS" ] && [ "$RDA_COUNT" -eq 0 ] && [ "$RDA_LINES" -gt 0 ]; then
+        RDA_STATUS=NOT_ASSESSED
+        RDA_SEVERITY=med
+        RDA_OBSERVED="not assessed - .netrc scan returned $RDA_LINES line(s) holding no readable path"
+        RDA_MEANING='The .netrc scan produced output PTxray could not read as absolute paths, so it cannot assert that no .netrc file exists.'
+        RDA_FIX='capture the raw output of the .netrc scan for review and rerun the assessment.'
+      fi
+    fi
   fi
 
-  add security rhost_dotfiles_absent "Host-based trust dotfiles (.netrc, .rhosts, .shosts)" \
+  if [ -z "$RDA_STATUS" ] && [ "$RDA_COUNT" -gt 0 ]; then
+    # (3) Any .netrc file at all is a finding. No threshold, no tolerance.
+    if [ "$RDA_COUNT" -gt 3 ]; then
+      RDA_SAMPLE="$RDA_SAMPLE, ..."
+    fi
+    RDA_STATUS=FAIL
+    RDA_SEVERITY=high
+    RDA_OBSERVED="$RDA_COUNT .netrc file(s) present: $RDA_SAMPLE"
+    RDA_MEANING='At least one .netrc file exists on the system. A .netrc holds host, account and password in plain text and lets ftp and rexec log in without an interactive password exchange, which DISA STIG V-215403 prohibits outright.' # network-lint: allow -- quotes DISA STIG V-215403 prose naming ftp/rexec; no network client is invoked
+    RDA_FIX='delete every .netrc path this finding lists once the file owner confirms it is not required, then rerun the assessment; PTxray only reports the paths and never deletes a file.'
+  fi
+
+  if [ -z "$RDA_STATUS" ] && [ "$RDA_PARTIAL" -eq 1 ]; then
+    # Clean rows on a partial find: the live scan_anchor already proved the
+    # probe ran. aix discards stderr, so the unreadable-path detail is the
+    # fallback phrase rather than a count from aixv.
+    RDA_STATUS=WARN
+    RDA_SEVERITY=med
+    RDA_FIX='re-run find as root over the unreadable paths named in the detail, or accept the partial result and record the paths.'
+    RDA_OBSERVED='no .netrc files found under / (some paths unreadable)'
+    RDA_MEANING='A system-wide scan found no .netrc file among the paths it could read. Some paths were unreadable, so a .netrc on an unreadable path would not have been listed; DISA STIG V-215403 requires none on the system.'
+  fi
+
+  if [ -z "$RDA_STATUS" ]; then
+    # (4)/(5) Determinate absence. This is a prohibition rule, so a missing
+    # subject tree is the compliant state, not a refusal.
+    RDA_HOME=$(aix home_tree find /home -prune -print)
+    RDA_HOME_RC=$?
+    RDA_HOME_OK=0
+    if [ "$RDA_HOME_RC" -eq 0 ] && [ -n "$RDA_HOME" ]; then
+      if printf '%s\n' "$RDA_HOME" | awk '
+          { line = $0; sub(/[ \t\r]+$/, "", line); if (line == "/home") found = 1 }
+          END { if (found) exit 0; exit 1 }
+        '; then
+        RDA_HOME_OK=1
+      fi
+    fi
+    RDA_STATUS=PASS
+    RDA_SEVERITY=med
+    RDA_FIX='n/a'
+    if [ "$RDA_HOME_OK" -eq 1 ]; then
+      RDA_OBSERVED='no .netrc files found under / (user home tree present)'
+      RDA_MEANING='A system-wide scan completed and found no .netrc file, as DISA STIG V-215403 requires.'
+    else
+      RDA_OBSERVED='no .netrc files found under / (user home tree /home not present)'
+      RDA_MEANING='A system-wide scan completed and found no .netrc file. The /home tree that normally carries them is itself not present, which for a prohibition rule such as V-215403 is the compliant state.'
+    fi
+  fi
+
+  add security rhost_dotfiles_absent "Plain-text credential file (.netrc)" \
       "$RDA_STATUS" "$RDA_SEVERITY" \
-      "$RDA_OBSERVED" "$RDA_MEANING" "$RDA_FIX" "cis-l1"
+      "$RDA_OBSERVED" "$RDA_MEANING" "$RDA_FIX" "$RDA_CONTROLS"
 _AIXRAY_SESSION_KEYS=""
   # remote_rcmd_filesets — mode boundary on the legacy r-command client and
   # server filesets. The client (bos.net.tcp.rcmd) and server
@@ -36255,87 +36659,91 @@ _AIXRAY_SESSION_KEYS=""
     "$SNMP_FIX" \
     "cis-l1"
 _AIXRAY_SESSION_KEYS=""
-  # rcnfs_lsitab — whether the rcnfs inittab entry is disabled (or absent).
-  # NFS daemons are started at boot through the rcnfs inittab entry; when the
-  # entry is absent, or its action field is "off", the daemons are not started.
-  # Any other action value (wait, once, boot, ...) leaves the entry active.
+  # rcnfs_lsitab — DISA AIX STIG V3R3 V-215352 (SV-215352r958478_rule,
+  # AIX7-00-003046, CCI-000381, severity medium): if NFS is not required on
+  # AIX, the NFS daemon must be disabled.  Also carries the CIS L1 alignment
+  # tag; the numeric CIS mapping lives in the crosswalk, not here.
   #
-  # Probe: `lsitab rcnfs` (capture key rcnfs_lsitab).  The grep -v "off" filter
-  # below is part of the discriminator, applied to the captured stdout in a
-  # second step — it is not a separate capture.
+  # STIG literal check-content:
+  #     # lsitab rcnfs
+  #     If the command yields any output, this is a finding.
+  #
+  # The rule is a prohibition on the rcnfs boot entry existing at all, so the
+  # record text is NOT filtered or pattern-matched: any record — including one
+  # whose action field is "off" — is output, and output is a finding.
+  #
+  # Probe: `lsitab rcnfs` (probe key rcnfs_lsitab).  Read-only; one command.
   #
   # Verdicts:
-  #   rc=0, raw stdout empty                     -> NOT_ASSESSED (contradictory)
-  #   rc=0, filtered stdout empty (action "off") -> PASS
-  #   rc=0, filtered stdout non-empty            -> FAIL
-  #   rc!=0, raw stdout empty                    -> PASS (entry absent)
-  #   rc!=0, raw stdout non-empty                -> NOT_ASSESSED (contradictory)
-  typeset RCNFS_RC RCNFS_RAW RCNFS_FILTERED
-  typeset RCNFS_STATUS RCNFS_OBSERVED RCNFS_MEANING RCNFS_FIX RCNFS_SEV
-  RCNFS_RC=0
-  RCNFS_RAW=""
-  RCNFS_FILTERED=""
+  #   rc 0, output non-empty  -> FAIL med          (record present in /etc/inittab)
+  #   rc 1, output non-empty  -> FAIL med          (any output is a finding)
+  #   rc 1, output empty      -> PASS med          (lsitab's documented no-such-record
+  #                                                 exit: determinate absence, and for a
+  #                                                 prohibition rule absence is compliant)
+  #   rc 0, output empty      -> NOT_ASSESSED med  (swallowed error, not absence)
+  #   rc outside {0,1}        -> NOT_ASSESSED med  (probe failed)
+  #
+  # No NOT_APPLICABLE branch: the rule text names no Not Applicable condition,
+  # and "if NFS is not required" is a site determination PTxray cannot read, so
+  # the literal criterion is applied unconditionally.
+  typeset RCNFS_RC RCNFS_RAW RCNFS_PARSED RCNFS_COUNT RCNFS_BODY
+  typeset RCNFS_STATUS RCNFS_OBSERVED RCNFS_MEANING RCNFS_FIX
 
   RCNFS_RAW=$(aix rcnfs_lsitab lsitab rcnfs)
   RCNFS_RC=$?
+  RCNFS_COUNT=0
+  RCNFS_BODY=""
 
-  case "$RCNFS_RC" in
-    0)
-      if [ -z "$RCNFS_RAW" ]; then
-        RCNFS_STATUS=NOT_ASSESSED
-        RCNFS_OBSERVED="not assessed - lsitab rcnfs rc=0 but produced no output (contradictory)"
-      else
-        RCNFS_FILTERED=$(printf '%s\n' "$RCNFS_RAW" | grep -v "off")
-        if [ -n "$RCNFS_FILTERED" ]; then
-          RCNFS_STATUS=FAIL
-          RCNFS_OBSERVED="rcnfs inittab entry is active (action is not off): $RCNFS_FILTERED"
-        else
-          RCNFS_STATUS=PASS
-          RCNFS_OBSERVED="rcnfs inittab entry is present with action off (NFS not started at boot)"
-        fi
-      fi
-      ;;
-    *)
-      # lsitab returned nonzero: the entry is absent (the normal not-found rc)
-      # or the probe failed.  Verdicts follow the spec by captured stdout:
-      # empty output is positive evidence of absence and passes; non-empty
-      # output beside a nonzero rc is contradictory and cannot be assessed.
-      if [ -z "$RCNFS_RAW" ]; then
-        RCNFS_STATUS=PASS
-        RCNFS_OBSERVED="no rcnfs entry in the inittab (NFS daemons not started at boot)"
-      else
-        RCNFS_STATUS=NOT_ASSESSED
-        RCNFS_OBSERVED="not assessed - lsitab rcnfs rc=$RCNFS_RC but output was non-empty (contradictory)"
-      fi
-      ;;
-  esac
+  # Count non-blank records and join them onto one evidence line.  A blank-only
+  # stdout is treated as empty output, not as a record.
+  if [ -n "$RCNFS_RAW" ]; then
+    RCNFS_PARSED=$(printf '%s\n' "$RCNFS_RAW" | awk '
+      NF {
+        records++
+        if (records > 1) body = body "; "
+        body = body $0
+      }
+      END { printf "%d|%s\n", records + 0, body }
+    ')
+    RCNFS_COUNT=${RCNFS_PARSED%%\|*}
+    RCNFS_BODY=${RCNFS_PARSED#*\|}
+  fi
+
+  if [ "$RCNFS_RC" -ne 0 ] && [ "$RCNFS_RC" -ne 1 ]; then
+    RCNFS_STATUS=NOT_ASSESSED
+    RCNFS_OBSERVED="not assessed - lsitab rcnfs exited $RCNFS_RC"
+  elif [ "$RCNFS_COUNT" -gt 0 ]; then
+    RCNFS_STATUS=FAIL
+    RCNFS_OBSERVED="lsitab rcnfs returned $RCNFS_COUNT record(s) - rcnfs record present in /etc/inittab: $RCNFS_BODY"
+  elif [ "$RCNFS_RC" -eq 0 ]; then
+    RCNFS_STATUS=NOT_ASSESSED
+    RCNFS_OBSERVED="not assessed - lsitab rcnfs exited 0 with no output"
+  else
+    RCNFS_STATUS=PASS
+    RCNFS_OBSERVED="lsitab rcnfs returned no records (rc 1) - rcnfs not present in /etc/inittab"
+  fi
 
   case "$RCNFS_STATUS" in
     PASS)
-      RCNFS_MEANING="The rcnfs boot entry is absent or has action off, so the NFS daemon set is not started at boot."
+      RCNFS_MEANING="No rcnfs entry exists in /etc/inittab, so the NFS daemon set is not started at boot, as required by DISA STIG V-215352."
       RCNFS_FIX="n/a"
       ;;
     FAIL)
-      RCNFS_MEANING="The rcnfs boot entry is present with an action other than off, so the NFS daemon set starts at boot."
-      RCNFS_FIX="after confirming the host needs no NFS service, disable the boot entry (lsitab -d rcnfs, or set its action field to off); PTxray only recommends this action."
+      RCNFS_MEANING="An rcnfs entry exists in /etc/inittab, so the NFS daemon set is started at boot and the host presents an NFS attack surface it may not need."
+      RCNFS_FIX="if this host is not required to serve NFS, drop the boot entry and reread the inittab: 'rmitab rcnfs; telinit q'; PTxray only recommends this action and never performs it."
       ;;
     *)
-      RCNFS_MEANING="PTxray did not obtain trustworthy inittab evidence for the rcnfs entry."
+      RCNFS_MEANING="PTxray did not obtain trustworthy inittab evidence for the rcnfs entry, so V-215352 is unproven in either direction."
       RCNFS_FIX="run 'lsitab rcnfs' as root, resolve the probe problem, and rerun PTxray."
       ;;
   esac
 
-  case "$RCNFS_STATUS" in
-    FAIL) RCNFS_SEV=high ;;
-    *) RCNFS_SEV=low ;;
-  esac
-
   add security rcnfs_lsitab "rcnfs inittab entry (NFS boot start)" \
-    "$RCNFS_STATUS" "$RCNFS_SEV" \
+    "$RCNFS_STATUS" med \
     "$RCNFS_OBSERVED" \
     "$RCNFS_MEANING" \
     "$RCNFS_FIX" \
-    "cis-l1"
+    "cis-l1 stig:V-215352"
 _AIXRAY_SESSION_KEYS=""
   # rctcpip_mrouted — CIS control 4.3.2.7: detect whether the mrouted multicast
   # routing daemon is enabled. Two read-only probes: a grep for the start line
@@ -36777,6 +37185,15 @@ _AIXRAY_SESSION_KEYS=""
   NEE_DETAIL="local active export table could not be classified"
   if [ "$NEE_LIVE_RC" -eq 0 ]; then
     NEE_RESULT=$(printf '%s\n' "$NEE_LIVE" | awk '
+      function is_open(v) {
+        return (v == "" || v == "*" || v == "everyone" || v == "(everyone)" || v == "world")
+      }
+      function host_opt(opt) {
+        if (index(opt, "access=") == 1) return !is_open(substr(opt, 8))
+        if (index(opt, "rw=") == 1) return !is_open(substr(opt, 4))
+        if (index(opt, "ro=") == 1) return !is_open(substr(opt, 4))
+        return 0
+      }
       {
         text=$0
         sub(/^[ \t]+/, "", text)
@@ -36794,7 +37211,18 @@ _AIXRAY_SESSION_KEYS=""
         rows++
         split(text, field, /[ \t]+/)
         path=field[1]
-        if (text !~ /(^|[, \t])access=/) {
+        opts=text
+        sub(/^[^ \t]+[ \t]*/, "", opts)
+        sub(/^-/, "", opts)
+        restricted=0
+        nopt=split(opts, parts, ",")
+        for (i=1; i<=nopt; i++) {
+          o=parts[i]
+          sub(/^[ \t]+/, "", o)
+          sub(/[ \t]+$/, "", o)
+          if (host_opt(o)) restricted=1
+        }
+        if (!restricted) {
           unrestricted++
           if (unrestricted <= 3)
             list=(list == "" ? path : list " " path)
@@ -36829,32 +37257,32 @@ _AIXRAY_SESSION_KEYS=""
       add security nfs_export_everyone "NFS export access" FAIL high \
           "$NEE_DETAIL" \
           "At least one currently exported directory has no access allow list, so the NFS server does not restrict it to approved clients." \
-          "add an explicit access allow list to each affected export and re-export it through the approved change process." "cis-l2"
+          "add an explicit access allow list to each affected export and re-export it through the approved change process." "cis-l2 stig:V-215330"
       ;;
     RESTRICTED)
       add security nfs_export_everyone "NFS export access" PASS high \
           "$NEE_DETAIL" \
           "Every directory in the local active export table has an explicit client access allow list." \
-          "n/a" "cis-l2"
+          "n/a" "cis-l2 stig:V-215330"
       ;;
     NONE)
       if [ "$NEE_CONF_NONE" -eq 1 ]; then
         add security nfs_export_everyone "NFS export access" PASS high \
             "no NFS export is active; exportfs and /etc/exports both list none" \
             "The local active export table reports no exported directory and /etc/exports defines none, so no export is available without a client allow list." \
-            "n/a" "cis-l2"
+            "n/a" "cis-l2 stig:V-215330"
       else
         add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
             "not assessed — local active export table is empty but /etc/exports state was not corroborated (rc=$NEE_CONF_RC)" \
             "The active table reported no exports, but local definitions could not be read or still define exports, so the empty state is not independently corroborated." \
-            "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2"
+            "restore read access to /etc/exports, confirm whether its definitions are intentionally dormant, then rerun PTxray." "cis-l2 stig:V-215330"
       fi
       ;;
     *)
       add security nfs_export_everyone "NFS export access" NOT_ASSESSED high \
           "not assessed — $NEE_DETAIL" \
           "The local active export table did not provide complete, trustworthy evidence about access allow lists." \
-          "restore access to the no-argument exportfs listing, verify the complete local active export table, then rerun PTxray." "cis-l2"
+          "restore access to the no-argument exportfs listing, verify the complete local active export table, then rerun PTxray." "cis-l2 stig:V-215330"
       ;;
   esac
 _AIXRAY_SESSION_KEYS=""
@@ -37929,7 +38357,9 @@ _AIXRAY_SESSION_KEYS=""
       RKL_PARSED=$(printf '%s\n' "$RKL_RAW" | awk '
         $1 == "rekeylimit" {
           count++
-          if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ || $3 !~ /^(0|[1-9][0-9]*)$/) {
+          if (NF == 3 && $2 == "default" && $3 == "none") {
+            defaultnone=1
+          } else if (NF != 3 || $2 !~ /^(0|[1-9][0-9]*)$/ || $3 !~ /^(0|[1-9][0-9]*)$/) {
             invalid=1
           } else {
             bytes=$2
@@ -37939,6 +38369,7 @@ _AIXRAY_SESSION_KEYS=""
         END {
           if (count == 0) print "__ABSENT__"
           else if (count > 1) print "__DUPLICATE__ " count
+          else if (defaultnone) print "__DEFAULT_NONE__"
           else if (invalid) print "__INVALID__"
           else print bytes " " seconds
         }')
@@ -37950,7 +38381,18 @@ _AIXRAY_SESSION_KEYS=""
           RKL_FIX='n/a'
           ;;
         __ABSENT__)
-          RKL_REASON='directive is absent from the captured effective configuration, so the enforced boundary is unknown'
+          # A real 'sshd -T' dump always prints every effective directive,
+          # rekeylimit included -- an sshd that has no rekeylimit prints
+          # 'rekeylimit default none', which is the FAIL branch below. Absence
+          # therefore means the capture is not an sshd -T dump, not that the
+          # boundary is unenforced, so this is a refusal and never a verdict.
+          RKL_REASON='directive is absent from the captured effective configuration, so the capture is not an sshd -T dump and the enforced boundary is unknown'
+          ;;
+        __DEFAULT_NONE__)
+          RKL_STATUS=FAIL
+          RKL_OBSERVED='rekeylimit default none'
+          RKL_MEANING='The SSH server does not enforce the required session-key renegotiation boundary because the effective rekeylimit disables the limit.'
+          RKL_FIX="set 'RekeyLimit 1073741824 3600' in the global sshd_config, validate it with 'sshd -T', and restart sshd; PTxray only recommends these actions."
           ;;
         __DUPLICATE__*)
           RKL_REASON="directive appears ${RKL_PARSED#__DUPLICATE__ } times in the captured effective configuration, so the effective value is ambiguous"
@@ -37974,228 +38416,165 @@ _AIXRAY_SESSION_KEYS=""
   add security ssh_rekeylimit "SSH rekey limit" "$RKL_STATUS" "$RKL_SEVERITY" \
       "$RKL_OBSERVED" "$RKL_MEANING" "$RKL_FIX" "cis-l1"
 _AIXRAY_SESSION_KEYS=""
-  # sendmail_greeting — CIS 4.6.4.1.  The SMTP greeting offered before
-  # authentication must be a fixed string, not one that expands the server
-  # host name ($j) or the sendmail version ($b), and the helpfile named by # network-lint: allow -- prose comment, no network call
-  # the config must be present.  With no sendmail.cf no SMTP greeting is # network-lint: allow -- prose comment, no network call
-  # served, so the item is not applicable.
+  # sendmail_greeting — DISA STIG V-215412.  When the host runs an SMTP
+  # service, the SMTP greeting must not disclose the sendmail version.  The # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  # SmtpGreetingMessage value in /etc/mail/sendmail.cf must not expand the $v # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  # or $Z macro; with no sendmail.cf the host serves no SMTP greeting, so the # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  # check is not applicable.
   typeset SMG_CF_RAW SMG_CF_RC
-  typeset SMG_GRT_RAW SMG_GRT_RC SMG_GRT_VERDICT SMG_GRT_OBS
-  typeset SMG_HF_RAW SMG_HF_RC SMG_HF_VERDICT SMG_HF_OBS
-  typeset SMG_STATUS SMG_OBSERVED SMG_MEANING SMG_FIX
+  typeset SMG_GRT_RAW SMG_GRT_RC SMG_GRT_VERDICT SMG_GRT_SEVERITY SMG_GRT_OBS
+  typeset SMG_STATUS SMG_SEVERITY SMG_OBSERVED SMG_MEANING SMG_FIX
 
-  SMG_CF_RAW=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL ls on /etc/mail/sendmail.cf metadata; ls makes no network call
+  SMG_CF_RAW=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
   SMG_CF_RC=$?
 
   if [ "$SMG_CF_RC" -eq 2 ] && [ -z "$SMG_CF_RAW" ]; then
     SMG_STATUS=NOT_APPLICABLE
-    SMG_OBSERVED="/etc/mail/sendmail.cf is absent; no sendmail SMTP greeting is served" # network-lint: allow -- prose finding text, no network call
-  elif [ "$SMG_CF_RC" -eq 0 ] && [ -n "$SMG_CF_RAW" ]; then
-    # sendmail.cf present.  Assess the greeting and the helpfile # network-lint: allow -- prose comment, no network call
-    # independently so every non-compliant condition is reported together.
-    SMG_GRT_RAW=$(aix smtp_greeting /usr/bin/egrep -i "^O SmtpGreetingMessage" /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL egrep on /etc/mail/sendmail.cf capture text; egrep makes no network call
+    SMG_SEVERITY=low
+    SMG_OBSERVED="/etc/mail/sendmail.cf is absent; no sendmail SMTP service is present" # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  elif [ "$SMG_CF_RC" -ne 0 ]; then
+    SMG_STATUS=NOT_ASSESSED
+    SMG_SEVERITY=med
+    SMG_OBSERVED="not assessed - sendmail.cf presence probe failed (rc=$SMG_CF_RC)" # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  elif [ -z "$SMG_CF_RAW" ]; then
+    SMG_STATUS=NOT_ASSESSED
+    SMG_SEVERITY=med
+    SMG_OBSERVED="not assessed - sendmail.cf presence probe returned no output" # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+  else
+    SMG_GRT_RAW=$(aix smtp_greeting grep SmtpGreetingMessage /etc/mail/sendmail.cf) # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
     SMG_GRT_RC=$?
-    SMG_HF_RAW=$(aix helpfile_exists test -e /etc/mail/helpfile)
-    SMG_HF_RC=$?
-    if [ "$SMG_GRT_RC" -gt 1 ]; then
+    if [ "$SMG_GRT_RC" -ne 0 ]; then
       SMG_GRT_VERDICT=NOT_ASSESSED
-      SMG_GRT_OBS="not assessed - SMTP greeting probe failed (rc=$SMG_GRT_RC); /etc/mail/sendmail.cf was not readable" # network-lint: allow -- prose finding text, no network call
-    elif [ "$SMG_GRT_RC" -eq 1 ]; then
+      SMG_GRT_SEVERITY=med
+      SMG_GRT_OBS="not assessed - SMTP greeting probe failed (rc=$SMG_GRT_RC)"
+    elif [ -z "$SMG_GRT_RAW" ]; then
+      SMG_GRT_VERDICT=NOT_ASSESSED
+      SMG_GRT_SEVERITY=med
+      SMG_GRT_OBS="not assessed - SMTP greeting probe returned no output"
+    elif printf '%s\n' "$SMG_GRT_RAW" | grep -q -E '[$][vZ]'; then
       SMG_GRT_VERDICT=FAIL
-      SMG_GRT_OBS="no O SmtpGreetingMessage directive is configured"
-    elif printf '%s\n' "$SMG_GRT_RAW" | grep -q -E '[$][jb]'; then
-      SMG_GRT_VERDICT=FAIL
-      SMG_GRT_OBS="the SmtpGreetingMessage value still uses the \$j or \$b macro, exposing the host name or sendmail version" # network-lint: allow -- prose finding text, no network call
+      SMG_GRT_SEVERITY=low
+      SMG_GRT_OBS="the SmtpGreetingMessage value contains the \$v or \$Z macro, exposing the sendmail version" # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
     else
       SMG_GRT_VERDICT=PASS
-      SMG_GRT_OBS="SmtpGreetingMessage is set to a static string"
+      SMG_GRT_SEVERITY=med
+      SMG_GRT_OBS="the SmtpGreetingMessage value does not contain the \$v or \$Z macro"
     fi
-    if [ "$SMG_HF_RC" -eq 0 ]; then
-      SMG_HF_VERDICT=PASS
-      SMG_HF_OBS="/etc/mail/helpfile is present"
-    elif [ "$SMG_HF_RC" -eq 1 ]; then
-      SMG_HF_VERDICT=FAIL
-      SMG_HF_OBS="/etc/mail/helpfile is missing"
-    else
-      SMG_HF_VERDICT=NOT_ASSESSED
-      SMG_HF_OBS="not assessed - helpfile probe failed (rc=$SMG_HF_RC)"
-    fi
-    if [ "$SMG_GRT_VERDICT" = "NOT_ASSESSED" ]; then
-      SMG_STATUS=NOT_ASSESSED
-      SMG_OBSERVED="$SMG_GRT_OBS"
-      if [ "$SMG_HF_VERDICT" != "PASS" ]; then
-        SMG_OBSERVED="$SMG_OBSERVED; $SMG_HF_OBS"
-      fi
-    elif [ "$SMG_HF_VERDICT" = "NOT_ASSESSED" ]; then
-      SMG_OBSERVED="$SMG_GRT_OBS; $SMG_HF_OBS"
-      if [ "$SMG_GRT_VERDICT" = "FAIL" ]; then
-        SMG_STATUS=FAIL
-      else
-        SMG_STATUS=NOT_ASSESSED
-      fi
-    elif [ "$SMG_GRT_VERDICT" = "PASS" ] && [ "$SMG_HF_VERDICT" = "PASS" ]; then
-      SMG_STATUS=PASS
-      SMG_OBSERVED="SMTP greeting is a static string and /etc/mail/helpfile is present"
-    else
-      SMG_STATUS=FAIL
-      SMG_OBSERVED="$SMG_GRT_OBS"
-      if [ "$SMG_HF_VERDICT" = "FAIL" ]; then
-        SMG_OBSERVED="$SMG_OBSERVED; $SMG_HF_OBS"
-      fi
-    fi
-  else
-    SMG_STATUS=NOT_ASSESSED
-    SMG_OBSERVED="not assessed - sendmail.cf presence probe failed (rc=$SMG_CF_RC)" # network-lint: allow -- prose finding text, no network call
+    SMG_STATUS=$SMG_GRT_VERDICT
+    SMG_SEVERITY=$SMG_GRT_SEVERITY
+    SMG_OBSERVED=$SMG_GRT_OBS
   fi
 
   case "$SMG_STATUS" in
     PASS)
-      SMG_MEANING="The sendmail SMTP greeting is a fixed string that does not reveal the server host name or the sendmail version, and the referenced helpfile is present." # network-lint: allow -- prose finding text, no network call
+      SMG_MEANING="The SMTP greeting does not expand the \$v or \$Z macro, so it discloses no sendmail version information before authentication." # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
       SMG_FIX="n/a"
       ;;
     FAIL)
-      SMG_MEANING="The sendmail SMTP greeting reveals the server host name or the sendmail version before authentication, or the configured helpfile is absent, giving reconnaissance information to any SMTP client." # network-lint: allow -- prose finding text, no network call
-      SMG_FIX="set a static O SmtpGreetingMessage value in /etc/mail/sendmail.cf that uses no \$j or \$b macro, and ensure /etc/mail/helpfile exists; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
+      SMG_MEANING="The SMTP greeting expands the \$v or \$Z macro and discloses the sendmail version to any connecting client." # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
+      SMG_FIX="change the O SmtpGreetingMessage line in /etc/mail/sendmail.cf to a static string that does not use the \$v or \$Z macro; PTxray only recommends this action." # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
       ;;
     NOT_APPLICABLE)
-      SMG_MEANING="No /etc/mail/sendmail.cf exists, so this host serves no sendmail SMTP greeting to assess." # network-lint: allow -- prose finding text, no network call
+      SMG_MEANING="No /etc/mail/sendmail.cf exists, so this host runs no sendmail SMTP service to assess." # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
       SMG_FIX="n/a"
       ;;
     *)
-      SMG_MEANING="PTxray did not obtain trustworthy evidence for the sendmail SMTP greeting configuration." # network-lint: allow -- prose finding text, no network call
-      SMG_FIX="verify /etc/mail/sendmail.cf is present and readable, then rerun PTxray." # network-lint: allow -- prose finding text, no network call
+      SMG_MEANING="PTxray did not obtain trustworthy evidence for the SMTP greeting configuration."
+      SMG_FIX="verify /etc/mail/sendmail.cf is present and readable, then rerun PTxray." # network-lint: allow -- names /etc/mail/sendmail.cf in prose or a local file path; no SMTP client is invoked
       ;;
   esac
 
   add security sendmail_greeting "Sendmail SMTP greeting" \
-    "$SMG_STATUS" med "$SMG_OBSERVED" \
-    "$SMG_MEANING" "$SMG_FIX" "cis-l1"
+    "$SMG_STATUS" "$SMG_SEVERITY" "$SMG_OBSERVED" \
+    "$SMG_MEANING" "$SMG_FIX" "stig:V-215412"
 _AIXRAY_SESSION_KEYS=""
-  # sendmail_privacyoptions — CIS control 4.6.4.2: sendmail must set # network-lint: allow -- prose header comment, no network call
-  # PrivacyOptions to include authwarnings, novrfy and noexpn so VRFY/EXPN
-  # queries are suppressed and SMTP authentication warnings are emitted.
+  # sendmail_privacyoptions — DISA STIG V-215415. # network-lint: allow -- tool id and V-ID header name the local mail service; no network endpoint
+  # network-lint: allow-next=20 -- decision block below documents the STIG privacy-options pipeline over the local mail configuration file; no line names a network endpoint
+  # SMTP service must not have the EXPN or VRFY features active. The STIG
+  # check-content pipeline reads /etc/mail/sendmail.cf with comments stripped
+  # and requires the "O PrivacyOptions" value to contain 'goaway' (which turns
+  # off EXPN/VRFY along with the other privacy features).
   #
-  # Two captures, the second gated on the first:
-  #   probe 1: ls -ld on the configuration file.
-  #     rc=2  => file absent; nothing to constrain -> NOT_APPLICABLE
-  #     rc=0  => file present; run probe 2
-  #     other => the probe failed; state unknown -> NOT_ASSESSED
-  #   probe 2: egrep for the PrivacyOptions line.
-  #     rc=1  => no PrivacyOptions declared -> FAIL
-  #     rc=0  => inspect the captured line for the three required options
-  #     rc>1  => the probe failed; state unknown -> NOT_ASSESSED
+  # Two captures. Capture 1 gates on the subject's existence: the STIG pipeline
+  # alone cannot tell "sendmail.cf absent" (subject genuinely missing -> PASS,
+  # a prohibition / svcoff rule) from "sendmail.cf present but declaring no
+  # PrivacyOptions" (an unhardened SMTP config -> FAIL), and both collapse to
+  # the same rc=1 from the second grep.
+  #   ls -ld /etc/mail/sendmail.cf
+  #   rc != 0 or empty => sendmail.cf not present -> PASS.
+  #   rc=0 + stat line => sendmail.cf present; decide on the STIG pipeline.
   #
-  typeset SP_CF_RAW SP_CF_RC SP_PRIV SP_PRIV_RC SP_LC
-  typeset SP_STATUS SP_SEV SP_OBS SP_MEAN SP_FIX
-  typeset SP_MISSING SP_HAS_AUTH SP_HAS_NOVRFY SP_HAS_NOEXPN
+  # Capture 2, the STIG check-content pipeline:
+  #   grep -v "^#" /etc/mail/sendmail.cf | grep -i privacyoptions
+  #   rc=0 + line  => PrivacyOptions present; pass iff the value has 'goaway'.
+  #   rc=1 + empty => no PrivacyOptions line declared; file present -> FAIL.
+  #   rc=0 + empty => the probe swallowed an error; state unknown -> NOT_ASSESSED.
+  #   other rc     => the probe failed; state unknown -> NOT_ASSESSED.
+  typeset SP_CF SP_CF_RC SP_PRIV SP_RC SP_LC SP_STATUS SP_SEV SP_OBS SP_MEAN SP_FIX
 
-  SP_CF_RAW=""
-  SP_CF_RC=0
-  SP_PRIV=""
-  SP_PRIV_RC=0
-  SP_LC=""
-  SP_MISSING=""
-  SP_HAS_AUTH=0
-  SP_HAS_NOVRFY=0
-  SP_HAS_NOEXPN=0
-
-  SP_CF_RAW=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL ls on /etc/mail/sendmail.cf metadata; ls makes no network call
+  SP_CF=$(aix sendmail_cf_stat ls -ld /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs ls -ld locally; ls makes no network call
   SP_CF_RC=$?
+  SP_SEV=med
 
-  if [ "$SP_CF_RC" -eq 0 ]; then
-    SP_PRIV=$(aix sendmail_privacy_options /usr/bin/egrep -i "^O PrivacyOptions" /etc/mail/sendmail.cf) # network-lint: allow -- aix() runs the LOCAL egrep on /etc/mail/sendmail.cf capture text; egrep makes no network call
-    SP_PRIV_RC=$?
-    case "$SP_PRIV_RC" in
+  if [ "$SP_CF_RC" -ne 0 ] || [ -z "$SP_CF" ]; then
+    SP_STATUS=PASS
+    SP_OBS="sendmail.cf is not present" # network-lint: allow -- local mail path in prose
+  else
+    SP_PRIV=$(aix sendmail_privacy_options sh -c 'grep -v "^#" /etc/mail/sendmail.cf | grep -i privacyoptions') # network-lint: allow -- aix() runs the LOCAL grep pipeline; grep makes no network call
+    SP_RC=$?
+
+    case "$SP_RC" in
       0)
         if [ -z "$SP_PRIV" ]; then
           SP_STATUS=NOT_ASSESSED
-          SP_OBS="not assessed - PrivacyOptions probe returned rc=0 with no output"
+          SP_OBS="not assessed - PrivacyOptions probe returned rc=0 with no output" # network-lint: allow -- sendmail setting in prose
         else
           SP_LC=$(printf '%s\n' "$SP_PRIV" | tr 'A-Z' 'a-z')
           case "$SP_LC" in
-            *authwarnings*) SP_HAS_AUTH=1 ;;
+            *goaway*)
+              SP_STATUS=PASS
+              SP_OBS="PrivacyOptions includes goaway" # network-lint: allow -- sendmail setting in prose
+              ;;
+            *)
+              SP_STATUS=FAIL
+              SP_OBS="PrivacyOptions is present but does not include goaway" # network-lint: allow -- sendmail setting in prose
+              ;;
           esac
-          case "$SP_LC" in
-            *novrfy*) SP_HAS_NOVRFY=1 ;;
-          esac
-          case "$SP_LC" in
-            *noexpn*) SP_HAS_NOEXPN=1 ;;
-          esac
-          SP_MISSING=""
-          if [ "$SP_HAS_AUTH" -eq 0 ]; then
-            SP_MISSING="authwarnings"
-          fi
-          if [ "$SP_HAS_NOVRFY" -eq 0 ]; then
-            if [ -n "$SP_MISSING" ]; then
-              SP_MISSING="$SP_MISSING novrfy"
-            else
-              SP_MISSING="novrfy"
-            fi
-          fi
-          if [ "$SP_HAS_NOEXPN" -eq 0 ]; then
-            if [ -n "$SP_MISSING" ]; then
-              SP_MISSING="$SP_MISSING noexpn"
-            else
-              SP_MISSING="noexpn"
-            fi
-          fi
-          if [ -n "$SP_MISSING" ]; then
-            SP_STATUS=FAIL
-            SP_OBS="PrivacyOptions is missing: $SP_MISSING"
-          else
-            SP_STATUS=PASS
-            SP_OBS="PrivacyOptions includes authwarnings, novrfy and noexpn"
-          fi
         fi
         ;;
       1)
         SP_STATUS=FAIL
-        SP_OBS="sendmail.cf exists but declares no PrivacyOptions" # network-lint: allow -- prose finding text, no network call
+        SP_OBS="sendmail.cf is present but declares no PrivacyOptions" # network-lint: allow -- local mail path in prose
         ;;
       *)
         SP_STATUS=NOT_ASSESSED
-        SP_OBS="not assessed - PrivacyOptions probe failed (rc=$SP_PRIV_RC)"
+        SP_OBS="not assessed - PrivacyOptions probe failed (rc=$SP_RC)" # network-lint: allow -- sendmail setting in prose
         ;;
     esac
-  elif [ "$SP_CF_RC" -eq 2 ]; then
-    SP_STATUS=NOT_APPLICABLE
-    SP_OBS="sendmail.cf is not present" # network-lint: allow -- prose finding text, no network call
-  else
-    SP_STATUS=NOT_ASSESSED
-    SP_OBS="not assessed - sendmail.cf probe failed (rc=$SP_CF_RC)" # network-lint: allow -- prose finding text, no network call
   fi
 
   case "$SP_STATUS" in
-    FAIL) SP_SEV=med ;;
-    *) SP_SEV=low ;;
-  esac
-
-  case "$SP_STATUS" in
     PASS)
-      SP_MEAN="sendmail suppresses VRFY/EXPN information leakage and emits authentication warnings." # network-lint: allow -- prose finding text, no network call
+      SP_MEAN="sendmail suppresses VRFY/EXPN information leakage through the goaway PrivacyOptions setting." # network-lint: allow -- sendmail/SMTP prose
       SP_FIX="n/a"
       ;;
     FAIL)
-      SP_MEAN="Without the required PrivacyOptions, sendmail answers VRFY/EXPN queries and omits authentication warnings, leaking account information over SMTP." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="add 'O PrivacyOptions=authwarnings,novrfy,noexpn' to /etc/mail/sendmail.cf and restart sendmail; PTxray only recommends these actions." # network-lint: allow -- prose finding text, no network call
-      ;;
-    NOT_APPLICABLE)
-      SP_MEAN="The sendmail configuration file does not exist, so there is no PrivacyOptions setting to enforce." # network-lint: allow -- prose finding text, no network call
-      SP_FIX="n/a"
+      SP_MEAN="Without goaway in PrivacyOptions, sendmail answers VRFY/EXPN queries and leaks account information over SMTP." # network-lint: allow -- sendmail/SMTP prose
+      SP_FIX="# startsrc -s sendmail -a \"-bd -q30m\"" # network-lint: allow -- the fix text is a recommendation string, never executed
       ;;
     *)
-      SP_MEAN="PTxray did not obtain trustworthy evidence about the sendmail configuration." # network-lint: allow -- prose finding text, no network call
+      SP_MEAN="PTxray did not obtain trustworthy evidence about the sendmail PrivacyOptions setting." # network-lint: allow -- sendmail setting in prose
       SP_FIX="resolve the probe failure and rerun PTxray."
       ;;
   esac
 
-  # network-lint: allow-next=6 -- the finding label names the SMTP mailer PrivacyOptions settings; the add command emits a finding, no network call
-  add security sendmail_privacyoptions "sendmail PrivacyOptions settings" \
+  # network-lint: allow-next=6 -- add() emits the sendmail PrivacyOptions finding; the finding id and prose strings name the local mail service, not a network endpoint
+  add security sendmail_privacyoptions "sendmail PrivacyOptions setting" \
     "$SP_STATUS" "$SP_SEV" \
     "$SP_OBS" \
     "$SP_MEAN" \
     "$SP_FIX" \
-    "cis-l1"
+    "cis-l1 stig:V-215415"
 _AIXRAY_SESSION_KEYS=""
   # fileperm_sendmailcf — CIS L1-aligned /etc/mail/sendmail.cf owner/group/mode boundary. # network-lint: allow -- prose header comment, no network call
   # The probe is `ls -l` (names, not numeric): mode in $1, link count in $2,
@@ -38791,92 +39170,68 @@ _AIXRAY_SESSION_KEYS=""
   fi
 _AIXRAY_SESSION_KEYS=""
 
-  # root_su_restrict — root must reject direct login (console and remote)
-  # and must not leave su open to every group. Reads four lsuser attributes
-  # in one self-contained capture; no root privilege is required.
-  typeset ROOT_SU_RAW ROOT_SU_RC ROOT_SU_PARSED ROOT_SU_TAB ROOT_SU_SHAPE
-  typeset ROOT_SU_LOGIN ROOT_SU_RLOGIN ROOT_SU_SU ROOT_SU_SUGROUPS ROOT_SU_VALUE
-  ROOT_SU_RAW=$(aix root_su_restrict lsuser -a login rlogin su sugroups root)
-  ROOT_SU_RC=$?
-  if [ "$ROOT_SU_RC" -ne 0 ]; then
-    add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
-        "not assessed — lsuser returned exit code $ROOT_SU_RC" \
-        "PTxray could not read the root account login and su attributes, so their state is unknown." \
-        "run 'lsuser -a login rlogin su sugroups root' with authority to read account attributes and rerun PTxray." \
-        "" \
-        "cis-l1"
-  elif [ -z "$ROOT_SU_RAW" ]; then
-    add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
-        "not assessed — lsuser returned no attributes (rc=0)" \
-        "The root account exists but lsuser produced no output, so PTxray could not discriminate its state." \
-        "verify 'lsuser -a login rlogin su sugroups root' returns the four attributes and rerun PTxray." \
-        "" \
-        "cis-l1"
+  # root_su_restrict — DISA STIG V-215338: switching to root with su must be
+  # limited to members of a defined group. Reads the root sugroups attribute
+  # with lsuser; a blank value or ALL is a finding. No root privilege needed.
+  typeset RSR_RAW RSR_RC RSR_AWK_RC RSR_SUGROUPS
+  RSR_RAW=$(aix lsuser_sugroups_root lsuser -a sugroups root)
+  RSR_RC=$?
+
+  if [ "$RSR_RC" -ne 0 ]; then
+    add security root_su_restrict "Restrict su to root" NOT_ASSESSED med \
+        "not assessed - lsuser exited $RSR_RC" \
+        "PTxray could not read the root sugroups attribute, so the su restriction state is unknown." \
+        "run 'lsuser -a sugroups root' with authority to read account attributes and rerun PTxray." \
+        "stig:V-215338"
+  elif [ -z "$RSR_RAW" ]; then
+    add security root_su_restrict "Restrict su to root" NOT_ASSESSED med \
+        "not assessed - lsuser returned no output (rc=0)" \
+        "lsuser produced no output for the root account, so PTxray could not discriminate its state." \
+        "verify 'lsuser -a sugroups root' returns the root sugroups attribute and rerun PTxray." \
+        "stig:V-215338"
   else
-    # Parse key=value pairs from the lsuser output. Robust to '=' inside
-    # values (split on the first '='), leading/trailing whitespace, and
-    # any attribute ordering across one or more lines. Emits OK<tab>login
-    # <tab>rlogin<tab>su<tab>sugroups when all four are present, else BAD.
-    ROOT_SU_PARSED=$(printf '%s\n' "$ROOT_SU_RAW" | awk '
+    # Parse the single lsuser line (root <attr=value> ...). Emits the sugroups
+    # value (possibly empty) and exits 0 when a root sugroups token exists;
+    # exits 1 when the root subject or its sugroups attribute is absent.
+    RSR_SUGROUPS=$(printf '%s\n' "$RSR_RAW" | awk '
       {
         n = split($0, tok, /[ \t]+/)
-        for (i = 1; i <= n; i++) {
+        if (tok[1] == "") next
+        if (tok[1] != "root") exit 1
+        for (i = 2; i <= n; i++) {
           if (tok[i] == "") continue
           eq = index(tok[i], "=")
           if (eq < 2) continue
-          key = substr(tok[i], 1, eq - 1)
-          val = substr(tok[i], eq + 1)
-          sub(/^[ \t]*/, "", val)
-          sub(/[ \t]*$/, "", val)
-          if (val == "") continue
-          if (key == "login") { login = val; login_seen = 1 }
-          else if (key == "rlogin") { rlogin = val; rlogin_seen = 1 }
-          else if (key == "su") { su = val; su_seen = 1 }
-          else if (key == "sugroups") { sugroups = val; sugroups_seen = 1 }
+          if (substr(tok[i], 1, eq - 1) == "sugroups") {
+            val = substr(tok[i], eq + 1)
+            sub(/^[ \t]*/, "", val)
+            sub(/[ \t]*$/, "", val)
+            print val
+            exit 0
+          }
         }
-      }
-      END {
-        if (login_seen == 1 && rlogin_seen == 1 && su_seen == 1 && sugroups_seen == 1)
-          printf "OK\t%s\t%s\t%s\t%s\n", login, rlogin, su, sugroups
-        else
-          print "BAD"
+        exit 1
       }')
-    ROOT_SU_TAB=$(printf '\t')
-    IFS="$ROOT_SU_TAB" read -r ROOT_SU_SHAPE ROOT_SU_LOGIN ROOT_SU_RLOGIN \
-      ROOT_SU_SU ROOT_SU_SUGROUPS <<EOF
-$ROOT_SU_PARSED
-EOF
-    case "$ROOT_SU_SHAPE" in
-      BAD)
-        add security root_su_restrict "Root login and su restrictions" NOT_ASSESSED high \
-            "not assessed — lsuser attributes could not be fully parsed (rc=0)" \
-            "At least one of login, rlogin, su, or sugroups was missing from the lsuser output, so the root account state is unknown." \
-            "confirm 'lsuser -a login rlogin su sugroups root' reports all four attributes and rerun PTxray." \
-            "" \
-            "cis-l1"
-        ;;
-      OK)
-        ROOT_SU_VALUE="login=$ROOT_SU_LOGIN rlogin=$ROOT_SU_RLOGIN su=$ROOT_SU_SU sugroups=$ROOT_SU_SUGROUPS"
-        # su is wide open when it is anything but false and every group is allowed.
-        if [ "$ROOT_SU_SU" != "false" ] && [ "$ROOT_SU_SUGROUPS" = "ALL" ]; then
-          add security root_su_restrict "Root login and su restrictions" FAIL high "$ROOT_SU_VALUE; su must be false or sugroups a named group, not ALL" \
-              "su access to the root account is open to every group: su=$ROOT_SU_SU, sugroups=$ROOT_SU_SUGROUPS." \
-              "set su=false for root or restrict sugroups to a named group list, and disable any direct root login." \
-              "cis-l1"
-        # Direct login is enabled when either the console or the remote path accepts root.
-        elif [ "$ROOT_SU_LOGIN" = "true" ] || [ "$ROOT_SU_RLOGIN" = "true" ]; then
-          add security root_su_restrict "Root login and su restrictions" FAIL high "$ROOT_SU_VALUE; login and rlogin must be false" \
-              "the root account accepts direct login: login=$ROOT_SU_LOGIN, rlogin=$ROOT_SU_RLOGIN." \
-              "set login=false and rlogin=false for root so it cannot sign in directly, and restrict su to a named group list." \
-              "cis-l1"
-        else
-          add security root_su_restrict "Root login and su restrictions" PASS high "$ROOT_SU_VALUE" \
-              "the root account rejects direct login and does not leave su open to every group." \
-              "n/a" \
-              "cis-l1"
-        fi
-        ;;
-    esac
+    RSR_AWK_RC=$?
+    if [ "$RSR_AWK_RC" -ne 0 ]; then
+      add security root_su_restrict "Restrict su to root" FAIL med \
+          "sugroups is not defined for root" \
+          "The lsuser output carries no sugroups value for the root account, so su to root is not restricted to a defined group." \
+          "PTxray only recommends this change: chsec -f /etc/security/user -s root -a sugroups=adm" \
+          "stig:V-215338"
+    elif [ -z "$RSR_SUGROUPS" ] || [ "$RSR_SUGROUPS" = "ALL" ]; then
+      add security root_su_restrict "Restrict su to root" FAIL med \
+          "sugroups=$RSR_SUGROUPS" \
+          "The root account leaves su open to every group: sugroups is blank or ALL, contrary to DISA STIG V-215338." \
+          "PTxray only recommends this change: chsec -f /etc/security/user -s root -a sugroups=adm" \
+          "stig:V-215338"
+    else
+      add security root_su_restrict "Restrict su to root" PASS med \
+          "sugroups=$RSR_SUGROUPS" \
+          "The root account restricts su to members of a defined group: sugroups=$RSR_SUGROUPS." \
+          "n/a" \
+          "stig:V-215338"
+    fi
   fi
 _AIXRAY_SESSION_KEYS=""
   # login_root_shell — root's configured login shell must be /usr/bin/ksh.

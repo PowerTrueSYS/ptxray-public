@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-user-home-directories-have",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_user_home_directories_have"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/bin/cat /etc/passwd",
+    "/usr/bin/aclget \"$UHDA_HOME\""
+  ],
+  "tags": [
+    "stig:V-215332"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX user home directories do not have extended ACLs (DISA STIG V-215332). An extended ACL on a home directory lets a non-owner change or replace files belonging to that account.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-user-home-directories-have/ck-stig-user-home-directories-have.ksh"
+}

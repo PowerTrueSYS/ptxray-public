@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-lock-cmd-configured-allow",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lock_cmd_configured_allow"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "ls /usr/bin/lock",
+    "ls /usr/bin/X11/xlock"
+  ],
+  "tags": [
+    "stig:V-215211"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that both /usr/bin/lock and /usr/bin/X11/xlock are present so users can directly initiate a session lock for all connection types. When either session lock command is missing, a user cannot lock an unattended session, leaving it open to anyone with physical access to the console.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lock-cmd-configured-allow/ck-stig-lock-cmd-configured-allow.ksh"
+}

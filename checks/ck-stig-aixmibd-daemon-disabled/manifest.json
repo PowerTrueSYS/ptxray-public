@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-aixmibd-daemon-disabled",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_aixmibd_daemon_disabled"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "cat /etc/rc.tcpip"
+  ],
+  "tags": [
+    "stig:V-215366"
+  ],
+  "severity": "medium",
+  "blurb": "This check looks at /etc/rc.tcpip, the list of network daemons AIX starts at boot, and reports whether aixmibd is still among them. aixmibd is a legacy SNMP MIB sub-agent that most systems no longer need; when it is left enabled it keeps an extra network listener running and answering queries about the machine, which widens the attack surface for no benefit.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-aixmibd-daemon-disabled/ck-stig-aixmibd-daemon-disabled.ksh"
+}

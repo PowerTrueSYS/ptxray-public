@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-capacity",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_capacity"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "df -k"
+  ],
+  "tags": [
+    "stig:V-215253"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that audit records have enough room on disk to survive a week. A nearly full audit filesystem can silently drop the evidence needed to reconstruct an incident.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-capacity/ck-stig-audit-capacity.ksh"
+}

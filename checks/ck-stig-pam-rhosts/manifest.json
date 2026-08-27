@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-pam-rhosts",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_pam_rhosts"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep rhosts_auth /etc/pam.conf |grep -v \\#"
+  ],
+  "tags": [
+    "stig:V-215433"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX PAM does not enable the rhosts_auth module. When an uncommented rhosts_auth entry is present in /etc/pam.conf, the .rhosts file becomes a supported authentication source, so trust-based rhosts authentication is possible and host equivalence grants can defeat centralized account control.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-pam-rhosts/ck-stig-pam-rhosts.ksh"
+}

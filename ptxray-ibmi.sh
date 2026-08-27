@@ -25,7 +25,7 @@ LC_ALL=C
 export LC_ALL
 PTXRAY_SELF=$0
 PTXRAY_DEFS_INTEGRATION=1
-PTXRAY_DEFS_DOWNLOADER_SHA256='8720efb8c04366da97c4b8f187ef6dcfb924d17fc38d1898900da813694822af'
+PTXRAY_DEFS_DOWNLOADER_SHA256='bfaad949ab4cf11076a3da7af5a31c68060b771edaf8c9ec467e6d8eee06fdc5'
 # Shared post-identity-gate selector for the adjacent signed-data downloader.
 # This module contains no transport implementation and no endpoint. Assemblers
 # bind the exact same-release downloader digest above it.
@@ -139,7 +139,7 @@ function ptxray_defs_sha256_file {
   digest=$("$verifier" dgst -sha256 -r "$1" 2>/dev/null | awk '{print $1}') \
     || return 1
   printf '%s\n' "$digest" | awk '
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     hex64($0){print;ok=1}END{exit ok?0:1}'
 }
 
@@ -231,7 +231,7 @@ function ptxray_defs_snapshot_protocol_valid {
     -v generation="$PTXRAY_DEFS_GENERATION" \
     -v kev="$PTXRAY_DEFS_KEV_SHA256" \
     -v apar="$PTXRAY_DEFS_APAR_SHA256" '
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     NR!=1{bad=1}
     NR==1{
       if(NF!=7||$1!="PTXRAY-DEFS"||$2!="1"||$3!="snapshot")bad=1
@@ -356,11 +356,11 @@ function ptxray_defs_resolve {
 function ptxray_defs_protocol_valid {
   printf '%s\n' "$1" | awk -F'|' '
     function digits(s){return s~/^(0|[1-9][0-9]*)$/}
-    function positive(s){return s~/^[1-9][0-9]*$/&&length(s)<=18}
-    function hex64(s, i,c){if(length(s)!=64)return 0;for(i=1;i<=64;i++){c=substr(s,i,1);if(c!~/[0-9a-f]/)return 0}return 1}
+    function positive(s){return s~/^[1-9][0-9]*$/&&substr(s,19,1)==""}
+    function hex64(s){return s~/^[0-9a-f]+$/&&substr(s,64,1)!=""&&substr(s,65,1)==""}
     function ymd(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/}
     function dotted(s){return s~/^[0-9][0-9][0-9][0-9][.][0-9][0-9][.][0-9][0-9]$/}
-    function version(s){return length(s)>=1&&length(s)<=64&&s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/}
+    function version(s){return s~/^[A-Za-z0-9][A-Za-z0-9._+-]*$/&&substr(s,65,1)==""}
     function created(s){return s~/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/}
     function generation(s, a,n){n=split(s,a,"-");return n==3&&a[1]=="g"&&positive(a[2])&&hex64(a[3])}
     NR!=1{bad=1}
@@ -654,7 +654,7 @@ function ptxray_defs_summary {
   fi
 }
 
-PTXRAY_VERSION=1.5.0
+PTXRAY_VERSION=1.6.0
 FORMAT=text
 COMPLIANCE=cis-l1
 DEFINITIONS_OFFLINE=0
@@ -668,8 +668,8 @@ while [ "$#" -gt 0 ]; do
     --html) FORMAT=html ;;
     --compliance)
       shift
-      [ "$#" -gt 0 ] || { echo "ptxray-ibmi.sh: --compliance requires cis-l1 or cis-l2" >&2; exit 2; }
-      case "$1" in cis-l1|cis-l2) COMPLIANCE=$1 ;; *) echo "ptxray-ibmi.sh: unsupported compliance profile: $1" >&2; exit 2;; esac
+      [ "$#" -gt 0 ] || { echo "ptxray-ibmi.sh: --compliance requires cis-l1, cis-l2, or cis-l1-l2" >&2; exit 2; }
+      case "$1" in cis-l1|cis-l2|cis-l1-l2) COMPLIANCE=$1 ;; *) echo "ptxray-ibmi.sh: unsupported compliance profile: $1" >&2; exit 2;; esac
       ;;
     --offline)
       [ "$DEFINITIONS_OFFLINE_SEEN" -eq 0 ] \
@@ -687,7 +687,11 @@ while [ "$#" -gt 0 ]; do
       DEFINITIONS_BUNDLE=$1
       ;;
     --help|-h)
-      echo "usage: ptxray-ibmi.sh [--text|--json|--html] [--compliance cis-l1|cis-l2] [--offline | --definitions-bundle SIGNED_FILE]"
+      echo "usage: ptxray-ibmi.sh [--text|--json|--html] [--compliance PROFILE] [--offline | --definitions-bundle SIGNED_FILE]"
+      echo "compliance PROFILE (default cis-l1):"
+      echo "  cis-l1    Level 1 controls alone"
+      echo "  cis-l2    Level 2 controls alone"
+      echo "  cis-l1-l2 Level 1 and Level 2 controls together"
       exit 0
       ;;
     *) echo "ptxray-ibmi.sh: unknown option: $1" >&2; exit 2 ;;
@@ -868,6 +872,316 @@ TODAY=${AIXRAY_TODAY:-$(date +%Y-%m-%d 2>/dev/null)}
 valid_ymd "$TODAY" || { echo "ptxray-ibmi.sh: invalid assessment date" >&2; exit 2; }
 TODAY_J=$(d2j "$TODAY")
 
+# Shared NetServer attribute capture. QZLSOLST ZLSL0201 via XMLSERVICE
+# (QXMLSERV.iPLUGR512K, six parms, typed receiver ds) plus a read-only
+# SMB NEGOTIATE to 127.0.0.1:445. Never QZLSMAINT, never CHGNSVA.
+# Probe keys: netserver_attrs, smb_negotiate. Fixture hook matches ibmi_sql.
+
+function nsa_probe {
+  typeset key rc
+  key=$1
+  shift
+  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
+    if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
+      cat "$AIXRAY_FIXTURES/$key.out"
+      rc=0
+      [ -r "$AIXRAY_FIXTURES/$key.rc" ] && read rc < "$AIXRAY_FIXTURES/$key.rc"
+      return $rc
+    fi
+    return 127
+  fi
+  "$@"
+}
+
+# Inlined from reference/netserver-attrs.ksh (verified PTSCAN reader).
+function nsa_qzls_live {
+  typeset XML X OUT
+  XML="<xmlservice><pgm name='QZLSOLST' lib='QSYS' error='on'>\
+<parm io='out'><ds>\
+<data type='24h'/>\
+<data type='10i0' var='browse_interval_ms'>0</data><data type='10i0' var='pending_browse_interval_ms'>0</data>\
+<data type='8h'/>\
+<data type='10i0' var='guest_logon_support'>0</data><data type='10i0' var='pending_guest_logon_support'>0</data>\
+<data type='10a' var='guest_profile'> </data><data type='10a' var='pending_guest_profile'> </data>\
+<data type='668h'/>\
+<data type='1a' var='system_name_access'> </data><data type='1a' var='pending_system_name_access'> </data>\
+<data type='1a' var='auth_method'> </data><data type='1a' var='pending_auth_method'> </data>\
+<data type='8h'/>\
+<data type='10i0' var='message_auth_mode'>0</data><data type='10i0' var='pending_message_auth_mode'>0</data>\
+<data type='8h'/>\
+<data type='10i0' var='lanman_auth'>0</data><data type='10i0' var='pending_lanman_auth'>0</data>\
+<data type='10i0' var='encrypted_connection_enforcement'>0</data><data type='10i0' var='pending_encrypted_connection_enforcement'>0</data>\
+<data type='20h'/>\
+</ds></parm>\
+<parm io='in'><data type='10i0'>800</data></parm>\
+<parm io='out'><ds><data type='10i0' var='total_records'>0</data><data type='10i0' var='records_returned'>0</data><data type='10i0' var='record_length'>0</data><data type='10i0' var='info_returned'>0</data><data type='1a' var='info_complete'> </data><data type='47h'/></ds></parm>\
+<parm io='in'><data type='8a'>ZLSL0201</data></parm>\
+<parm io='in'><data type='15a'> </data></parm>\
+<parm io='both'><ds><data type='10i0'>16</data><data type='10i0' var='ec_bytes_available'>0</data><data type='7a' var='ec_msgid'> </data><data type='1a'> </data></ds></parm>\
+</pgm></xmlservice>"
+  if [ ! -x /QOpenSys/usr/bin/qsh ]; then
+    printf '%s\n' "call=FAILED"
+    printf '%s\n' "QZLSOLST qsh not present"
+    return 1
+  fi
+  X=$(printf '%s' "$XML" | sed "s/'/''/g")
+  OUT=$(/QOpenSys/usr/bin/qsh -c "db2 \"CALL QXMLSERV.iPLUGR512K('*na','*here *cdata','$X')\"" 2>&1 </dev/null)
+  printf '%s\n' "$OUT" | sed -n "s/^<data type='[^']*' var='\([^']*\)'><!\[CDATA\[\(.*\)\]\]><\/data>.*/\1=\2/p" | sed 's/ *$//'
+  if printf '%s\n' "$OUT" | grep -q '+++ success'; then
+    printf '%s\n' "call=success"
+    return 0
+  fi
+  printf '%s\n' "call=FAILED"
+  printf '%s\n' "$OUT" | grep -i 'error\|CPF\|SQL' | head -5
+  return 1
+}
+
+# PASE python for SMB NEGOTIATE. First executable candidate wins:
+# $AIXRAY_QOPENSYS/pkgs/bin/python3 (default root /QOpenSys), then
+# usr/bin/python3, then command -v python3.
+function nsa_smb_resolve_python {
+  typeset root cand
+  root=${AIXRAY_QOPENSYS:-/QOpenSys}
+  for cand in "$root/pkgs/bin/python3" "$root/usr/bin/python3"; do
+    if [ -x "$cand" ]; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+  done
+  cand=$(command -v python3 2>/dev/null) || cand=""
+  if [ -n "$cand" ] && [ -x "$cand" ]; then
+    printf '%s\n' "$cand"
+    return 0
+  fi
+  return 1
+}
+
+function nsa_smb_tcp_open {
+  (eval 'exec 3<>/dev/tcp/127.0.0.1/445') >/dev/null 2>&1 # network-lint: allow -- loopback-only SMB NEGOTIATE; never leaves the host
+}
+
+function nsa_smb_live {
+  typeset py smb_rc
+  py=$(nsa_smb_resolve_python) || py=""
+  if [ -n "$py" ]; then
+    "$py" - <<'PY'
+import socket, struct, sys
+HOST, PORT = "127.0.0.1", 445
+def send(pkt, timeout=5):
+    s = socket.create_connection((HOST, PORT), timeout=timeout) # network-lint: allow -- loopback-only SMB NEGOTIATE; never leaves the host
+    try:
+        s.sendall(struct.pack(">I", len(pkt)) + pkt)
+        hdr = s.recv(4)
+        if len(hdr) < 4:
+            raise RuntimeError("short_response")
+        n = struct.unpack(">I", hdr)[0] & 0xFFFFFF
+        data = b""
+        while len(data) < n:
+            chunk = s.recv(n - len(data))
+            if not chunk:
+                raise RuntimeError("short_response")
+            data += chunk
+        return data
+    finally:
+        s.close()
+def smb1_negotiate(dialects):
+    hdr = (b"\xffSMB" + b"\x72" + b"\x00\x00\x00\x00" + b"\x18" + b"\x53\xc8" +
+           b"\x00"*2 + b"\x00"*8 + b"\x00\x00" + b"\xff\xfe" + b"\x00\x00" + b"\x00\x00")
+    body = b"".join(b"\x02" + d + b"\x00" for d in dialects)
+    return hdr + b"\x00" + struct.pack("<H", len(body)) + body
+def smb2_negotiate(dialects):
+    hdr = b"\xfeSMB" + struct.pack("<HHIHHIIQIIQ", 64, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0) + b"\x00"*16
+    body = (struct.pack("<HHHHI", 36, len(dialects), 1, 0, 0) + b"\x00"*16 +
+            struct.pack("<II", 0, 0) + b"".join(struct.pack("<H", d) for d in dialects))
+    return hdr + body
+def classify(resp, kind):
+    if not resp:
+        return "refused"
+    if kind == "smb1":
+        if len(resp) >= 9 and resp[:4] == b"\xffSMB":
+            wc = resp[32] if len(resp) > 32 else 0
+            st = struct.unpack("<I", resp[5:9])[0]
+            if wc == 0 or st != 0:
+                return "refused"
+            return "answered"
+        return "refused"
+    if len(resp) >= 70 and resp[:4] == b"\xfeSMB":
+        st = struct.unpack("<I", resp[8:12])[0]
+        if st == 0 and struct.unpack("<H", resp[64:66])[0] == 65:
+            dialect = struct.unpack("<HH", resp[66:70])[1]
+            return "0x%04x" % dialect
+        return "refused"
+    return "refused"
+def probe_reason(exc):
+    name = type(exc).__name__
+    msg = str(exc).lower()
+    if name == "timeout" or "timed out" in msg or "timeout" in msg:
+        return "timeout"
+    if "reset" in msg:
+        return "reset"
+    if "short_response" in msg:
+        return "short_response"
+    return "probe_failed"
+def probe(kind, pkt):
+    try:
+        return classify(send(pkt), kind), ""
+    except Exception as exc:
+        return "not_assessed", probe_reason(exc)
+try:
+    socket.create_connection((HOST, PORT), timeout=2).close() # network-lint: allow -- loopback-only SMB NEGOTIATE; never leaves the host
+except Exception:
+    print("smb1=unbound smb2=unbound smb3=unbound")
+    sys.exit(0)
+s1, r1 = probe("smb1", smb1_negotiate([b"NT LM 0.12"]))
+s2, r2 = probe("smb2", smb2_negotiate([0x0202, 0x0210]))
+s3, r3 = probe("smb3", smb2_negotiate([0x0300, 0x0302]))
+print("smb1=%s smb2=%s smb3=%s" % (s1, s2, s3))
+whys = []
+if r1:
+    whys.append("smb1=" + r1)
+if r2:
+    whys.append("smb2=" + r2)
+if r3:
+    whys.append("smb3=" + r3)
+if whys:
+    print("smb_why=" + ";".join(whys))
+PY
+    smb_rc=$?
+    printf '%s\n' "smb_python=$py"
+    return $smb_rc
+  fi
+  if nsa_smb_tcp_open; then
+    printf '%s\n' "smb1=not_assessed smb2=not_assessed smb3=not_assessed"
+    printf '%s\n' "smb_why=python3 not present; SMB NEGOTIATE not run"
+    return 2
+  fi
+  printf '%s\n' "smb1=unbound smb2=unbound smb3=unbound"
+  return 0
+}
+
+function nsa_parse_smb {
+  printf '%s\n' "$1" | awk '
+    /^smb_why=/ {
+      why = substr($0, 9)
+      next
+    }
+    /^smb_python=/ {
+      smbpy = substr($0, index($0, "=") + 1)
+      next
+    }
+    {
+      n = split($0, a, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        p = index(a[i], "=")
+        if (p < 2) continue
+        k = substr(a[i], 1, p - 1)
+        v = substr(a[i], p + 1)
+        if (k == "smb1") smb1 = v
+        if (k == "smb2") smb2 = v
+        if (k == "smb3") smb3 = v
+        if (k == "smb_python") smbpy = v
+      }
+    }
+    /Connection refused/ { unbound = 1 }
+    /Network is unreachable/ { unbound = 1 }
+    /timed out/ { unbound = 1 }
+    /SMB1 negotiate, dialects NT LM 0.12 only:/ {
+      if ($0 ~ /wordcount 0/ || $0 !~ /status 0x00000000/) smb1 = "refused"
+      else smb1 = "answered"
+    }
+    /\(SMB2 only offered\)/ {
+      if ($0 ~ /status 0x00000000/ && match($0, /dialect 0x[0-9a-fA-F]+/))
+        smb2 = substr($0, RSTART + 8, RLENGTH - 8)
+      else
+        smb2 = "refused"
+    }
+    /\(SMB3 only offered\)/ {
+      if ($0 ~ /status 0x00000000/ && match($0, /dialect 0x[0-9a-fA-F]+/))
+        smb3 = substr($0, RSTART + 8, RLENGTH - 8)
+      else
+        smb3 = "refused"
+    }
+    END {
+      extra = ""
+      if (smbpy != "") extra = " smb_python=" smbpy
+      if (unbound && smb1 == "" && smb2 == "" && smb3 == "") {
+        print "smb1=unbound smb2=unbound smb3=unbound" extra
+        exit
+      }
+      if (smb1 == "") smb1 = "refused"
+      if (smb2 == "") smb2 = "refused"
+      if (smb3 == "") smb3 = "refused"
+      print "smb1=" smb1 " smb2=" smb2 " smb3=" smb3 extra
+      if (why != "") print "smb_why=" why
+    }
+  '
+}
+
+function nsa_why_from {
+  printf '%s\n' "$1" | awk '
+    $0 ~ /^ec_msgid=/ {
+      msgid = substr($0, index($0, "=") + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", msgid)
+    }
+    $0 ~ /^call=/ {
+      call = substr($0, index($0, "=") + 1)
+    }
+    {
+      if (msgid == "" && match($0, /CPF[0-9][0-9][0-9][0-9]/))
+        msgid = substr($0, RSTART, RLENGTH)
+      if (msgid == "" && match($0, /SQL[0-9][0-9][0-9][0-9]/))
+        msgid = substr($0, RSTART, RLENGTH)
+    }
+    END {
+      printf "%s\t%s\n", call, msgid
+    }
+  '
+}
+
+function capture_cap_netserver_attrs {
+  typeset nsa_rc smb_rc parsed call msgid smb_line
+  NSA_OK=0
+  NSA_WHY=""
+  NSA_RAW=""
+
+  NSA_RAW=$(nsa_probe netserver_attrs nsa_qzls_live)
+  nsa_rc=$?
+
+  parsed=$(nsa_why_from "$NSA_RAW")
+  call=$(printf '%s\n' "$parsed" | awk -F'\t' '{print $1}')
+  msgid=$(printf '%s\n' "$parsed" | awk -F'\t' '{print $2}')
+
+  if [ "$nsa_rc" -eq 127 ]; then
+    NSA_WHY="QZLSOLST capture missing"
+  elif [ -z "$NSA_RAW" ]; then
+    NSA_WHY="QZLSOLST capture empty (rc=$nsa_rc)"
+  elif [ -n "$msgid" ]; then
+    NSA_WHY="QZLSOLST $msgid"
+  elif [ "$nsa_rc" -ne 0 ] || [ "$call" = "FAILED" ]; then
+    NSA_WHY="QZLSOLST failed (no message id)"
+  elif [ "$call" = "success" ]; then
+    NSA_OK=1
+  else
+    NSA_WHY="QZLSOLST failed (no message id)"
+  fi
+
+  smb_line=$(nsa_probe smb_negotiate nsa_smb_live)
+  smb_rc=$?
+  if [ "$smb_rc" -eq 127 ]; then
+    smb_line="smb1=unbound smb2=unbound smb3=unbound"
+  else
+    smb_line=$(nsa_parse_smb "$smb_line")
+  fi
+
+  if [ -n "$NSA_RAW" ]; then
+    NSA_RAW="$NSA_RAW
+$smb_line"
+  else
+    NSA_RAW=$smb_line
+  fi
+  return 0
+}
+
 # Shared SECURITY_INFO capture. Empty or refused is D-i6 evidence.
 
 function capture_cap_security_info {
@@ -890,7 +1204,7 @@ function capture_cap_security_info {
 # value meaning the scan profile cannot read that sysval (D-i6) — not empty.
 
 function capture_cap_system_values {
-  SYSVAL_RAW=$(ibmi_sql system_value_info "SELECT VARCHAR(SYSTEM_VALUE_NAME,10) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(CURRENT_NUMERIC_VALUE)),''),20) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CURRENT_CHARACTER_VALUE),''),256) FROM QSYS2.SYSTEM_VALUE_INFO ORDER BY SYSTEM_VALUE_NAME")
+  SYSVAL_RAW=$(ibmi_sql system_value_info "SELECT VARCHAR(SYSTEM_VALUE_NAME,10) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(CURRENT_NUMERIC_VALUE)),''),20) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CURRENT_CHARACTER_VALUE),''),4096) FROM QSYS2.SYSTEM_VALUE_INFO ORDER BY SYSTEM_VALUE_NAME")
   SYSVAL_RC=$?
   SYSVAL_OK=0
   SYSVAL_WHY=""
@@ -922,13 +1236,918 @@ function capture_cap_user_info {
   return 0
 }
 
-capture_cap_system_values
+capture_cap_netserver_attrs
 capture_cap_security_info
+capture_cap_system_values
 capture_cap_user_info
+IBMI_SRCREG=$(cat <<'PTXRAY_SRCREG_EOF'
+ibmi-lifecycle|true|2026-08-26|30|curator-verified
+cis-ibm-i|true|2026-08-19|180|curator-verified
+ibmi-security-bulletins|true|2026-08-26|30|ibm-securityapp-fetch
+ibmi-psp-group-levels|false|unknown|30|unknown
+PTXRAY_SRCREG_EOF
+)
+IBMI_SRCREG_COUNT=4
+IBMI_SRCREG_PAYLOAD=$(cat <<'PTXRAY_SRCREG_PAYLOAD_EOF'
+2.1|1994-06-30
+2.2|1995-03-31
+2.3|1996-05-31
+3.0|1997-05-31
+3.1|1998-10-31
+3.2|2000-05-31
+3.6|1998-10-31
+3.7|1999-06-30
+4.1|2000-05-31
+4.2|2000-05-31
+4.3|2001-01-31
+4.4|2001-05-31
+4.5|2002-07-31
+5.1|2005-09-30
+5.2|2007-04-30
+5.3|2009-04-30
+5.4|2013-09-30
+6.1|2015-09-30
+7.1|2018-04-30
+7.2|2021-04-30
+7.3|2023-09-30
+7.4|2026-09-30
+7.5|SUPPORTED
+7.6|SUPPORTED
+PTXRAY_SRCREG_PAYLOAD_EOF
+)
+IBMI_SRCREG_PAYLOAD_COUNT=24
+IBMI_SRCREG_PAYLOAD_KIND=release-eol-pairs-v1
+IBMI_BULLETINS=$(cat <<'PTXRAY_IBMI_BULLETINS_EOF'
+CVE-2011-4599|-||2025-07-31||none
+CVE-2012-2806|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2012-2806|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2012-2806|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2012-2806|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2013-6629|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2013-6629|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2013-6629|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2013-6629|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2013-6630|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2013-6630|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2013-6630|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2013-6630|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2014-0076|-||2019-12-18||none
+CVE-2014-0160|-||2019-12-18||none
+CVE-2014-0178|-||2019-12-18||none
+CVE-2014-0195|-||2019-12-18||none
+CVE-2014-0198|-||2019-12-18||none
+CVE-2014-0221|-||2019-12-18||none
+CVE-2014-0224|-||2019-12-18||none
+CVE-2014-0239|-||2019-12-18||none
+CVE-2014-3086|-||2019-12-18||none
+CVE-2014-3470|-||2019-12-18||none
+CVE-2014-3566|-||2019-12-18||none
+CVE-2014-3569|-||2019-12-18||none
+CVE-2014-3570|-||2019-12-18||none
+CVE-2014-3571|-||2019-12-18||none
+CVE-2014-3572|-||2019-12-18||none
+CVE-2014-4208|-||2019-12-18||none
+CVE-2014-4209|-||2019-12-18||none
+CVE-2014-4218|-||2019-12-18||none
+CVE-2014-4219|-||2019-12-18||none
+CVE-2014-4220|-||2019-12-18||none
+CVE-2014-4221|-||2019-12-18||none
+CVE-2014-4227|-||2019-12-18||none
+CVE-2014-4244|-||2019-12-18||none
+CVE-2014-4252|-||2019-12-18||none
+CVE-2014-4262|-||2019-12-18||none
+CVE-2014-4263|-||2019-12-18||none
+CVE-2014-4265|-||2019-12-18||none
+CVE-2014-4266|-||2019-12-18||none
+CVE-2014-4268|-||2019-12-18||none
+CVE-2014-6549|-||2019-12-18||none
+CVE-2014-6585|-||2019-12-18||none
+CVE-2014-6587|-||2019-12-18||none
+CVE-2014-6591|-||2019-12-18||none
+CVE-2014-6593|-||2019-12-18||none
+CVE-2014-6601|-||2019-12-18||none
+CVE-2014-8176|-||2019-12-18||none
+CVE-2014-8275|-||2019-12-18||none
+CVE-2014-8892|-||2019-12-18||none
+CVE-2014-8920|-||2019-12-18||none
+CVE-2015-0114|-||2019-12-18||none
+CVE-2015-0138|-||2019-12-18||none
+CVE-2015-0192|-||2019-12-18||none
+CVE-2015-0204|-||2019-12-18||none
+CVE-2015-0205|-||2019-12-18||none
+CVE-2015-0206|-||2019-12-18||none
+CVE-2015-0207|-||2019-12-18||none
+CVE-2015-0208|-||2019-12-18||none
+CVE-2015-0209|-||2019-12-18||none
+CVE-2015-0285|-||2019-12-18||none
+CVE-2015-0286|-||2019-12-18||none
+CVE-2015-0287|-||2019-12-18||none
+CVE-2015-0288|-||2019-12-18||none
+CVE-2015-0289|-||2019-12-18||none
+CVE-2015-0290|-||2019-12-18||none
+CVE-2015-0292|-||2019-12-18||none
+CVE-2015-0293|-||2019-12-18||none
+CVE-2015-0383|-||2019-12-18||none
+CVE-2015-0395|-||2019-12-18||none
+CVE-2015-0400|-||2019-12-18||none
+CVE-2015-0403|-||2019-12-18||none
+CVE-2015-0406|-||2019-12-18||none
+CVE-2015-0407|-||2019-12-18||none
+CVE-2015-0408|-||2019-12-18||none
+CVE-2015-0410|-||2019-12-18||none
+CVE-2015-0412|-||2019-12-18||none
+CVE-2015-0437|-||2019-12-18||none
+CVE-2015-0458|-||2019-12-18||none
+CVE-2015-0459|-||2019-12-18||none
+CVE-2015-0469|-||2019-12-18||none
+CVE-2015-0477|-||2019-12-18||none
+CVE-2015-0478|-||2019-12-18||none
+CVE-2015-0480|-||2019-12-18||none
+CVE-2015-0486|-||2019-12-18||none
+CVE-2015-0488|-||2019-12-18||none
+CVE-2015-0491|-||2019-12-18||none
+CVE-2015-1283|-||2019-12-18||none
+CVE-2015-1787|-||2019-12-18||none
+CVE-2015-1788|-||2019-12-18||none
+CVE-2015-1789|-||2019-12-18||none
+CVE-2015-1790|-||2019-12-18||none
+CVE-2015-1791|-||2019-12-18||none
+CVE-2015-1792|-||2019-12-18||none
+CVE-2015-1793|-||2019-12-18||none
+CVE-2015-1794|-||2019-12-18||none
+CVE-2015-1914|-||2019-12-18||none
+CVE-2015-1916|-||2019-12-18||none
+CVE-2015-1931|-||2019-12-18||none
+CVE-2015-2590|-||2019-12-18||none
+CVE-2015-2596|-||2019-12-18||none
+CVE-2015-2601|-||2019-12-18||none
+CVE-2015-2613|-||2019-12-18||none
+CVE-2015-2619|-||2019-12-18||none
+CVE-2015-2621|-||2019-12-18||none
+CVE-2015-2625|-||2019-12-18||none
+CVE-2015-2628|-||2019-12-18||none
+CVE-2015-2632|-||2019-12-18||none
+CVE-2015-2637|-||2019-12-18||none
+CVE-2015-2638|-||2019-12-18||none
+CVE-2015-2659|-||2019-12-18||none
+CVE-2015-2664|-||2019-12-18||none
+CVE-2015-2716|-||2019-12-18||none
+CVE-2015-2808|-||2024-10-08||none
+CVE-2015-3183|-||2019-12-18||none
+CVE-2015-3193|-||2019-12-18||none
+CVE-2015-3194|-||2019-12-18||none
+CVE-2015-3195|-||2019-12-18||none
+CVE-2015-3196|-||2019-12-18||none
+CVE-2015-3197|-||2019-12-18||none
+CVE-2015-3223|-||2019-12-18||none
+CVE-2015-4000|-||2019-12-18||none
+CVE-2015-4620|-||2019-12-18||none
+CVE-2015-4729|-||2019-12-18||none
+CVE-2015-4731|-||2019-12-18||none
+CVE-2015-4732|-||2019-12-18||none
+CVE-2015-4733|-||2019-12-18||none
+CVE-2015-4734|-||2019-12-18||none
+CVE-2015-4736|-||2019-12-18||none
+CVE-2015-4748|-||2019-12-18||none
+CVE-2015-4749|-||2019-12-18||none
+CVE-2015-4760|-||2019-12-18||none
+CVE-2015-4803|-||2019-12-18||none
+CVE-2015-4805|-||2019-12-18||none
+CVE-2015-4806|-||2019-12-18||none
+CVE-2015-4810|-||2019-12-18||none
+CVE-2015-4835|-||2019-12-18||none
+CVE-2015-4840|-||2019-12-18||none
+CVE-2015-4842|-||2019-12-18||none
+CVE-2015-4843|-||2019-12-18||none
+CVE-2015-4844|-||2019-12-18||none
+CVE-2015-4860|-||2019-12-18||none
+CVE-2015-4868|-||2019-12-18||none
+CVE-2015-4871|-||2019-12-18||none
+CVE-2015-4872|-||2019-12-18||none
+CVE-2015-4881|-||2019-12-18||none
+CVE-2015-4882|-||2019-12-18||none
+CVE-2015-4883|-||2019-12-18||none
+CVE-2015-4893|-||2019-12-18||none
+CVE-2015-4902|-||2019-12-18||none
+CVE-2015-4903|-||2019-12-18||none
+CVE-2015-4911|-||2019-12-18||none
+CVE-2015-5006|-||2019-12-18||none
+CVE-2015-5041|-||2019-12-18||none
+CVE-2015-5252|-||2019-12-18||none
+CVE-2015-5296|-||2019-12-18||none
+CVE-2015-5299|-||2019-12-18||none
+CVE-2015-5330|-||2019-12-18||none
+CVE-2015-5370|-||2019-12-18||none
+CVE-2015-5477|-||2019-12-18||none
+CVE-2015-7450|-||2019-12-18||none
+CVE-2015-7540|-||2019-12-18||none
+CVE-2015-7560|-||2019-12-18||none
+CVE-2015-7575|-||2024-10-08||none
+CVE-2015-7981|-||2019-12-18||none
+CVE-2015-8000|-||2019-12-18||none
+CVE-2015-8126|-||2019-12-18||none
+CVE-2015-8461|-||2019-12-18||none
+CVE-2015-8467|-||2019-12-18||none
+CVE-2015-8472|-||2019-12-18||none
+CVE-2015-8540|-||2019-12-18||none
+CVE-2015-8605|-||2019-12-18||none
+CVE-2015-8704|-||2019-12-18||none
+CVE-2015-8705|-||2019-12-18||none
+CVE-2016-0264|-||2019-12-18||none
+CVE-2016-0287|-||2019-12-18||none
+CVE-2016-0359|-||2019-12-18||none
+CVE-2016-0363|-||2019-12-18||none
+CVE-2016-0376|-||2019-12-18||none
+CVE-2016-0385|-||2019-12-18||none
+CVE-2016-0402|-||2019-12-18||none
+CVE-2016-0448|-||2019-12-18||none
+CVE-2016-0466|-||2019-12-18||none
+CVE-2016-0475|-||2019-12-18||none
+CVE-2016-0483|-||2019-12-18||none
+CVE-2016-0494|-||2019-12-18||none
+CVE-2016-0636|-||2019-12-18||none
+CVE-2016-0686|-||2019-12-18||none
+CVE-2016-0687|-||2019-12-18||none
+CVE-2016-0695|-||2019-12-18||none
+CVE-2016-0701|-||2019-12-18||none
+CVE-2016-0702|-||2019-12-18||none
+CVE-2016-0703|-||2019-12-18||none
+CVE-2016-0704|-||2019-12-18||none
+CVE-2016-0705|-||2019-12-19||none
+CVE-2016-0736|-||2019-12-18||none
+CVE-2016-0771|-||2019-12-18||none
+CVE-2016-0777|-||2019-12-18||none
+CVE-2016-0778|-||2019-12-18||none
+CVE-2016-0797|-||2019-12-18||none
+CVE-2016-0798|-||2019-12-18||none
+CVE-2016-0799|-||2019-12-18||none
+CVE-2016-0800|-||2019-12-18||none
+CVE-2016-10009|-||2019-12-18||none
+CVE-2016-10010|-||2019-12-18||none
+CVE-2016-10011|-||2019-12-18||none
+CVE-2016-10012|-||2019-12-18||none
+CVE-2016-10165|-||2019-12-19||none
+CVE-2016-1285|-||2019-12-18||none
+CVE-2016-1286|-||2019-12-18||none
+CVE-2016-1546|-||2019-12-18||none
+CVE-2016-1907|-||2019-12-18||none
+CVE-2016-1908|-||2019-12-18||none
+CVE-2016-2088|-||2019-12-18||none
+CVE-2016-2105|-||2019-12-18||none
+CVE-2016-2106|-||2019-12-18||none
+CVE-2016-2107|-||2019-12-18||none
+CVE-2016-2108|-||2019-12-18||none
+CVE-2016-2109|-||2019-12-18||none
+CVE-2016-2110|-||2019-12-18||none
+CVE-2016-2111|-||2019-12-18||none
+CVE-2016-2112|-||2019-12-18||none
+CVE-2016-2113|-||2019-12-18||none
+CVE-2016-2114|-||2019-12-18||none
+CVE-2016-2115|-||2019-12-18||none
+CVE-2016-2118|-||2019-12-18||none
+CVE-2016-2161|-||2019-12-18||none
+CVE-2016-2176|-||2019-12-18||none
+CVE-2016-2177|-||2019-12-18||none
+CVE-2016-2178|-||2019-12-18||none
+CVE-2016-2179|-||2019-12-18||none
+CVE-2016-2180|-||2019-12-18||none
+CVE-2016-2181|-||2019-12-18||none
+CVE-2016-2182|-||2019-12-18||none
+CVE-2016-2183|-||2024-10-04||none
+CVE-2016-2774|-||2019-12-18||none
+CVE-2016-2775|-||2019-12-18||none
+CVE-2016-2776|-||2019-12-18||none
+CVE-2016-2842|-||2019-12-18||none
+CVE-2016-2923|-||2019-12-18||none
+CVE-2016-2960|-||2019-12-18||none
+CVE-2016-3092|-||2019-12-18||none
+CVE-2016-3115|-||2019-12-18||none
+CVE-2016-3422|-||2019-12-18||none
+CVE-2016-3425|-||2019-12-18||none
+CVE-2016-3426|-||2019-12-18||none
+CVE-2016-3427|-||2019-12-18||none
+CVE-2016-3443|-||2019-12-18||none
+CVE-2016-3449|-||2019-12-18||none
+CVE-2016-3458|-||2019-12-18||none
+CVE-2016-3485|-||2019-12-18||none
+CVE-2016-3498|-||2019-12-18||none
+CVE-2016-3500|-||2019-12-18||none
+CVE-2016-3503|-||2019-12-18||none
+CVE-2016-3508|-||2019-12-18||none
+CVE-2016-3511|-||2019-12-18||none
+CVE-2016-3550|-||2019-12-18||none
+CVE-2016-3552|-||2019-12-18||none
+CVE-2016-3587|-||2019-12-18||none
+CVE-2016-3598|-||2019-12-18||none
+CVE-2016-3606|-||2019-12-18||none
+CVE-2016-3610|-||2019-12-18||none
+CVE-2016-4979|-||2019-12-18||none
+CVE-2016-5387|-||2019-12-18||none
+CVE-2016-5388|-||2019-12-18||none
+CVE-2016-5542|-||2019-12-18||none
+CVE-2016-5546|-||2019-12-18||none
+CVE-2016-5547|-||2019-12-18||none
+CVE-2016-5548|-||2019-12-18||none
+CVE-2016-5549|-||2019-12-18||none
+CVE-2016-5552|-||2019-12-18||none
+CVE-2016-5554|-||2019-12-18||none
+CVE-2016-5556|-||2019-12-18||none
+CVE-2016-5568|-||2019-12-18||none
+CVE-2016-5573|-||2019-12-18||none
+CVE-2016-5582|-||2019-12-18||none
+CVE-2016-5597|-||2019-12-18||none
+CVE-2016-5983|-||2019-12-18||none
+CVE-2016-5986|-||2019-12-18||none
+CVE-2016-6170|-||2019-12-18||none
+CVE-2016-6302|-||2019-12-18||none
+CVE-2016-6303|-||2019-12-18||none
+CVE-2016-6304|-||2019-12-18||none
+CVE-2016-6305|-||2019-12-18||none
+CVE-2016-6306|-||2019-12-18||none
+CVE-2016-6307|-||2019-12-18||none
+CVE-2016-6308|-||2019-12-18||none
+CVE-2016-6329|-||2024-10-04||none
+CVE-2016-7055|-||2019-12-18||none
+CVE-2016-8743|-||2019-12-18||none
+CVE-2016-8858|-||2019-12-18||none
+CVE-2016-8864|-||2019-12-18||none
+CVE-2016-9131|-||2019-12-18||none
+CVE-2016-9147|-||2019-12-18||none
+CVE-2016-9444|-||2019-12-18||none
+CVE-2016-9778|-||2019-12-18||none
+CVE-2016-9840|-||2019-12-19||none
+CVE-2016-9841|-||2019-12-19||none
+CVE-2016-9842|-||2019-12-19||none
+CVE-2016-9843|-||2019-12-19||none
+CVE-2017-10053|-||2019-12-19||none
+CVE-2017-10067|-||2019-12-19||none
+CVE-2017-10074|-||2019-12-19||none
+CVE-2017-10078|-||2019-12-19||none
+CVE-2017-10081|-||2019-12-19||none
+CVE-2017-10087|-||2019-12-19||none
+CVE-2017-10089|-||2019-12-19||none
+CVE-2017-10090|-||2019-12-19||none
+CVE-2017-10096|-||2019-12-19||none
+CVE-2017-10101|-||2019-12-19||none
+CVE-2017-10102|-||2019-12-19||none
+CVE-2017-10105|-||2019-12-19||none
+CVE-2017-10107|-||2019-12-19||none
+CVE-2017-10108|-||2019-12-19||none
+CVE-2017-10109|-||2019-12-19||none
+CVE-2017-10110|-||2019-12-19||none
+CVE-2017-10111|-||2019-12-19||none
+CVE-2017-10115|-||2019-12-19||none
+CVE-2017-10116|-||2019-12-19||none
+CVE-2017-10118|-||2019-12-19||none
+CVE-2017-10125|-||2019-12-19||none
+CVE-2017-10135|-||2019-12-19||none
+CVE-2017-10176|-||2019-12-19||none
+CVE-2017-10193|-||2019-12-19||none
+CVE-2017-10198|-||2019-12-19||none
+CVE-2017-10243|-||2019-12-19||none
+CVE-2017-10274|-||2019-12-19||none
+CVE-2017-10281|-||2019-12-19||none
+CVE-2017-10285|-||2019-12-19||none
+CVE-2017-10293|-||2019-12-19||none
+CVE-2017-10295|-||2019-12-19||none
+CVE-2017-10309|-||2019-12-19||none
+CVE-2017-10345|-||2019-12-19||none
+CVE-2017-10346|-||2019-12-19||none
+CVE-2017-10347|-||2019-12-19||none
+CVE-2017-10348|-||2019-12-19||none
+CVE-2017-10349|-||2019-12-19||none
+CVE-2017-10350|-||2019-12-19||none
+CVE-2017-10355|-||2019-12-19||none
+CVE-2017-10356|-||2019-12-19||none
+CVE-2017-10357|-||2019-12-19||none
+CVE-2017-10388|-||2019-12-19||none
+CVE-2017-12150|-||2019-12-19||none
+CVE-2017-12151|-||2019-12-19||none
+CVE-2017-12163|-||2019-12-19||none
+CVE-2017-12613|-||2019-12-19||none
+CVE-2017-12618|-||2019-12-19||none
+CVE-2017-12626|-||2026-06-19||none
+CVE-2017-1289|-||2019-12-19||none
+CVE-2017-1376|-||2019-12-19||none
+CVE-2017-1460|-||2019-12-19||none
+CVE-2017-14746|-||2019-12-19||none
+CVE-2017-14952|-||2025-07-31||none
+CVE-2017-15085|-||2019-12-19||none
+CVE-2017-15086|-||2019-12-19||none
+CVE-2017-15087|-||2019-12-19||none
+CVE-2017-15232|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2017-15232|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2017-15232|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2017-15232|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2017-15275|-||2019-12-19||none
+CVE-2017-15691|-||2025-12-10||none
+CVE-2017-15708|-||2024-01-03||none
+CVE-2017-15906|-||2019-12-19||none
+CVE-2017-17484|-||2025-07-31||none
+CVE-2017-2619|-||2019-12-18||none
+CVE-2017-3135|-||2019-12-18||none
+CVE-2017-3136|-||2019-12-18||none
+CVE-2017-3137|-||2019-12-18||none
+CVE-2017-3138|-||2019-12-18||none
+CVE-2017-3142|-||2019-12-19||none
+CVE-2017-3143|-||2019-12-19||none
+CVE-2017-3145|-||2019-12-19||none
+CVE-2017-3167|-||2019-12-19||none
+CVE-2017-3169|-||2019-12-19||none
+CVE-2017-3231|-||2019-12-18||none
+CVE-2017-3241|-||2019-12-18||none
+CVE-2017-3252|-||2019-12-18||none
+CVE-2017-3253|-||2019-12-18||none
+CVE-2017-3259|-||2019-12-18||none
+CVE-2017-3260|-||2019-12-18||none
+CVE-2017-3261|-||2019-12-18||none
+CVE-2017-3272|-||2019-12-18||none
+CVE-2017-3289|-||2019-12-18||none
+CVE-2017-3509|-||2019-12-19||none
+CVE-2017-3511|-||2019-12-19||none
+CVE-2017-3512|-||2019-12-19||none
+CVE-2017-3514|-||2019-12-19||none
+CVE-2017-3526|-||2019-12-19||none
+CVE-2017-3533|-||2019-12-19||none
+CVE-2017-3539|-||2019-12-19||none
+CVE-2017-3544|-||2019-12-19||none
+CVE-2017-3730|-||2019-12-18||none
+CVE-2017-3731|-||2019-12-18||none
+CVE-2017-3732|-||2019-12-19||none
+CVE-2017-3736|-||2019-12-19||none
+CVE-2017-5715|-||2024-10-07||none
+CVE-2017-5753|-||2024-10-07||none
+CVE-2017-5754|-||2024-10-07||none
+CVE-2017-7494|-||2019-12-19||none
+CVE-2017-7659|-||2019-12-19||none
+CVE-2017-7668|-||2019-12-19||none
+CVE-2017-7679|-||2019-12-19||none
+CVE-2017-9798|-||2019-12-19||none
+CVE-2018-0732|-||2019-12-19||none
+CVE-2018-0733|-||2019-12-19||none
+CVE-2018-0734|-||2019-12-19||none
+CVE-2018-0737|-||2019-12-19||none
+CVE-2018-0739|-||2019-12-19||none
+CVE-2018-1050|-||2019-12-19||none
+CVE-2018-1057|-||2019-12-19||none
+CVE-2018-10858|-||2019-12-19||none
+CVE-2018-10918|-||2019-12-19||none
+CVE-2018-10919|-||2019-12-19||none
+CVE-2018-11212|-||2019-12-19||none
+CVE-2018-1139|-||2019-12-19||none
+CVE-2018-1140|-||2019-12-19||none
+CVE-2018-11763|-||2019-12-19||none
+CVE-2018-11813|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2018-11813|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2018-11813|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2018-11813|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2018-12539|-||2019-12-19||none
+CVE-2018-12547|-||2019-12-19||none
+CVE-2018-12549|-||2019-12-19||none
+CVE-2018-1333|-||2018-08-08||none
+CVE-2018-13785|-||2019-12-19||none
+CVE-2018-1388|-||2019-12-19||none
+CVE-2018-1417|-||2019-12-19||none
+CVE-2018-14498|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2018-14498|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2018-14498|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2018-14498|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2018-1517|-||2019-12-19||none
+CVE-2018-15473|-||2019-12-19||none
+CVE-2018-1656|-||2019-12-19||none
+CVE-2018-17189|-||2019-02-20||none
+CVE-2018-17199|-||2019-02-20||none
+CVE-2018-1888|-||2022-08-29||none
+CVE-2018-1890|-||2019-12-19||none
+CVE-2018-20685|-||2019-12-19||none
+CVE-2018-25031|7.2|SI78973|2022-04-08||ibm-bulletin-table
+CVE-2018-25031|7.3|SI78972|2022-04-08||ibm-bulletin-table
+CVE-2018-25031|7.4|SI78971|2022-04-08||ibm-bulletin-table
+CVE-2018-25032|7.4|MF70398|2022-10-26||ibm-bulletin-table
+CVE-2018-25032|7.5|MF70403|2022-10-26||ibm-bulletin-table
+CVE-2018-2579|-||2019-12-19||none
+CVE-2018-2582|-||2019-12-19||none
+CVE-2018-2588|-||2019-12-19||none
+CVE-2018-2599|-||2019-12-19||none
+CVE-2018-2602|-||2019-12-19||none
+CVE-2018-2603|-||2019-12-19||none
+CVE-2018-2618|-||2019-12-19||none
+CVE-2018-2629|-||2019-12-19||none
+CVE-2018-2633|-||2019-12-19||none
+CVE-2018-2634|-||2019-12-19||none
+CVE-2018-2637|-||2019-12-19||none
+CVE-2018-2638|-||2019-12-19||none
+CVE-2018-2639|-||2019-12-19||none
+CVE-2018-2641|-||2019-12-19||none
+CVE-2018-2657|-||2019-12-19||none
+CVE-2018-2663|-||2019-12-19||none
+CVE-2018-2677|-||2019-12-19||none
+CVE-2018-2678|-||2019-12-19||none
+CVE-2018-2783|-||2019-12-19||none
+CVE-2018-2790|-||2019-12-19||none
+CVE-2018-2794|-||2019-12-19||none
+CVE-2018-2795|-||2019-12-19||none
+CVE-2018-2796|-||2019-12-19||none
+CVE-2018-2797|-||2019-12-19||none
+CVE-2018-2798|-||2019-12-19||none
+CVE-2018-2799|-||2019-12-19||none
+CVE-2018-2800|-||2019-12-19||none
+CVE-2018-2814|-||2019-12-19||none
+CVE-2018-2815|-||2019-12-19||none
+CVE-2018-2825|-||2019-12-19||none
+CVE-2018-2826|-||2019-12-19||none
+CVE-2018-2940|-||2019-12-19||none
+CVE-2018-2952|-||2019-12-19||none
+CVE-2018-2964|-||2019-12-19||none
+CVE-2018-2973|-||2019-12-19||none
+CVE-2018-3136|-||2019-12-19||none
+CVE-2018-3139|-||2019-12-19||none
+CVE-2018-3149|-||2019-12-19||none
+CVE-2018-3169|-||2019-12-19||none
+CVE-2018-3180|-||2019-12-19||none
+CVE-2018-3183|-||2019-12-19||none
+CVE-2018-3214|-||2019-12-19||none
+CVE-2018-3639|-||2024-10-07||none
+CVE-2018-5407|-||2019-12-19||none
+CVE-2018-5732|-||2019-12-19||none
+CVE-2018-5733|-||2019-12-19||none
+CVE-2018-5740|-||2019-12-19||none
+CVE-2018-5741|-||2019-12-19||none
+CVE-2018-5743|-||2019-12-19||none
+CVE-2018-5744|-||2022-08-15||none
+CVE-2018-5745|-||2022-08-15||none
+CVE-2018-8011|-||2018-08-08||none
+CVE-2019-0190|-||2019-02-20||none
+CVE-2019-0196|-||2019-12-19||none
+CVE-2019-0197|-||2019-12-19||none
+CVE-2019-0220|-||2019-12-19||none
+CVE-2019-10081|-||2019-12-19||none
+CVE-2019-10082|-||2019-12-19||none
+CVE-2019-10092|-||2019-12-19||none
+CVE-2019-10097|-||2019-12-19||none
+CVE-2019-10098|-||2019-12-19||none
+CVE-2019-10218|-||2019-12-20||none
+CVE-2019-10245|-||2019-12-19||none
+CVE-2019-11771|-||2019-12-19||none
+CVE-2019-11772|-||2019-12-19||none
+CVE-2019-11775|-||2019-12-19||none
+CVE-2019-11777|7.2|SI80975|2022-09-12||ibm-bulletin-table
+CVE-2019-11777|7.3|SI80974|2022-09-12||ibm-bulletin-table
+CVE-2019-11777|7.4|SI80973|2022-09-12||ibm-bulletin-table
+CVE-2019-11777|7.5|SI80972|2022-09-12||ibm-bulletin-table
+CVE-2019-1543|-||2019-12-19||none
+CVE-2019-1547|-||2019-12-19||none
+CVE-2019-1549|-||2019-12-19||none
+CVE-2019-1559|-||2019-12-19||none
+CVE-2019-1563|-||2019-12-19||none
+CVE-2019-17567|-||2021-09-24||none
+CVE-2019-17631|-||2020-01-31||none
+CVE-2019-17639|-||2020-09-28||none
+CVE-2019-2422|-||2019-12-19||none
+CVE-2019-2426|-||2019-12-19||none
+CVE-2019-2449|-||2019-12-19||none
+CVE-2019-2602|-||2019-12-19||none
+CVE-2019-2684|-||2019-12-19||none
+CVE-2019-2697|-||2019-12-19||none
+CVE-2019-2698|-||2019-12-19||none
+CVE-2019-2762|-||2019-12-19||none
+CVE-2019-2766|-||2019-12-19||none
+CVE-2019-2769|-||2019-12-19||none
+CVE-2019-2786|-||2019-12-19||none
+CVE-2019-2816|-||2019-12-19||none
+CVE-2019-2933|-||2020-01-31||none
+CVE-2019-2945|-||2020-01-31||none
+CVE-2019-2949|-||2020-08-05||none
+CVE-2019-2958|-||2020-01-31||none
+CVE-2019-2962|-||2020-01-31||none
+CVE-2019-2964|-||2020-01-31||none
+CVE-2019-2973|-||2020-01-31||none
+CVE-2019-2975|-||2020-01-31||none
+CVE-2019-2978|-||2020-01-31||none
+CVE-2019-2981|-||2020-01-31||none
+CVE-2019-2983|-||2020-01-31||none
+CVE-2019-2988|-||2020-01-31||none
+CVE-2019-2989|-||2020-01-31||none
+CVE-2019-2992|-||2020-01-31||none
+CVE-2019-2996|-||2020-01-31||none
+CVE-2019-2999|-||2020-01-31||none
+CVE-2019-3880|-||2022-08-15||none
+CVE-2019-4040|-||2019-12-19||none
+CVE-2019-4381|-||2022-08-15||none
+CVE-2019-4450|-||2019-12-20||none
+CVE-2019-4473|-||2019-12-19||none
+CVE-2019-4536|-||2019-12-19||none
+CVE-2019-6109|-||2019-12-19||none
+CVE-2019-6111|-||2019-12-19||none
+CVE-2019-6465|-||2022-08-15||none
+CVE-2019-6471|-||2019-12-19||none
+CVE-2019-7317|-||2019-12-19||none
+CVE-2019-9517|-||2019-12-19||none
+CVE-2020-11985|-||2020-09-09||none
+CVE-2020-11993|-||2020-09-09||none
+CVE-2020-13950|-||2021-09-24||none
+CVE-2020-14152|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2020-14152|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2020-14152|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2020-14152|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2020-14318|-||2020-11-11||none
+CVE-2020-14323|-||2020-11-11||none
+CVE-2020-14556|-||2020-09-28||none
+CVE-2020-14577|-||2020-09-28||none
+CVE-2020-14578|-||2020-09-28||none
+CVE-2020-14579|-||2020-09-28||none
+CVE-2020-14583|-||2020-09-28||none
+CVE-2020-14593|-||2020-09-28||none
+CVE-2020-14621|-||2020-09-28||none
+CVE-2020-14779|-||2021-02-03||none
+CVE-2020-14781|-||2021-02-03||none
+CVE-2020-14782|-||2021-03-26||none
+CVE-2020-14796|-||2021-02-03||none
+CVE-2020-14797|-||2021-02-03||none
+CVE-2020-14803|-||2021-03-26||none
+CVE-2020-1927|-||2020-06-10||none
+CVE-2020-1934|-||2020-06-10||none
+CVE-2020-1967|-||2020-06-19||none
+CVE-2020-1971|-||2021-01-11||none
+CVE-2020-2583|-||2020-03-26||none
+CVE-2020-2590|-||2020-09-28||none
+CVE-2020-2593|-||2020-03-26||none
+CVE-2020-2601|-||2020-09-28||none
+CVE-2020-2604|-||2020-03-26||none
+CVE-2020-2654|-||2020-08-05||none
+CVE-2020-2659|-||2020-03-26||none
+CVE-2020-27221|-||2021-03-26||none
+CVE-2020-2754|-||2020-06-19||none
+CVE-2020-2755|-||2020-06-19||none
+CVE-2020-2756|-||2020-06-19||none
+CVE-2020-2757|-||2020-06-19||none
+CVE-2020-2773|-||2021-03-26||none
+CVE-2020-2781|-||2020-06-19||none
+CVE-2020-2800|-||2020-06-19||none
+CVE-2020-2803|-||2020-06-19||none
+CVE-2020-2805|-||2020-06-19||none
+CVE-2020-2830|-||2020-06-19||none
+CVE-2020-35538|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2020-35538|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2020-35538|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2020-35538|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2020-4345|-||2020-05-15||none
+CVE-2020-4788|-||2020-11-19||none
+CVE-2020-8616|-||2020-07-06||none
+CVE-2020-8617|-||2020-07-06||none
+CVE-2020-8622|-||2020-10-20||none
+CVE-2020-8624|-||2020-10-20||none
+CVE-2020-9490|-||2020-09-09||none
+CVE-2021-20254|-||2021-05-13||none
+CVE-2021-20501|-||2021-04-20||none
+CVE-2021-2163|-||2022-10-24||none
+CVE-2021-2341|-||2022-02-18||none
+CVE-2021-23450|7.2|SJ00250|2024-04-24||ibm-bulletin-table
+CVE-2021-23450|7.3|SJ00250|2024-04-24||ibm-bulletin-table
+CVE-2021-23450|7.4|SJ00250|2024-04-24||ibm-bulletin-table
+CVE-2021-23450|7.5|SJ00250|2024-04-24||ibm-bulletin-table
+CVE-2021-2369|-||2021-10-18||none
+CVE-2021-23840|-||2021-03-12||none
+CVE-2021-23841|-||2021-03-12||none
+CVE-2021-2432|-||2021-10-18||none
+CVE-2021-25214|-||2021-06-17||none
+CVE-2021-25215|-||2021-06-17||none
+CVE-2021-25217|-||2021-09-17||none
+CVE-2021-25219|-||2021-12-22||none
+CVE-2021-25220|7.2|SI80439,SI80457|2022-07-13||ibm-bulletin-table
+CVE-2021-25220|7.3|SI80437,SI80438,SI80456|2022-07-13||ibm-bulletin-table
+CVE-2021-25220|7.4|SI80430,SI80431,SI80455|2022-07-13||ibm-bulletin-table
+CVE-2021-25220|7.5|SI80440,SI80443,SI80458|2022-07-13||ibm-bulletin-table
+CVE-2021-30641|-||2021-09-24||none
+CVE-2021-31618|-||2021-09-24||none
+CVE-2021-33193|-||2021-09-24||none
+CVE-2021-3449|-||2021-04-15||none
+CVE-2021-3450|-||2021-04-15||none
+CVE-2021-34798|-||2021-12-06||none
+CVE-2021-35493|-||2022-03-30||none
+CVE-2021-35517|-||2021-09-24||none
+CVE-2021-35550|-||2022-06-02||none
+CVE-2021-35556|-||2022-01-21||none
+CVE-2021-35559|-||2022-01-21||none
+CVE-2021-35560|-||2022-01-21||none
+CVE-2021-35561|-||2022-08-11||none
+CVE-2021-35564|-||2022-01-21||none
+CVE-2021-35565|-||2022-01-21||none
+CVE-2021-35578|-||2022-01-21||none
+CVE-2021-35586|-||2022-01-21||none
+CVE-2021-35603|-||2022-06-02||none
+CVE-2021-36090|-||2022-03-30||none
+CVE-2021-3711|-||2021-09-24||none
+CVE-2021-3712|-||2021-09-24||none
+CVE-2021-38876|-||2021-12-27||none
+CVE-2021-39031|7.2|SI78973|2022-03-31||ibm-bulletin-table
+CVE-2021-39031|7.3|SI78972|2022-03-31||ibm-bulletin-table
+CVE-2021-39031|7.4|SI78971|2022-03-31||ibm-bulletin-table
+CVE-2021-39038|7.2|SI78973|2022-03-31||ibm-bulletin-table
+CVE-2021-39038|7.3|SI78972|2022-03-31||ibm-bulletin-table
+CVE-2021-39038|7.4|SI78971|2022-03-31||ibm-bulletin-table
+CVE-2021-39056|-||2022-01-12||none
+CVE-2021-39275|-||2021-12-06||none
+CVE-2021-40438|-||2021-12-06||none
+CVE-2021-41035|-||2022-01-21||none
+CVE-2021-4104|-||2023-04-07||none
+CVE-2021-41617|-||2021-12-01||none
+CVE-2021-43566|-||2022-03-02||none
+CVE-2021-44141|-||2022-03-02||none
+CVE-2021-44224|-||2022-02-28||none
+CVE-2021-44228|-||2021-12-21||none
+CVE-2021-44832|-||2022-03-30||none
+CVE-2021-45046|-||2021-12-21||none
+CVE-2021-45105|-||2021-12-29||none
+CVE-2021-46708|7.2|SI78973|2022-04-08||ibm-bulletin-table
+CVE-2021-46708|7.3|SI78972|2022-04-08||ibm-bulletin-table
+CVE-2021-46708|7.4|SI78971|2022-04-08||ibm-bulletin-table
+CVE-2021-46822|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2021-46822|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2021-46822|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2021-46822|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2022-0396|7.2|SI80439,SI80457|2022-07-13||ibm-bulletin-table
+CVE-2022-0396|7.3|SI80437,SI80438,SI80456|2022-07-13||ibm-bulletin-table
+CVE-2022-0396|7.4|SI80430,SI80431,SI80455|2022-07-13||ibm-bulletin-table
+CVE-2022-0396|7.5|SI80440,SI80443,SI80458|2022-07-13||ibm-bulletin-table
+CVE-2022-0778|-||2022-04-14||none
+CVE-2022-1292|7.5|SI80204|2022-06-28||ibm-bulletin-table
+CVE-2022-2068|7.5|SI80588|2022-07-27||ibm-bulletin-table
+CVE-2022-21248|-||2022-06-02||none
+CVE-2022-21291|-||2022-06-02||none
+CVE-2022-21293|-||2022-06-02||none
+CVE-2022-21294|-||2022-06-02||none
+CVE-2022-21299|-||2022-08-11||none
+CVE-2022-21305|-||2022-06-02||none
+CVE-2022-21340|-||2022-06-02||none
+CVE-2022-21341|-||2022-06-02||none
+CVE-2022-21349|-||2022-06-02||none
+CVE-2022-21360|-||2022-06-02||none
+CVE-2022-21365|-||2022-06-02||none
+CVE-2022-21426|-||2023-08-18||none
+CVE-2022-21434|-||2022-08-11||none
+CVE-2022-21443|-||2022-08-11||none
+CVE-2022-21496|-||2022-08-11||none
+CVE-2022-21619|-||2023-02-07||none
+CVE-2022-21624|-||2023-02-07||none
+CVE-2022-21626|-||2023-02-07||none
+CVE-2022-21628|-||2023-02-07||none
+CVE-2022-22310|7.2|SI78973|2022-03-31||ibm-bulletin-table
+CVE-2022-22310|7.3|SI78972|2022-03-31||ibm-bulletin-table
+CVE-2022-22310|7.4|SI78971|2022-03-31||ibm-bulletin-table
+CVE-2022-22393|7.2|SI79991|2022-06-16||ibm-bulletin-table
+CVE-2022-22393|7.3|SI79990|2022-06-16||ibm-bulletin-table
+CVE-2022-22393|7.4|SI79988|2022-06-16||ibm-bulletin-table
+CVE-2022-22393|7.5|SI79987|2022-06-16||ibm-bulletin-table
+CVE-2022-22475|7.2|SI79991|2022-06-16||ibm-bulletin-table
+CVE-2022-22475|7.3|SI79990|2022-06-16||ibm-bulletin-table
+CVE-2022-22475|7.4|SI79988|2022-06-16||ibm-bulletin-table
+CVE-2022-22475|7.5|SI79987|2022-06-16||ibm-bulletin-table
+CVE-2022-22476|7.2|SI80975|2022-09-12||ibm-bulletin-table
+CVE-2022-22476|7.3|SI80974|2022-09-12||ibm-bulletin-table
+CVE-2022-22476|7.4|SI80973|2022-09-12||ibm-bulletin-table
+CVE-2022-22476|7.5|SI80972|2022-09-12||ibm-bulletin-table
+CVE-2022-22481|7.2|SI79561,SI79562|2022-05-06||ibm-bulletin-table
+CVE-2022-22481|7.3|SI79559,SI79560|2022-05-06||ibm-bulletin-table
+CVE-2022-22481|7.4|SI79557,SI79558|2022-05-06||ibm-bulletin-table
+CVE-2022-22495|-||2022-05-23||none
+CVE-2022-22720|7.2|SI79640|2022-06-13||ibm-bulletin-table
+CVE-2022-22720|7.3|SI79641|2022-06-13||ibm-bulletin-table
+CVE-2022-22720|7.4|SI80014|2022-06-13||ibm-bulletin-table
+CVE-2022-22721|7.2|SI79640|2022-06-13||ibm-bulletin-table
+CVE-2022-22721|7.3|SI79641|2022-06-13||ibm-bulletin-table
+CVE-2022-22721|7.4|SI80014|2022-06-13||ibm-bulletin-table
+CVE-2022-22950|-||2022-06-10||none
+CVE-2022-22965|-||2022-06-10||none
+CVE-2022-22968|-||2022-06-10||none
+CVE-2022-23302|-||2022-01-25||none
+CVE-2022-23305|-||2022-01-25||none
+CVE-2022-23307|-||2022-01-25||none
+CVE-2022-24785|-||2022-06-09||none
+CVE-2022-24839|7.2|SI81736|2023-02-01||ibm-bulletin-table
+CVE-2022-24839|7.3|SI81735|2023-02-01||ibm-bulletin-table
+CVE-2022-24839|7.4|SI81734|2023-02-01||ibm-bulletin-table
+CVE-2022-24839|7.5|SI81733|2023-02-01||ibm-bulletin-table
+CVE-2022-2795|7.2|SI81709|2022-11-28||ibm-bulletin-table
+CVE-2022-2795|7.3|SI81708|2022-11-28||ibm-bulletin-table
+CVE-2022-2795|7.4|SI81707|2022-11-28||ibm-bulletin-table
+CVE-2022-2795|7.5|SI81706|2022-11-28||ibm-bulletin-table
+CVE-2022-28614|7.2|SI80355|2022-07-28||ibm-bulletin-table
+CVE-2022-28614|7.3|SI80354|2022-07-28||ibm-bulletin-table
+CVE-2022-28614|7.4|SI80353|2022-07-28||ibm-bulletin-table
+CVE-2022-28614|7.5|SI80337|2022-07-28||ibm-bulletin-table
+CVE-2022-28615|7.2|SI80355|2022-07-28||ibm-bulletin-table
+CVE-2022-28615|7.3|SI80354|2022-07-28||ibm-bulletin-table
+CVE-2022-28615|7.4|SI80353|2022-07-28||ibm-bulletin-table
+CVE-2022-28615|7.5|SI80337|2022-07-28||ibm-bulletin-table
+CVE-2022-2928|7.2|SI81441|2022-12-02||ibm-bulletin-table
+CVE-2022-2928|7.3|SI81440|2022-12-02||ibm-bulletin-table
+CVE-2022-2928|7.4|SI81439|2022-12-02||ibm-bulletin-table
+CVE-2022-2928|7.5|SI81438|2022-12-02||ibm-bulletin-table
+CVE-2022-2929|7.2|SI81441|2022-12-02||ibm-bulletin-table
+CVE-2022-2929|7.3|SI81440|2022-12-02||ibm-bulletin-table
+CVE-2022-2929|7.4|SI81439|2022-12-02||ibm-bulletin-table
+CVE-2022-2929|7.5|SI81438|2022-12-02||ibm-bulletin-table
+CVE-2022-3171|7.2|SI81736|2023-02-01||ibm-bulletin-table
+CVE-2022-3171|7.3|SI81735|2023-02-01||ibm-bulletin-table
+CVE-2022-3171|7.4|SI81734|2023-02-01||ibm-bulletin-table
+CVE-2022-3171|7.5|SI81733|2023-02-01||ibm-bulletin-table
+CVE-2022-31813|7.2|SI80355|2022-07-28||ibm-bulletin-table
+CVE-2022-31813|7.3|SI80354|2022-07-28||ibm-bulletin-table
+CVE-2022-31813|7.4|SI80353|2022-07-28||ibm-bulletin-table
+CVE-2022-31813|7.5|SI80337|2022-07-28||ibm-bulletin-table
+CVE-2022-32742|7.3|SI80815|2022-08-17||ibm-bulletin-table
+CVE-2022-32742|7.4|SI80816|2022-08-17||ibm-bulletin-table
+CVE-2022-34165|7.2|SI81736|2023-02-01||ibm-bulletin-table
+CVE-2022-34165|7.3|SI81735|2023-02-01||ibm-bulletin-table
+CVE-2022-34165|7.4|SI81734|2023-02-01||ibm-bulletin-table
+CVE-2022-34165|7.5|SI81733|2023-02-01||ibm-bulletin-table
+CVE-2022-34358|7.2|SI80412|2022-11-28||ibm-bulletin-table
+CVE-2022-34358|7.3|SI80413|2022-11-28||ibm-bulletin-table
+CVE-2022-34358|7.4|SI80414|2022-11-28||ibm-bulletin-table
+CVE-2022-34358|7.5|SI80415|2022-11-28||ibm-bulletin-table
+CVE-2022-3509|7.2|SI81736|2023-02-01||ibm-bulletin-table
+CVE-2022-3509|7.3|SI81735|2023-02-01||ibm-bulletin-table
+CVE-2022-3509|7.4|SI81734|2023-02-01||ibm-bulletin-table
+CVE-2022-3509|7.5|SI81733|2023-02-01||ibm-bulletin-table
+CVE-2022-3676|-||2023-02-07||none
+CVE-2022-37434|7.2|SI80912|2022-11-17||ibm-bulletin-table
+CVE-2022-37434|7.3|SI80909|2022-11-17||ibm-bulletin-table
+CVE-2022-37434|7.4|SI80841|2022-11-17||ibm-bulletin-table
+CVE-2022-37434|7.5|SI80776|2022-11-17||ibm-bulletin-table
+CVE-2022-37734|7.2|SI81736|2023-02-01||ibm-bulletin-table
+CVE-2022-37734|7.3|SI81735|2023-02-01||ibm-bulletin-table
+CVE-2022-37734|7.4|SI81734|2023-02-01||ibm-bulletin-table
+CVE-2022-37734|7.5|SI81733|2023-02-01||ibm-bulletin-table
+CVE-2022-38177|7.2|SI81709|2022-11-28||ibm-bulletin-table
+CVE-2022-38177|7.3|SI81708|2022-11-28||ibm-bulletin-table
+CVE-2022-38177|7.4|SI81707|2022-11-28||ibm-bulletin-table
+CVE-2022-38177|7.5|SI81706|2022-11-28||ibm-bulletin-table
+CVE-2022-38178|7.2|SI81709|2022-11-28||ibm-bulletin-table
+CVE-2022-38178|7.3|SI81708|2022-11-28||ibm-bulletin-table
+CVE-2022-38178|7.4|SI81707|2022-11-28||ibm-bulletin-table
+CVE-2022-38178|7.5|SI81706|2022-11-28||ibm-bulletin-table
+CVE-2022-42889|-||2023-02-13||none
+PTXRAY_IBMI_BULLETINS_EOF
+)
+IBMI_BULLETINS_COUNT=699
+IBMI_BULLETINS_MAPPED=43
+IBMI_BULLETINS_ASOF='2026-08-26'
+IBMI_BULLETINS_LOADED=1
 
-# The standalone atoms remain available for an operator who deliberately
-# permits IBM's network-backed SYSTOOLS currency views.  The public assessment
-# itself never runs those views, so their controls remain visible and honest.
+# Look up one field of one source-registry record. IBMI_SRCREG is an
+# LF-separated id|loaded|as_of|threshold|status_basis table spliced in by the
+# assembler. Prints the named field, or nothing (return 0) when the id or the
+# field name is unknown, so a check can ask for a vintage without parsing JSON.
+function ibmi_srcreg_field {
+  typeset want_id=$1 want_field=$2 field_idx
+  case "$want_field" in
+    id) field_idx=1 ;;
+    loaded) field_idx=2 ;;
+    as_of) field_idx=3 ;;
+    threshold) field_idx=4 ;;
+    status_basis) field_idx=5 ;;
+    *) return 0 ;;
+  esac
+  while IFS='|' read rid loaded as_of threshold status_basis; do
+    if [ "$rid" = "$want_id" ]; then
+      case "$field_idx" in
+        1) printf '%s\n' "$rid" ;;
+        2) printf '%s\n' "$loaded" ;;
+        3) printf '%s\n' "$as_of" ;;
+        4) printf '%s\n' "$threshold" ;;
+        5) printf '%s\n' "$status_basis" ;;
+      esac
+      return 0
+    fi
+  done <<PTXRAY_SRCREG_INPUT
+$IBMI_SRCREG
+PTXRAY_SRCREG_INPUT
+  return 0
+}
+
+# Print each IBMI_BULLETINS record for one IBM i release. IBMI_BULLETINS is
+# the LF-separated cve|release|ptfs|published|cvss_base|ptf_basis table
+# spliced in by the assembler. Prints nothing (return 0) when no record
+# matches, so a check can ask for a release without parsing JSON.
+function ibmi_bulletins_for_release {
+  typeset want_rel=$1 cve release ptfs published cvss_base ptf_basis
+  while IFS='|' read cve release ptfs published cvss_base ptf_basis; do
+    [ "$release" = "$want_rel" ] || continue
+    printf '%s\n' "$cve|$release|$ptfs|$published|$cvss_base|$ptf_basis"
+  done <<PTXRAY_IBMI_BULLETINS_INPUT
+$IBMI_BULLETINS
+PTXRAY_IBMI_BULLETINS_INPUT
+}
+
+
+# These three controls need IBM's network-backed SYSTOOLS currency views, which
+# the assessment boundary bans, so 1.6 assesses none of them: build/assemble.sh
+# refuses to emit a standalone door for ck-cur-firmware, ck-cur-ptf-groups and
+# ck-sec-group-currency, and build/assemble-ibmi.sh leaves their fragments out of
+# the monolith.  The check sources stay under tools.d/ibmi/checks and the
+# controls stay visible as the typed NOT_ASSESSED refusals below; the explicit
+# --allow-ibm-lookup opt-in that turns the lookups back on arrives in 1.7.
 add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
     "not assessed — network-backed IBM FLRT query is disabled" \
     "The public assessment makes no SYSTOOLS.FIRMWARE_CURRENCY request, because that view may contact IBM." \
@@ -942,87 +2161,1910 @@ add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSE
     "not assessed — network-backed IBM PSP query is disabled" \
     "The public assessment makes no SYSTOOLS.GROUP_PTF_CURRENCY request, because that view may contact IBM PSP." \
     "compare the installed Security and HIPER groups against IBM Preventive Service Planning outside this assessment."
-  # cur_os_lifecycle — IBM i OS release vs embedded EOS table.
-  # Authority: IBM Release life cycle as of DATA_VINTAGE.
-  # Not a CIS rec. One finding. Calls ibmi_sql for
-  # SYSIBMADM.ENV_SYS_INFO OS_VERSION / OS_RELEASE.
-  # Does not call ibmi_cl / DSPPTF / GO LICPGM.
-  # Does not SELECT HOST_NAME (D82). Does not query
-  # SYSTOOLS.GROUP_PTF_CURRENCY (ck-cur-ptf-groups) or
-  # SYSTOOLS.FIRMWARE_CURRENCY (ck-cur-firmware).
-  # 7.6/7.5 SUPPORTED is PASS. 7.4 EOS 2026-09-30. 7.3/7.2/7.1/6.1/5.4 past.
-  DATA_VINTAGE="2026-08-20"
-  EOS_IBMI="
-5.4|2013-09-30
-6.1|2015-09-30
-7.1|2018-04-30
-7.2|2021-04-30
-7.3|2023-09-30
-7.4|2026-09-30
-7.5|SUPPORTED
-7.6|SUPPORTED
-"
-  OS_RAW=$(ibmi_sql os_vrm "SELECT 'OS' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_VERSION,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_RELEASE,'-')),10) FROM SYSIBMADM.ENV_SYS_INFO")
-  OS_RC=$?
-  if [ "$OS_RC" -ne 0 ]; then
+# cur_os_lifecycle — IBM i OS release vs embedded EOS table.
+# Authority: IBM Release life cycle as of the embedded IBM i source-registry
+# ibmi-lifecycle as_of. Not a CIS rec. One finding. Calls ibmi_sql for
+# SYSIBMADM.ENV_SYS_INFO OS_VERSION / OS_RELEASE.
+# Does not call ibmi_cl / DSPPTF / GO LICPGM.
+# Does not SELECT HOST_NAME (D82). Does not query
+# SYSTOOLS.GROUP_PTF_CURRENCY (ck-cur-ptf-groups) or
+# SYSTOOLS.FIRMWARE_CURRENCY (ck-cur-firmware).
+# The release/EOS pairs and their vintage come from the embedded IBM i source
+# registry (int-ibmi-embed-registry): ibmi_srcreg_field ibmi-lifecycle
+# loaded|as_of|threshold, plus the IBMI_SRCREG_PAYLOAD release|eol table.
+# A stale, not-loaded, or absent registry never produces PASS: the check
+# refuses with NOT_ASSESSED naming the stale or missing reference data.
+# as_of and EOS are validated as real calendar dates (valid_ymd) before the
+# Julian conversion; a future as_of or an impossible date refuses, it never
+# grades.
+# 7.6/7.5 SUPPORTED is PASS. A release past its EOS fails, a release within
+# a year of its EOS warns, and a release absent from the payload is not
+# assessed rather than guessed.
+OS_RAW=$(ibmi_sql os_vrm "SELECT 'OS' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_VERSION,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_RELEASE,'-')),10) FROM SYSIBMADM.ENV_SYS_INFO")
+OS_RC=$?
+if [ "$OS_RC" -ne 0 ]; then
+  add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+      "not assessed — capture failed (rc=$OS_RC)" \
+      "The IBM i OS-release probe did not yield a readable ENV_SYS_INFO dump, so the support window cannot be graded." \
+      "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never changes the operating system."
+elif [ -z "$OS_RAW" ]; then
+  add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+      "not assessed — capture empty (rc=0)" \
+      "The IBM i OS-release probe returned no pipe row, so the support window cannot be graded." \
+      "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never changes the operating system."
+else
+  OS_LINE=$(printf '%s\n' "$OS_RAW" | awk -F'|' '$1=="OS"{n++; line=$0} END{if(n==1) print line}')
+  if [ -z "$OS_LINE" ]; then
     add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
-        "not assessed — capture failed (rc=$OS_RC)" \
-        "The IBM i OS-release probe did not yield a readable ENV_SYS_INFO dump, so the support window cannot be graded." \
-        "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never changes the operating system."
-  elif [ -z "$OS_RAW" ]; then
-    add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
-        "not assessed — capture empty (rc=0)" \
-        "The IBM i OS-release probe returned no pipe row, so the support window cannot be graded." \
-        "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never changes the operating system."
+        "not assessed — OS row missing or not unique in ENV_SYS_INFO" \
+        "The IBM i OS-release dump was readable, but it did not contain exactly one OS row, so the release cannot be graded." \
+        "inspect SYSIBMADM.ENV_SYS_INFO for OS_VERSION and OS_RELEASE."
   else
-    OS_LINE=$(printf '%s\n' "$OS_RAW" | awk -F'|' '$1=="OS"{n++; line=$0} END{if(n==1) print line}')
-    if [ -z "$OS_LINE" ]; then
+    OS_VER=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    OS_REL=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    case "$OS_VER" in
+      ''|*[!0-9]*) OS_VER="" ;;
+    esac
+    case "$OS_REL" in
+      ''|*[!0-9]*) OS_REL="" ;;
+    esac
+    if [ -z "$OS_VER" ] || [ -z "$OS_REL" ]; then
       add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
-          "not assessed — OS row missing or not unique in ENV_SYS_INFO" \
-          "The IBM i OS-release dump was readable, but it did not contain exactly one OS row, so the release cannot be graded." \
-          "inspect SYSIBMADM.ENV_SYS_INFO for OS_VERSION and OS_RELEASE."
+          "not assessed — OS_VERSION or OS_RELEASE unreadable" \
+          "The OS row was present, but OS_VERSION or OS_RELEASE was not a decimal digit string, so it is not graded." \
+          "inspect SYSIBMADM.ENV_SYS_INFO OS_VERSION and OS_RELEASE."
     else
-      OS_VER=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
-      OS_REL=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
-      case "$OS_VER" in
-        ''|*[!0-9]*) OS_VER="" ;;
-      esac
-      case "$OS_REL" in
-        ''|*[!0-9]*) OS_REL="" ;;
-      esac
-      if [ -z "$OS_VER" ] || [ -z "$OS_REL" ]; then
+      REL="$OS_VER.$OS_REL"
+      # Reference data (vintage + payload) from the embedded IBM i source
+      # registry. loaded=false, a stale as_of, or a missing helper/payload
+      # always refuses: a stale table must never produce a PASS again.
+      LIFE_LOADED=$(ibmi_srcreg_field ibmi-lifecycle loaded 2>/dev/null)
+      LIFE_RC=$?
+      if [ "$LIFE_RC" -ne 0 ]; then
         add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
-            "not assessed — OS_VERSION or OS_RELEASE unreadable" \
-            "The OS row was present, but OS_VERSION or OS_RELEASE was not a decimal digit string, so it is not graded." \
-            "inspect SYSIBMADM.ENV_SYS_INFO OS_VERSION and OS_RELEASE."
+            "not assessed — reference data missing (ibmi_srcreg_field unavailable)" \
+            "The embedded IBM i source registry helper is not available in this scan artifact, so the OS support window cannot be graded." \
+            "re-run with a scan artifact that embeds the IBM i source registry (int-ibmi-embed-registry). This scanner never changes the operating system."
+      elif [ -z "$LIFE_LOADED" ]; then
+        add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+            "not assessed — reference data missing (ibmi-lifecycle row absent)" \
+            "The embedded IBM i source registry has no ibmi-lifecycle row, so the OS support window cannot be graded." \
+            "refresh the IBM i source registry (tools/refresh-ibmi-data.py) and re-run. This scanner never changes the operating system."
+      elif [ "$LIFE_LOADED" != "true" ]; then
+        add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+            "not assessed — reference data not loaded (ibmi-lifecycle)" \
+            "The ibmi-lifecycle source-registry row exists but is not loaded, so the OS support window cannot be graded." \
+            "run tools/refresh-ibmi-data.py to load the lifecycle reference data, then re-run. This scanner never changes the operating system."
       else
-        REL="$OS_VER.$OS_REL"
-        EOS=$(printf '%s\n' "$EOS_IBMI" | awk -F'|' -v r="$REL" '$1==r{print $2; exit}')
-        if [ -z "$EOS" ]; then
-          add lifecycle cur_os_lifecycle "IBM i release support" WARN med "$REL" \
-              "Release $REL is not in the bundled reference data (vintage $DATA_VINTAGE)." \
-              "check IBM Release life cycle for this IBM i release."
-        elif [ "$EOS" = "SUPPORTED" ]; then
-          add lifecycle cur_os_lifecycle "IBM i release support" PASS low "$REL — no announced end of support" \
-              "This IBM i release is in active support and still receives security fixes." "n/a"
+        LIFE_AS_OF=$(ibmi_srcreg_field ibmi-lifecycle as_of 2>/dev/null)
+        LIFE_THRESHOLD=$(ibmi_srcreg_field ibmi-lifecycle threshold 2>/dev/null)
+        case "$LIFE_THRESHOLD" in
+          ''|*[!0-9]*) LIFE_THRESHOLD="" ;;
+        esac
+        AS_OF_J=""
+        case "$LIFE_AS_OF" in
+          [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+            # Shape alone is not enough: valid_ymd rejects impossible calendar
+            # dates (2026-99-99, 2026-02-30) before the Julian conversion.
+            if valid_ymd "$LIFE_AS_OF"; then
+              AS_OF_J=$(d2j "$LIFE_AS_OF")
+            fi
+            ;;
+        esac
+        if [ -z "$AS_OF_J" ]; then
+          add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+              "not assessed — reference data as_of unreadable" \
+              "The ibmi-lifecycle reference data has no readable as_of date, so the support window cannot be graded." \
+              "refresh the IBM i source registry so ibmi-lifecycle carries a valid as_of, then re-run. This scanner never changes the operating system."
+        elif [ -z "$LIFE_THRESHOLD" ]; then
+          add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+              "not assessed — reference data threshold unreadable" \
+              "The ibmi-lifecycle reference data has no readable freshness threshold, so the support window cannot be graded." \
+              "refresh the IBM i source registry so ibmi-lifecycle carries consumer_max_age_days, then re-run. This scanner never changes the operating system."
+        elif [ "$TODAY_J" -lt "$AS_OF_J" ]; then
+          add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+              "not assessed — reference data as_of in the future ($LIFE_AS_OF)" \
+              "The ibmi-lifecycle reference data is stamped with a future as_of date, so it cannot be graded as current." \
+              "refresh the IBM i lifecycle reference data (tools/refresh-ibmi-data.py) and re-run. This scanner never changes the operating system."
+        elif [ $(( TODAY_J - AS_OF_J )) -gt "$LIFE_THRESHOLD" ]; then
+          add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+              "not assessed — reference data stale (as_of $LIFE_AS_OF)" \
+              "The ibmi-lifecycle reference data is older than its freshness threshold, so it cannot be graded as current." \
+              "refresh the IBM i lifecycle reference data (tools/refresh-ibmi-data.py) and re-run. This scanner never changes the operating system."
         else
-          EOSJ=$(d2j "$EOS")
-          if [ "$TODAY_J" -gt "$EOSJ" ]; then
-            add lifecycle cur_os_lifecycle "IBM i release support" FAIL high "$REL — support ended $EOS" \
-                "This IBM i release is past standard support — without an IBM i Service Extension, it no longer receives IBM security fixes, so newly disclosed CVEs remain open here." \
-                "plan the upgrade to a supported IBM i release now; consider an IBM i Service Extension only as a bridge."
-          elif [ $(( EOSJ - TODAY_J )) -le 365 ]; then
-            add lifecycle cur_os_lifecycle "IBM i release support" WARN high "$REL — support ends $EOS" \
-                "IBM standard support for this release ends within a year — after that, security fixes require an IBM i Service Extension." \
-                "plan and schedule the upgrade to a supported IBM i release before $EOS."
+          PAYLOAD_ROWS=$(printf '%s\n' "${IBMI_SRCREG_PAYLOAD:-}" | awk -F'|' 'NF==2 && $1!=""{n++} END{print n+0}')
+          if [ "$PAYLOAD_ROWS" -eq 0 ]; then
+            add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+                "not assessed — reference data missing (ibmi-lifecycle payload table)" \
+                "The ibmi-lifecycle registry row is fresh but carries no release/EOS payload table, so the support window cannot be graded." \
+                "refresh the IBM i source registry so ibmi-lifecycle carries its release/EOS payload, then re-run. This scanner never changes the operating system."
           else
-            add lifecycle cur_os_lifecycle "IBM i release support" PASS low "$REL — supported until $EOS" \
-                "This IBM i release is in active support." "n/a"
+            EOS=$(printf '%s\n' "${IBMI_SRCREG_PAYLOAD:-}" | awk -F'|' -v r="$REL" '$1==r{print $2; exit}')
+            if [ -z "$EOS" ]; then
+              add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+                  "not assessed — release $REL not in reference data" \
+                  "Release $REL is not listed in the ibmi-lifecycle reference data, so it cannot be graded as supported." \
+                  "check IBM Release life cycle for release $REL and update the ibmi-lifecycle payload in the IBM i source registry."
+            elif [ "$EOS" = "SUPPORTED" ]; then
+              add lifecycle cur_os_lifecycle "IBM i release support" PASS low \
+                  "$REL — no announced end of support (reference as_of $LIFE_AS_OF)" \
+                  "This IBM i release is in active support and still receives security fixes." "n/a"
+            else
+              EOSJ=""
+              case "$EOS" in
+                [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+                  # Same real-calendar gate as as_of: an impossible EOS date
+                  # (2026-99-99) must refuse, not compute a nonsense support day.
+                  if valid_ymd "$EOS"; then
+                    EOSJ=$(d2j "$EOS")
+                  fi
+                  ;;
+              esac
+              if [ -z "$EOSJ" ]; then
+                add lifecycle cur_os_lifecycle "IBM i release support" NOT_ASSESSED low \
+                    "not assessed — EOS date $EOS unreadable" \
+                    "The ibmi-lifecycle reference data lists an unreadable end-of-support date for release $REL, so it cannot be graded." \
+                    "correct the EOS date for release $REL in the ibmi-lifecycle payload and re-run."
+              elif [ "$TODAY_J" -gt "$EOSJ" ]; then
+                add lifecycle cur_os_lifecycle "IBM i release support" FAIL high "$REL — support ended $EOS" \
+                    "This IBM i release is past standard support — without an IBM i Service Extension, it no longer receives IBM security fixes, so newly disclosed CVEs remain open here." \
+                    "plan the upgrade to a supported IBM i release now; consider an IBM i Service Extension only as a bridge."
+              elif [ $(( EOSJ - TODAY_J )) -le 365 ]; then
+                add lifecycle cur_os_lifecycle "IBM i release support" WARN high "$REL — support ends $EOS" \
+                    "IBM standard support for this release ends within a year — after that, security fixes require an IBM i Service Extension." \
+                    "plan and schedule the upgrade to a supported IBM i release before $EOS."
+              else
+                add lifecycle cur_os_lifecycle "IBM i release support" PASS low \
+                    "$REL — supported until $EOS (reference as_of $LIFE_AS_OF)" \
+                    "This IBM i release is in active support." "n/a"
+              fi
+            fi
           fi
         fi
       fi
     fi
   fi
+fi
+
+  # net_ddm_tcp_l2 — IBM i DDM TCP/IP attributes, CIS 5.2.4 L2.
+  # The SELECT is the sibling ck-net-ddm-tcp query, including its LAND decode.
+  # This check grades only *ENCUSRPWD + *AES as PASS; *USRENCPWD is L1-only.
+  DDMTCP_RAW=$(ibmi_sql qadbxrdbd "SELECT 'DDM_TCP' CONCAT '|' CONCAT VARCHAR(CASE LAND(DBXRSEC, X'E0') WHEN X'00' THEN '*USRID' WHEN X'20' THEN '*VLDONLY' WHEN X'40' THEN '*USRIDPWD' WHEN X'C0' THEN '*USRENCPWD' WHEN X'80' THEN '*ENCUSRPWD' WHEN X'A0' THEN '*KERBEROS' ELSE '*UNKNOWN' END, 11) CONCAT '|' CONCAT VARCHAR(CASE WHEN LAND(DBTFLGS, X'01') = X'01' THEN '*AES' ELSE '*DES' END, 4) FROM QSYS.QADBXRDBD WHERE DBXRMTN = '*LOCAL'")
+  DDMTCP_RC=$?
+  if [ "$DDMTCP_RC" -ne 0 ]; then
+    add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" NOT_ASSESSED low "not assessed — capture failed (rc=$DDMTCP_RC)" "The QADBXRDBD probe did not yield a readable *LOCAL DDM TCP/IP attribute row, so PWDRQD and ENCALG cannot be graded." "re-run the scan as the scan profile and confirm QSYS.QADBXRDBD returns the *LOCAL row. This scanner never changes DDM TCP/IP attributes." cis-l2
+  elif [ -z "$DDMTCP_RAW" ]; then
+    add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" NOT_ASSESSED low "not assessed — capture empty (rc=0)" "The QADBXRDBD probe returned no pipe row, so PWDRQD and ENCALG cannot be graded." "re-run the scan as the scan profile and confirm QSYS.QADBXRDBD returns the *LOCAL row. This scanner never changes DDM TCP/IP attributes." cis-l2
+  else
+    DDMTCP_LINE=$(printf '%s\n' "$DDMTCP_RAW" | awk -F'|' '$1=="DDM_TCP"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$DDMTCP_LINE" ]; then
+      add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" NOT_ASSESSED low "not assessed — DDM_TCP row missing or not unique in QADBXRDBD" "The QADBXRDBD dump did not contain exactly one DDM_TCP row, so the values cannot be graded." "inspect QSYS.QADBXRDBD for DBXRMTN = *LOCAL." cis-l2
+    else
+      DDMTCP_AUT=$(printf '%s\n' "$DDMTCP_LINE" | awk -F'|' '{v=$2; sub(/[ \t]+$/, "", v); print v}')
+      DDMTCP_ENC=$(printf '%s\n' "$DDMTCP_LINE" | awk -F'|' '{v=$3; sub(/[ \t]+$/, "", v); print v}')
+      if [ -z "$DDMTCP_AUT" ] || [ -z "$DDMTCP_ENC" ]; then
+        add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" NOT_ASSESSED low "not assessed — DDM TCP/IP attribute value unreadable" "The DDM_TCP row was present, but a catalog value was empty, so it is not graded." "inspect the *LOCAL row of QSYS.QADBXRDBD and CHGDDMTCPA." cis-l2
+      elif [ "$DDMTCP_AUT" = "*ENCUSRPWD" ] && [ "$DDMTCP_ENC" = "*AES" ]; then
+        add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" PASS low "PWDRQD=$DDMTCP_AUT ENCALG=$DDMTCP_ENC" "DDM TCP/IP lowest authentication requires an encrypted password and lowest encryption is AES." n/a cis-l2
+      elif { [ "$DDMTCP_AUT" = "*USRENCPWD" ] || [ "$DDMTCP_AUT" = "*USRIDPWD" ] || [ "$DDMTCP_AUT" = "*USRID" ] || [ "$DDMTCP_AUT" = "*VLDONLY" ] || { [ "$DDMTCP_AUT" = "*ENCUSRPWD" ] && [ "$DDMTCP_ENC" = "*DES" ]; }; } && { [ "$DDMTCP_ENC" = "*AES" ] || [ "$DDMTCP_ENC" = "*DES" ]; }; then
+        add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" FAIL high "PWDRQD=$DDMTCP_AUT ENCALG=$DDMTCP_ENC" "DDM TCP/IP lowest authentication or encryption is weaker than the L2 requirement." "CHGDDMTCPA AUTOSTART(*YES) PWDRQD(*ENCUSRPWD) ENCALG(*AES). This scanner never changes DDM TCP/IP attributes." cis-l2
+      else
+        add security net_ddm_tcp_l2 "DDM TCP/IP attributes (L2)" NOT_ASSESSED low "not assessed — PWDRQD=$DDMTCP_AUT ENCALG=$DDMTCP_ENC is outside the pairs this check grades" "The catalog values were not a documented pair that this check grades." "review PWDRQD and ENCALG; this pair is outside the set this check grades." cis-l2
+      fi
+    fi
+  fi
+
+# net_ftp_tls — IBM i FTP TLS-only sub-condition.
+# CIS IBM i V7R5M0/V7R4M0 5.2.11 (L1). ALWSSL itself remains unverified.
+FTP_RAW=$(ibmi_sql net_ftp_tls_bound "SELECT 'BOUND' CONCAT '|' CONCAT VARCHAR(CHAR(LOCAL_PORT),6) FROM QSYS2.NETSTAT_INFO WHERE TCP_STATE = 'LISTEN' AND LOCAL_PORT IN (21, 990)")
+FTP_RC=$?
+FTP_SOURCE="QUSRSYS/QATMFTP"
+FTP_FIX="set FTP Allow SSL to *ONLY using CHGFTPA ALWSSL(*ONLY). This scanner never changes FTP attributes."
+FTP_PROBE_FIX="re-run the scan and confirm QSYS2.NETSTAT_INFO returns LOCAL_PORT and TCP_STATE. This scanner never changes FTP attributes."
+
+if [ "$FTP_RC" -eq 1 ] && [ -z "$FTP_RAW" ]; then
+  add security net_ftp_tls "FTP TLS-only" NOT_APPLICABLE low \
+      "ports 21/990 not bound; ALWSSL not read" \
+      "Neither FTP port 21 nor implicit-FTPS port 990 is bound, so FTP is not exposed by a listening endpoint; ALWSSL was not read." \
+      "n/a" "cis-l1"
+elif [ "$FTP_RC" -ne 0 ]; then
+  add security net_ftp_tls "FTP TLS-only" NOT_ASSESSED low \
+      "not assessed — capture failed (rc=$FTP_RC)" \
+      "The netstat probe failed, so the FTP listening endpoints and ALWSSL posture cannot be assessed." \
+      "$FTP_PROBE_FIX" "cis-l1"
+elif [ -z "$FTP_RAW" ]; then
+  add security net_ftp_tls "FTP TLS-only" NOT_ASSESSED low \
+      "not assessed — capture empty (rc=0)" \
+      "The netstat probe returned no rows at rc 0, so the result is not safely interpretable." \
+      "$FTP_PROBE_FIX" "cis-l1"
+else
+  FTP_COUNTS=$(printf '%s\n' "$FTP_RAW" | awk -F'|' '
+    $1 == "BOUND" && $2 ~ /^[ 0-9][ 0-9]*$/ { valid++ }
+    END { printf "%d", valid+0 }')
+  if [ "$FTP_COUNTS" -gt 0 ]; then
+    add security net_ftp_tls "FTP TLS-only" NOT_ASSESSED low \
+        "not assessed — ports 21/990 bound; ALWSSL source unverified ($FTP_SOURCE)" \
+        "One or more FTP listening endpoints are bound, but ALWSSL is not read because its source is unverified ($FTP_SOURCE)." \
+        "$FTP_FIX" "cis-l1"
+  else
+    add security net_ftp_tls "FTP TLS-only" NOT_ASSESSED low \
+        "not assessed — unparseable netstat row" \
+        "The netstat probe returned data that was not a valid BOUND row, so FTP exposure cannot be assessed." \
+        "$FTP_PROBE_FIX" "cis-l1"
+  fi
+fi
+
+#!/bin/ksh
+# net_ids_policy — CIS IBM i 5.2.9 Intrusion Detection Policies.
+# PUBLIC-readable determinant: QSYS2.SYSTEM_VALUE_INFO QAUDLVL/QAUDLVL2 must
+# contain *ATNEVT. IDSPOLICY.CONF is *PUBLIC *EXCLUDE; the scan profile needs
+# *R or *ALLOBJ to read it. Capture keys replay the 2026-08-26 live capture:
+# ids_sysvals via ibmi_sql; ids_dir / idspolicy_conf / idspolicy_head via ibmi
+# (ls / grep / head -40). Legacy net_ids_policy_stmts overlays keep their
+# original verdicts.
+IDS_FIX="Review Intrusion Detection in the IBM i Knowledge Center and configure Intrusion Detection per your specific requirements. This scanner never changes IBM i Intrusion Detection policies."
+
+# PASE family for capture keys (ls / grep / head). Fixture hook matches
+# ibmi_sql; live runs the argv. Top-level: ksh88 cannot define a function
+# inside if. Do not substitute SQL under these keys.
+function ibmi {
+  typeset key rc
+  key=$1
+  shift
+  if [ -n "${AIXRAY_FIXTURES:-}" ]; then
+    if [ -r "$AIXRAY_FIXTURES/$key.out" ]; then
+      cat "$AIXRAY_FIXTURES/$key.out"
+      rc=0
+      [ -r "$AIXRAY_FIXTURES/$key.rc" ] && read rc < "$AIXRAY_FIXTURES/$key.rc"
+      return $rc
+    fi
+    return 127
+  fi
+  "$@"
+}
+
+IDS_DIR_RAW=$(ibmi ids_dir ls -la /QIBM/UserData/OS400/QOS/ETC/ 2>&1)
+IDS_DIR_RC=$?
+
+IDS_SYS_RAW=$(ibmi_sql ids_sysvals "SELECT VARCHAR(TRIM(SYSTEM_VALUE_NAME),20) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CURRENT_CHARACTER_VALUE),''),256) FROM QSYS2.SYSTEM_VALUE_INFO WHERE SYSTEM_VALUE_NAME IN ('QAUDCTL','QAUDLVL','QAUDLVL2','QSCANFS','QSCANFSCTL')")
+IDS_SYS_RC=$?
+
+IDS_CONF_RAW=$(ibmi idspolicy_conf /usr/bin/grep -v "^#" /QIBM/UserData/OS400/QOS/ETC/IDSPOLICY.CONF 2>&1)
+IDS_CONF_RC=$?
+
+IDS_HEAD_RAW=$(ibmi idspolicy_head head -40 /QIBM/UserData/OS400/QOS/ETC/IDSPOLICY.CONF 2>&1)
+IDS_HEAD_RC=$?
+
+IDS_ATNEVT=$(printf '%s\n' "$IDS_SYS_RAW" | awk '
+  /^DB2>/ { next }
+  /^SYSTEM_VALUE_NAME/ { next }
+  /^[- ]+$/ { next }
+  /RECORD\(S\) SELECTED/ { next }
+  /^[ \t]*$/ { next }
+  {
+    line = $0
+    name = ""
+    val = ""
+    p = index(line, "|")
+    if (p > 0) {
+      name = substr(line, 1, p - 1)
+      val = substr(line, p + 1)
+    } else {
+      name = $1
+      val = line
+      sub(/^[^ \t]+[ \t]+/, "", val)
+    }
+    gsub(/^[ \t]+|[ \t]+$/, "", name)
+    gsub(/^[ \t]+|[ \t]+$/, "", val)
+    if (name == "QAUDLVL" || name == "QAUDLVL2") {
+      saw = 1
+      n = split(val, tok, /[ \t]+/)
+      i = 1
+      while (i <= n) {
+        if (tok[i] == "*ATNEVT") found = 1
+        i++
+      }
+    }
+  }
+  END {
+    if (found) print "yes"
+    else if (saw) print "no"
+  }
+')
+
+if [ "$IDS_SYS_RC" -eq 0 ] && [ -n "$IDS_ATNEVT" ]; then
+  if [ "$IDS_ATNEVT" = no ]; then
+    add security net_ids_policy "Intrusion detection policies" FAIL high \
+      "IDS not active (QAUDLVL lacks *ATNEVT)" \
+      "Intrusion detection is not active because QAUDLVL/QAUDLVL2 does not include *ATNEVT." \
+      "$IDS_FIX" \
+      "cis-l1"
+  else
+    IDS_FILE=""
+    if [ "$IDS_DIR_RC" -eq 0 ]; then
+      IDS_FILE=$(printf '%s\n' "$IDS_DIR_RAW" | awk '
+        $NF == "IDSPOLICY.CONF" {
+          present = 1
+          mode = $1
+        }
+        END {
+          if (!present) { print "no"; exit }
+          if (mode ~ /^-/ && substr(mode, 8, 1) != "r") print "yes-nopub"
+          else print "yes"
+        }
+      ')
+    fi
+    IDS_AUTH=$(printf '%s\n' "$IDS_CONF_RAW" "$IDS_HEAD_RAW" | awk '
+      {
+        line = tolower($0)
+        if (index(line, "permission denied") || index(line, "not authorized") || index(line, "operation not permitted")) n = 1
+      }
+      END { if (n) print "yes" }
+    ')
+    IDS_NOFILE=$(printf '%s\n' "$IDS_CONF_RAW" "$IDS_HEAD_RAW" | awk '
+      {
+        line = tolower($0)
+        if (index(line, "no such file") || index(line, "does not exist")) n = 1
+      }
+      END { if (n) print "yes" }
+    ')
+    IDS_STMTS=$(printf '%s\n' "$IDS_CONF_RAW" | awk '
+      /^DB2>/ { next }
+      /^[ \t]*$/ { next }
+      /^[ \t]*#/ { next }
+      /^rc=[0-9][0-9]*$/ { next }
+      /RECORD\(S\) SELECTED/ { next }
+      { n++ }
+      END { print n+0 }
+    ')
+    IDS_AUTH_GAP=0
+    if [ "$IDS_AUTH" = yes ]; then
+      IDS_AUTH_GAP=1
+    elif [ "$IDS_FILE" = yes-nopub ] && [ "$IDS_CONF_RC" -ge 2 ]; then
+      IDS_AUTH_GAP=1
+    fi
+    if [ "$IDS_FILE" = no ] || [ "$IDS_NOFILE" = yes ]; then
+      add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+        "not assessed — IDS policy file not present" \
+        "The Intrusion Detection policy file is not present, so its contents cannot be inspected." \
+        "$IDS_FIX" \
+        "cis-l1"
+    elif [ "$IDS_AUTH_GAP" -eq 1 ]; then
+      add security net_ids_policy "Intrusion detection policies" WARN low \
+        "IDS active (*ATNEVT) but IDSPOLICY.CONF is unreadable (*PUBLIC *EXCLUDE; scan profile needs *R or *ALLOBJ)" \
+        "QAUDLVL includes *ATNEVT so IDS can be active, but the scan profile cannot read IDSPOLICY.CONF (*PUBLIC *EXCLUDE)." \
+        "Grant the scan profile *R on /QIBM/UserData/OS400/QOS/ETC/IDSPOLICY.CONF or *ALLOBJ. This scanner never changes IBM i Intrusion Detection policies." \
+        "cis-l1"
+    elif [ "$IDS_CONF_RC" -eq 0 ] || [ "$IDS_CONF_RC" -eq 1 ]; then
+      if [ "$IDS_STMTS" -ge 1 ]; then
+        add security net_ids_policy "Intrusion detection policies" PASS low \
+          "IDS active (*ATNEVT) with $IDS_STMTS policy statement(s)" \
+          "Intrusion detection is active and the policy file holds at least one non-comment statement." \
+          "n/a" \
+          "cis-l1"
+      else
+        add security net_ids_policy "Intrusion detection policies" FAIL high \
+          "IDS policy file is the IBM default (no policy statements)" \
+          "The Intrusion Detection policy file is present but holds only comments, so it is the IBM default and is not configured." \
+          "$IDS_FIX" \
+          "cis-l1"
+      fi
+    else
+      add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+        "not assessed — IDSPOLICY.CONF probe failed (rc=$IDS_CONF_RC)" \
+        "The IDSPOLICY.CONF probe failed without an authority error, so policy statements are not graded." \
+        "$IDS_FIX" \
+        "cis-l1"
+    fi
+  fi
+else
+  IDS_RAW=$(ibmi_sql net_ids_policy_stmts "SELECT 'IDS' CONCAT '|' CONCAT VARCHAR(CHAR((SELECT COUNT(*) FROM TABLE(QSYS2.IFS_OBJECT_STATISTICS(START_PATH_NAME => '/QIBM/UserData/OS400/QOS/ETC/IDSPOLICY.CONF', SUBTREE_DIRECTORIES => 'NO')))),4) CONCAT '|' CONCAT VARCHAR(CHAR(COUNT(*)),8) FROM TABLE(QSYS2.IFS_READ(PATH_NAME => '/QIBM/UserData/OS400/QOS/ETC/IDSPOLICY.CONF', END_OF_LINE => 'ANY', MAXIMUM_LINE_LENGTH => 2000)) WHERE LINE IS NOT NULL AND LTRIM(LINE) NOT LIKE '#%' AND LTRIM(RTRIM(LINE)) <> ''")
+  IDS_RC=$?
+
+  if [ "$IDS_RC" -ne 0 ]; then
+    add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+      "not assessed — capture failed (rc=$IDS_RC)" \
+      "The Intrusion Detection policy-file probe did not yield a readable row, so policy posture is not graded." \
+      "$IDS_FIX" \
+      "cis-l1"
+  elif [ -z "$IDS_RAW" ]; then
+    add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+      "not assessed — capture empty (rc=0)" \
+      "The Intrusion Detection policy-file probe returned no row, so policy posture is not graded." \
+      "$IDS_FIX" \
+      "cis-l1"
+  else
+    IDS_PARSE=$(printf '%s\n' "$IDS_RAW" | awk -F'|' '
+      { n++ }
+      NF != 3 { bad = 1; next }
+      {
+        sub(/^[ \t]+/, "", $1); sub(/[ \t]+$/, "", $1)
+        sub(/^[ \t]+/, "", $2); sub(/[ \t]+$/, "", $2)
+        sub(/^[ \t]+/, "", $3); sub(/[ \t]+$/, "", $3)
+      }
+      $1 != "IDS" || $2 !~ /^[0-9]+$/ || $3 !~ /^[0-9]+$/ || ($2 != "0" && $2 != "1") { bad = 1 }
+      END { if (n == 1 && !bad) print $2 "|" $3 }
+    ')
+    if [ -z "$IDS_PARSE" ]; then
+      add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+        "not assessed — IDS row unparseable" \
+        "The probe row was not the expected IDS|<exists>|<statements> shape, so it is not graded." \
+        "$IDS_FIX" \
+        "cis-l1"
+    else
+      IDS_EXISTS=${IDS_PARSE%%"|"*}
+      IDS_STMTS=${IDS_PARSE#*"|"}
+      if [ "$IDS_EXISTS" -eq 0 ]; then
+        add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+          "not assessed — IDS policy file not present" \
+          "The Intrusion Detection policy file is not present, so its contents cannot be inspected." \
+          "$IDS_FIX" \
+          "cis-l1"
+      elif [ "$IDS_STMTS" -eq 0 ]; then
+        add security net_ids_policy "Intrusion detection policies" FAIL high "no IDS policy statements defined" \
+          "The Intrusion Detection policy file holds only comments, so no policy is defined." \
+          "$IDS_FIX" \
+          "cis-l1"
+      else
+        add security net_ids_policy "Intrusion detection policies" NOT_ASSESSED low \
+          "not assessed — manual: $IDS_STMTS IDS policy statement(s) defined; adequacy and review ownership are an interview question" \
+          "A configured Intrusion Detection policy file is present; adequacy and review ownership are an interview question." \
+          "$IDS_FIX" \
+          "cis-l1"
+      fi
+    fi
+  fi
+fi
+
+# ck-ibmi-net-netserver-browse-interval — CIS IBM i 5.3.6 (L2) NetServer
+# browse interval. Grades exposure from QSYS2.NETSTAT_INFO 139/445 and
+# QUSRSYS.QATOCSTART *NETSVR AUTOSTART (live-capture-2026-08-26-manual).
+# Trust NETSTAT only at rc 0 (zero rows = unbound). Nonzero non-authority
+# rc is a typed probe failure. CPF22xx / SQL0551 / "not authorized" is a
+# typed PTSCAN authority refusal and precedes the exposure residual.
+# When NetServer is exposed, grade browse_interval_ms from cap-netserver-attrs
+# NSA_RAW (key=value). 0 ms PASS *NONE; >0 FAIL in seconds. NSA_OK=0
+# renders NSA_WHY. Do not call QZLSOLST from this fragment.
+# This scanner never changes NetServer attributes.
+NSBI_FIX="CHGNSVA BROWSEITV(*NONE); ENDNSV; STRNSV RESET(*YES). This scanner never changes NetServer attributes."
+NSBI_AUTH_FIX="Grant the scan profile *USE on QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART, then re-run. This scanner never changes NetServer attributes."
+
+NSBI_PORTS=$(ibmi_sql netstat_smb_ports "SELECT 'PORT' CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(LOCAL_PORT)),5) CONCAT '|' CONCAT VARCHAR(TRIM(TCP_STATE),12) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT IN (139, 445, 25, 21, 990, 161)")
+NSBI_PORTS_RC=$?
+NSBI_START=$(ibmi_sql netserver_start_cfg "SELECT 'START' CONCAT '|' CONCAT VARCHAR(TRIM(SERVER),30) CONCAT '|' CONCAT VARCHAR(TRIM(AUTOSTART),10) FROM QUSRSYS.QATOCSTART WHERE SERVER LIKE '%NETSVR%' OR SERVER LIKE '%NETSERVER%' OR SERVER LIKE '%SMTP%' OR SERVER LIKE '%FTP%' OR SERVER LIKE '%SNMP%'")
+NSBI_START_RC=$?
+
+NSBI_PORT_COUNTS=$(printf '%s\n' "$NSBI_PORTS" | awk '
+  BEGIN { bound = 0; rec = 0; auth = 0 }
+  {
+    gsub(/\r/, "")
+    low = tolower($0)
+    if (low ~ /cpf22[0-9][0-9]/) auth = 1
+    if (low ~ /sql0551/) auth = 1
+    if (low ~ /sqlstate:[ \t]*42501/) auth = 1
+    if (low ~ /not authorized/) auth = 1
+    n = split($0, a, "|")
+    if (n >= 3) {
+      port = a[2]; state = a[3]
+      gsub(/^[ \t]+|[ \t]+$/, "", port)
+      gsub(/^[ \t]+|[ \t]+$/, "", state)
+      if (port ~ /^(139|445)$/) {
+        rec++
+        if (state == "LISTEN") bound++
+      }
+      next
+    }
+    line = $0
+    gsub(/^[ \t]+/, "", line)
+    if (line ~ /^(139|445)[ \t]+/) {
+      rec++
+      if (line ~ /^(139|445)[ \t]+LISTEN([ \t]|$)/) bound++
+    }
+  }
+  END { printf "%d %d %d\n", bound + 0, rec + 0, auth + 0 }
+')
+NSBI_BOUND=$(printf '%s\n' "$NSBI_PORT_COUNTS" | awk '{ print $1 + 0 }')
+NSBI_PORT_REC=$(printf '%s\n' "$NSBI_PORT_COUNTS" | awk '{ print $2 + 0 }')
+NSBI_PORTS_AUTH=$(printf '%s\n' "$NSBI_PORT_COUNTS" | awk '{ print $3 + 0 }')
+[ -n "$NSBI_BOUND" ] || NSBI_BOUND=0
+[ -n "$NSBI_PORT_REC" ] || NSBI_PORT_REC=0
+[ -n "$NSBI_PORTS_AUTH" ] || NSBI_PORTS_AUTH=0
+
+NSBI_AS_PARSE=$(printf '%s\n' "$NSBI_START" | awk '
+  BEGIN { val = ""; auth = 0 }
+  {
+    gsub(/\r/, "")
+    low = tolower($0)
+    if (low ~ /cpf22[0-9][0-9]/) auth = 1
+    if (low ~ /sql0551/) auth = 1
+    if (low ~ /sqlstate:[ \t]*42501/) auth = 1
+    if (low ~ /not authorized/) auth = 1
+    n = split($0, a, "|")
+    if (n >= 3) {
+      srv = a[2]; ast = a[3]
+      gsub(/^[ \t]+|[ \t]+$/, "", srv)
+      gsub(/^[ \t]+|[ \t]+$/, "", ast)
+      if (srv == "*NETSVR" || srv == "*NETSERVER") val = ast
+      next
+    }
+    for (i = 1; i <= NF; i++) {
+      if (($i == "*NETSVR" || $i == "*NETSERVER") && (i + 1) <= NF && ($(i + 1) == "*YES" || $(i + 1) == "*NO"))
+        val = $(i + 1)
+    }
+  }
+  END { printf "%s|%d\n", val, auth + 0 }
+')
+NSBI_AS=$(printf '%s\n' "$NSBI_AS_PARSE" | awk -F'|' '{ print $1 }')
+NSBI_AS_AUTH=$(printf '%s\n' "$NSBI_AS_PARSE" | awk -F'|' '{ print $2 + 0 }')
+[ -n "$NSBI_AS_AUTH" ] || NSBI_AS_AUTH=0
+
+NSBI_PORTS_TRUST=0
+if [ "$NSBI_PORTS_AUTH" -eq 0 ]; then
+  if [ "$NSBI_PORTS_RC" -eq 0 ]; then
+    NSBI_PORTS_TRUST=1
+  fi
+fi
+
+NSBI_AS_TRUST=0
+if [ "$NSBI_AS_AUTH" -eq 0 ]; then
+  if [ "$NSBI_START_RC" -eq 0 ] || [ "$NSBI_START_RC" -eq 1 ]; then
+    if [ "$NSBI_AS" = "*YES" ] || [ "$NSBI_AS" = "*NO" ]; then
+      NSBI_AS_TRUST=1
+    fi
+  fi
+fi
+
+NSBI_EXPOSED=0
+if [ "$NSBI_PORTS_TRUST" -eq 1 ] && [ "$NSBI_BOUND" -ge 1 ]; then
+  NSBI_EXPOSED=1
+fi
+if [ "$NSBI_AS_TRUST" -eq 1 ] && [ "$NSBI_AS" = "*YES" ]; then
+  NSBI_EXPOSED=1
+fi
+
+if [ "$NSBI_PORTS_TRUST" -eq 1 ] && [ "$NSBI_BOUND" -eq 0 ] && [ "$NSBI_AS_TRUST" -eq 1 ] && [ "$NSBI_AS" = "*NO" ]; then
+  add security net_netserver_browse_interval "NetServer browse interval" NOT_APPLICABLE low \
+      "ports 139/445 unbound; *NETSVR AUTOSTART=*NO" \
+      "SMB ports 139 and 445 are not bound and *NETSVR AUTOSTART is *NO, so there is no NetServer exposure to grade." \
+      "n/a" \
+      "cis-l2"
+elif [ "$NSBI_PORTS_AUTH" -eq 1 ] || [ "$NSBI_AS_AUTH" -eq 1 ]; then
+  if [ "$NSBI_PORTS_AUTH" -eq 1 ] && [ "$NSBI_AS_AUTH" -eq 1 ]; then
+    NSBI_AUTH_OBS="not assessed — scan profile lacks authority to read QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART"
+    NSBI_AUTH_MEAN="The scan profile cannot read QSYS2.NETSTAT_INFO or QUSRSYS.QATOCSTART (SQL0551 / CPF22xx / not authorized). PTSCAN is *USER with no special authorities, so NetServer exposure cannot be graded."
+  elif [ "$NSBI_PORTS_AUTH" -eq 1 ]; then
+    NSBI_AUTH_OBS="not assessed — scan profile lacks authority to read QSYS2.NETSTAT_INFO"
+    NSBI_AUTH_MEAN="The scan profile cannot read QSYS2.NETSTAT_INFO (SQL0551 / CPF22xx / not authorized). PTSCAN is *USER with no special authorities, so NetServer exposure cannot be graded."
+  else
+    NSBI_AUTH_OBS="not assessed — scan profile lacks authority to read QUSRSYS.QATOCSTART"
+    NSBI_AUTH_MEAN="The scan profile cannot read QUSRSYS.QATOCSTART (SQL0551 / CPF22xx / not authorized). PTSCAN is *USER with no special authorities, so *NETSVR AUTOSTART cannot be graded."
+  fi
+  add security net_netserver_browse_interval "NetServer browse interval" NOT_ASSESSED low \
+      "$NSBI_AUTH_OBS" \
+      "$NSBI_AUTH_MEAN" \
+      "$NSBI_AUTH_FIX" \
+      "cis-l2"
+elif [ "$NSBI_EXPOSED" -eq 1 ]; then
+  if [ "${NSA_OK:-0}" -eq 1 ]; then
+    NSBI_MS=$(printf '%s\n' "${NSA_RAW:-}" | awk '
+      {
+        gsub(/\r/, "")
+        n = split($0, tok, /[ \t]+/)
+        for (i = 1; i <= n; i++) {
+          eq = index(tok[i], "=")
+          if (eq < 1) continue
+          key = substr(tok[i], 1, eq - 1)
+          val = substr(tok[i], eq + 1)
+          if (key == "browse_interval_ms") { print val; exit }
+        }
+      }
+    ')
+    NSBI_MS_OK=$(printf '%s\n' "${NSBI_MS:-}" | awk '/^[0-9]+$/ { print "1"; exit } { print "0"; exit }')
+    if [ "$NSBI_MS_OK" -eq 1 ] && [ "$NSBI_MS" -eq 0 ]; then
+      add security net_netserver_browse_interval "NetServer browse interval" PASS low \
+          "*NONE (browse announcements off)" \
+          "NetServer browse announcements are off (*NONE), so the server does not advertise itself on the SMB browse list." \
+          "n/a" \
+          "cis-l2"
+    elif [ "$NSBI_MS_OK" -eq 1 ]; then
+      NSBI_SEC=$((NSBI_MS / 1000))
+      add security net_netserver_browse_interval "NetServer browse interval" FAIL low \
+          "$NSBI_SEC s" \
+          "NetServer browse interval is $NSBI_SEC s, so the server announces itself on the SMB browse list." \
+          "$NSBI_FIX" \
+          "cis-l2"
+    else
+      add security net_netserver_browse_interval "NetServer browse interval" NOT_ASSESSED low \
+          "not assessed — browse_interval_ms absent from NSA_RAW" \
+          "The NetServer attribute capture did not yield a numeric browse_interval_ms, so the browse interval cannot be graded." \
+          "$NSBI_FIX" \
+          "cis-l2"
+    fi
+  elif [ -n "${NSA_WHY:-}" ]; then
+    add security net_netserver_browse_interval "NetServer browse interval" NOT_ASSESSED low \
+        "not assessed — $NSA_WHY" \
+        "The NetServer attribute capture did not yield a readable browse interval ($NSA_WHY). A missing QZLSOLST result is not a clean result." \
+        "Grant the scan profile *USE on QZLSOLST, then re-run. This scanner never changes NetServer attributes." \
+        "cis-l2"
+  else
+    add security net_netserver_browse_interval "NetServer browse interval" NOT_ASSESSED low \
+        "not assessed — QZLSOLST read not wired" \
+        "NetServer is running; the browse interval is not graded because the QZLSOLST read is not wired." \
+        "$NSBI_FIX" \
+        "cis-l2"
+  fi
+else
+  NSBI_FAIL_SRC=""
+  if [ "$NSBI_PORTS_TRUST" -eq 0 ]; then
+    NSBI_FAIL_SRC="QSYS2.NETSTAT_INFO"
+  fi
+  if [ "$NSBI_AS_TRUST" -eq 0 ]; then
+    if [ -n "$NSBI_FAIL_SRC" ]; then
+      NSBI_FAIL_SRC="$NSBI_FAIL_SRC and QUSRSYS.QATOCSTART"
+    else
+      NSBI_FAIL_SRC="QUSRSYS.QATOCSTART"
+    fi
+  fi
+  if [ "$NSBI_FAIL_SRC" = "QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART" ]; then
+    NSBI_FAIL_OBS="not assessed — QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART probes failed"
+    NSBI_FAIL_MEAN="The QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART probes failed without an authority error, so NetServer exposure cannot be graded."
+  else
+    NSBI_FAIL_OBS="not assessed — $NSBI_FAIL_SRC probe failed"
+    NSBI_FAIL_MEAN="The $NSBI_FAIL_SRC probe failed without an authority error, so NetServer exposure cannot be graded."
+  fi
+  add security net_netserver_browse_interval "NetServer browse interval" NOT_ASSESSED low \
+      "$NSBI_FAIL_OBS" \
+      "$NSBI_FAIL_MEAN" \
+      "$NSBI_FIX" \
+      "cis-l2"
+fi
+
+  # net_netserver_guest — IBM i NetServer guest profile (CIS IBM i 5.3.1).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.3.1 (L1). Guest profile must be *NONE;
+  # the fix is CHGNSVA GUESTPRF(*NONE); ENDNSV; STRNSV RESET(*YES).
+  # Parses cap-netserver-attrs NSA_RAW (key=value). Does not call QZLSOLST.
+  # Determinate path: TCP 139/445 not LISTEN AND QATOCSTART *NETSVR
+  # AUTOSTART=*NO -> NOT_APPLICABLE. LISTEN or AUTOSTART=*YES independently
+  # -> grade guest_profile / guest_logon_support from NSA_RAW. NSA_OK=0 ->
+  # NOT_ASSESSED with NSA_WHY. Never PASS from absence of evidence.
+  NSG_PORT_RAW=$(ibmi_sql netstat_smb_ports "SELECT VARCHAR(CHAR(LOCAL_PORT),6) CONCAT '|' CONCAT VARCHAR(TRIM(TCP_STATE),20) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT IN (139, 445, 25, 21, 990, 161)")
+  NSG_PORT_RC=$?
+  NSG_CFG_RAW=$(ibmi_sql netserver_start_cfg "SELECT VARCHAR(TRIM(SERVER),30) CONCAT '|' CONCAT VARCHAR(TRIM(AUTOSTART),10) FROM QUSRSYS.QATOCSTART WHERE SERVER LIKE '%NETSVR%' OR SERVER LIKE '%NETSERVER%'")
+  NSG_CFG_RC=$?
+
+  NSG_PORT_CLASS=$(printf '%s\n' "$NSG_PORT_RAW" | awk '
+    function trim(s) {
+      sub(/^[ \t]+/, "", s)
+      sub(/[ \t]+$/, "", s)
+      return s
+    }
+    {
+      raw = $0
+      sub(/\r$/, "", raw)
+      low = tolower(raw)
+      if (low ~ /sqlstate:[ \t]*42501/ || low ~ /not authorized/) auth = 1
+      if (raw ~ /RECORD\(S\) SELECTED/ || raw ~ /LOCAL_PORT/) seen = 1
+      raw = trim(raw)
+      if (index(raw, "|") > 0) {
+        n = split(raw, f, "|")
+        for (i = 1; i <= n; i++) f[i] = trim(f[i])
+        port = f[1]; state = f[2]
+        if (n >= 3 && f[1] !~ /^[0-9]+$/) { port = f[2]; state = f[3] }
+        if ((port == "139" || port == "445") && state == "LISTEN") listen = 1
+        if (port ~ /^[0-9]+$/ && state ~ /^[A-Z_]+$/) seen = 1
+        next
+      }
+      n = split(raw, f, /[ \t]+/)
+      for (i = 1; i <= n; i++) {
+        if ((f[i] == "139" || f[i] == "445") && i < n && f[i + 1] == "LISTEN") listen = 1
+        if (f[i] ~ /^[0-9]+$/ && i < n && f[i + 1] ~ /^[A-Z_]+$/) seen = 1
+      }
+    }
+    END {
+      if (auth) print "AUTH"
+      else if (listen) print "LISTEN"
+      else if (seen) print "NOTLISTEN"
+      else print "NONE"
+    }')
+  NSG_CFG_CLASS=$(printf '%s\n' "$NSG_CFG_RAW" | awk '
+    function trim(s) {
+      sub(/^[ \t]+/, "", s)
+      sub(/[ \t]+$/, "", s)
+      return s
+    }
+    {
+      raw = $0
+      sub(/\r$/, "", raw)
+      low = tolower(raw)
+      if (low ~ /sqlstate:[ \t]*42501/ || low ~ /not authorized/) auth = 1
+      n = split(raw, f, /[| \t]+/)
+      for (i = 1; i <= n; i++) {
+        f[i] = trim(f[i])
+        if (f[i] == "*NETSVR") {
+          found = 1
+          if (i < n) {
+            nxt = trim(f[i + 1])
+            if (nxt == "*YES" || nxt == "*NO") auto = nxt
+          }
+        }
+      }
+    }
+    END {
+      if (auth) print "AUTH"
+      else if (auto == "*YES") print "YES"
+      else if (auto == "*NO") print "NO"
+      else if (found) print "UNPARSEABLE"
+      else print "NONE"
+    }')
+
+  # Absence of LISTEN is only parsed netstat evidence (NOTLISTEN). NONE with
+  # any nonzero rc is a failed/empty probe, never affirmative not-LISTEN.
+  NSG_NO_LISTEN=0
+  if [ "$NSG_PORT_CLASS" = "NOTLISTEN" ]; then
+    NSG_NO_LISTEN=1
+  fi
+
+  # LISTEN or AUTOSTART=*YES independently select the residual. Authority or
+  # capture failure is reported only when neither probe supplies that
+  # evidence and NOT_APPLICABLE cannot be established.
+  NSG_REASON=probe_failed
+  if [ "$NSG_PORT_CLASS" = "LISTEN" ] || [ "$NSG_CFG_CLASS" = "YES" ]; then
+    if [ "${NSA_OK:-0}" -ne 1 ]; then
+      NSG_REASON=nsa_failed
+    else
+      NSG_REASON=nsa_grade
+    fi
+  elif [ "$NSG_NO_LISTEN" -eq 1 ] && [ "$NSG_CFG_CLASS" = "NO" ]; then
+    NSG_REASON=not_started
+  elif [ "$NSG_PORT_CLASS" = "AUTH" ] || [ "$NSG_CFG_CLASS" = "AUTH" ]; then
+    NSG_REASON=authority
+  else
+    NSG_REASON=probe_failed
+  fi
+
+  NSG_FAIL_RC=$NSG_PORT_RC
+  [ "$NSG_PORT_RC" -ne 0 ] || NSG_FAIL_RC=$NSG_CFG_RC
+
+  NSG_SEV=low
+  NSG_FIX_GUEST="run CHGNSVA GUESTPRF(*NONE); ENDNSV; STRNSV RESET(*YES) to set the guest profile to *NONE and make the pending value effective. This scanner never changes NetServer attributes."
+  case "$NSG_REASON" in
+    not_started) NSG_STATUS=NOT_APPLICABLE
+      NSG_OBS="NetServer not started, not autostarted"
+      NSG_MEAN="TCP ports 139 and 445 are not LISTEN and QATOCSTART *NETSVR AUTOSTART=*NO, so NetServer is not exposing SMB and is not configured to start."
+      NSG_FIX="n/a"
+      ;;
+    nsa_failed) NSG_STATUS=NOT_ASSESSED
+      NSG_OBS="not assessed — ${NSA_WHY:-Guest profile not read: QZLSOLST ZLSL0100 not yet wired}"
+      NSG_MEAN="NetServer is started or autostarted, but the QZLSOLST ZLSL0201 capture did not yield a readable guest profile (${NSA_WHY:-capture unavailable}). A missing dump is not a clean result."
+      NSG_FIX="re-run the scan as the scan profile and confirm QZLSOLST format ZLSL0201 is readable. This scanner never changes NetServer attributes."
+      ;;
+    nsa_grade)
+      NSG_GP=$(printf '%s\n' "${NSA_RAW:-}" | awk '
+        function trim(s) {
+          sub(/^[ \t]+/, "", s)
+          sub(/[ \t]+$/, "", s)
+          return s
+        }
+        {
+          raw = $0
+          sub(/\r$/, "", raw)
+          eq = index(raw, "=")
+          if (eq < 1) next
+          key = trim(substr(raw, 1, eq - 1))
+          if (key != "guest_profile") next
+          print trim(substr(raw, eq + 1))
+          found = 1
+          exit 0
+        }
+        END { if (!found) exit 2 }
+      ')
+      NSG_GP_RC=$?
+      NSG_GL=$(printf '%s\n' "${NSA_RAW:-}" | awk '
+        function trim(s) {
+          sub(/^[ \t]+/, "", s)
+          sub(/[ \t]+$/, "", s)
+          return s
+        }
+        {
+          raw = $0
+          sub(/\r$/, "", raw)
+          eq = index(raw, "=")
+          if (eq < 1) next
+          key = trim(substr(raw, 1, eq - 1))
+          if (key != "guest_logon_support") next
+          print trim(substr(raw, eq + 1))
+          found = 1
+          exit 0
+        }
+        END { if (!found) exit 2 }
+      ')
+      NSG_GL_RC=$?
+      case "$NSG_GP" in
+        "''"|'""') NSG_GP="" ;;
+      esac
+      if [ "$NSG_GP_RC" -ne 0 ]; then
+        NSG_STATUS=NOT_ASSESSED
+        NSG_OBS="not assessed — guest_profile missing from NSA_RAW"
+        NSG_MEAN="The QZLSOLST ZLSL0201 capture was readable, but it did not contain guest_profile, so the guest profile cannot be graded."
+        NSG_FIX="inspect the cap-netserver-attrs dump for guest_profile and guest_logon_support. This scanner never changes NetServer attributes."
+      else
+        NSG_GP_BLANK=0
+        case "$NSG_GP" in
+          ""|"*NONE") NSG_GP_BLANK=1 ;;
+        esac
+        if [ "$NSG_GP_BLANK" -eq 0 ]; then
+          NSG_STATUS=FAIL
+          NSG_OBS="GUESTPRF $NSG_GP"
+          NSG_MEAN="NetServer guest profile is $NSG_GP, so guest access is enabled."
+          NSG_FIX="$NSG_FIX_GUEST"
+        elif [ "$NSG_GL_RC" -ne 0 ]; then
+          NSG_STATUS=NOT_ASSESSED
+          NSG_OBS="not assessed — guest_logon_support missing from NSA_RAW"
+          NSG_MEAN="The QZLSOLST ZLSL0201 capture was readable and guest_profile is blank, but guest_logon_support was missing, so guest access cannot be graded."
+          NSG_FIX="inspect the cap-netserver-attrs dump for guest_profile and guest_logon_support. This scanner never changes NetServer attributes."
+        else
+          NSG_GLN=$(printf '%s\n' "$NSG_GL" | awk '/^[0-9]+$/ { print $0 + 0 }')
+          if [ -z "$NSG_GLN" ]; then
+            NSG_STATUS=NOT_ASSESSED
+            NSG_OBS="not assessed — guest_logon_support unreadable"
+            NSG_MEAN="The QZLSOLST ZLSL0201 capture was readable, but guest_logon_support was not a BIN4 0/1 value, so guest access cannot be graded."
+            NSG_FIX="inspect the cap-netserver-attrs dump for guest_logon_support. This scanner never changes NetServer attributes."
+          elif [ "$NSG_GLN" -eq 0 ]; then
+            NSG_STATUS=PASS
+            NSG_OBS="GUESTPRF *NONE"
+            NSG_MEAN="NetServer guest profile is *NONE and guest logon support is 0, so guest access is disabled."
+            NSG_FIX="n/a"
+          elif [ "$NSG_GLN" -eq 1 ]; then
+            NSG_STATUS=FAIL
+            NSG_OBS="GUESTPRF *NONE guest_logon_support=1"
+            NSG_MEAN="NetServer guest logon support is enabled, so guest access is not disabled."
+            NSG_FIX="$NSG_FIX_GUEST"
+          else
+            NSG_STATUS=NOT_ASSESSED
+            NSG_OBS="not assessed — guest_logon_support unreadable"
+            NSG_MEAN="The QZLSOLST ZLSL0201 capture was readable, but guest_logon_support was not a BIN4 0/1 value, so guest access cannot be graded."
+            NSG_FIX="inspect the cap-netserver-attrs dump for guest_logon_support. This scanner never changes NetServer attributes."
+          fi
+        fi
+      fi
+      ;;
+    authority) NSG_STATUS=NOT_ASSESSED
+      NSG_OBS="not assessed — scan profile lacks authority to read NETSTAT_INFO or QATOCSTART"
+      NSG_MEAN="The scan profile cannot read QSYS2.NETSTAT_INFO or QUSRSYS.QATOCSTART, so the NetServer guest profile cannot be graded. PTSCAN is *USER with no special authorities."
+      NSG_FIX="grant the scan profile *USE on QUSRSYS.QATOCSTART and QSYS2.NETSTAT_INFO, then re-run. This scanner never changes NetServer attributes."
+      ;;
+    probe_failed) NSG_STATUS=NOT_ASSESSED
+      NSG_OBS="not assessed — capture failed (rc=$NSG_FAIL_RC)"
+      NSG_MEAN="The NETSTAT_INFO or QATOCSTART probe did not yield readable evidence, so the NetServer guest profile cannot be graded. Absence of evidence is not a clean result."
+      NSG_FIX="re-run the scan as the scan profile and confirm QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART are readable. This scanner never changes NetServer attributes."
+      ;;
+  esac
+
+  add security net_netserver_guest "NetServer guest profile" \
+      "$NSG_STATUS" "$NSG_SEV" "$NSG_OBS" "$NSG_MEAN" "$NSG_FIX" \
+      "cis-l1"
+
+  # net_netserver_lanman — IBM i NetServer LANMAN password hash.
+  # Authority: CIS IBM i V7R5M0/V7R4M0 Benchmark v2.1.0 rec 5.3.2 (L1).
+  # One finding. Release via ibmi_release (probe key os_vrm, honours $REL).
+  # On 7.5 the underlying LANMAN hash was removed, so the benchmark retires
+  # the rec — 7.5+ is determinate NOT_APPLICABLE. On 7.4 and earlier there is
+  # no verified read-only source for the LANMAN option (QZLSOLST layout
+  # unverified), so the setting is a typed NOT_ASSESSED refusal. Never guess
+  # a QZLSOLST layout; the scanner never changes NetServer attributes.
+  RELEASE_RC=0
+  RELEASE=$(ibmi_release 2>/dev/null)
+  RELEASE_RC=$?
+  case "$RELEASE" in
+    # ibmi_release returns only a digit-dot-digit shape for a readable release,
+    # so the explicit 7.5 list below is the whole retired side; any other
+    # well-formed release is 7.4-or-earlier territory (typed refusal). The *)
+    # branch therefore means "release not read" only, never a known release.
+    7.5|7.6|7.7)
+      add security net_netserver_lanman "NetServer LANMAN password hash" NOT_APPLICABLE low \
+          "LANMAN hash removed in IBM i 7.5; CIS 7.5 5.3.2 has no audit" \
+          "The underlying system LANMAN hash was removed in IBM i 7.5, so CIS 7.5 5.3.2 has no audit or remediation and the recommendation is retired." \
+          "n/a" \
+          "cis-l1"
+      ;;
+    [0-9].[0-9])
+      add security net_netserver_lanman "NetServer LANMAN password hash" NOT_ASSESSED low \
+          "not assessed — LANMAN option not read: no verified read-only source (QZLSOLST)" \
+          "The CIS 7.4 5.3.2 recommendation is to set the NetServer LANMAN option to *NO, but no verified read-only source exposes the current LANMAN option on this release, so the setting cannot be graded." \
+          "run GO NETS option 10 and set the LANMAN option to *NO (CHGNSVA LANMANOPT(*NO)) during a planned window and confirm NetServer still works. This scanner never changes NetServer attributes." \
+          "cis-l1"
+      ;;
+    *)
+      add security net_netserver_lanman "NetServer LANMAN password hash" NOT_ASSESSED low \
+          "not assessed — release unknown (rc=$RELEASE_RC)" \
+          "The IBM i release could not be read, so it is not known whether 5.3.2 is retired (7.5 and later) or still requires a LANMAN option check (7.4 and earlier), and the recommendation cannot be graded." \
+          "confirm the OS version and release from SYSIBMADM.ENV_SYS_INFO (or set REL), then re-assess. This scanner never changes NetServer attributes." \
+          "cis-l1"
+      ;;
+  esac
+
+  # net_netserver_signing — IBM i NetServer SMB signing, CIS IBM i 5.3.3 (L1).
+  # Message authentication must be *REQUIRED. Exposure is graded from the
+  # verified read-only sources QSYS2.NETSTAT_INFO (ports 139/445) and
+  # QUSRSYS.QATOCSTART (*NETSVR AUTOSTART), keyed netstat_smb_ports and
+  # netserver_start_cfg so the 2026-08-26 capture replays. NOT_APPLICABLE
+  # when 139/445 are unbound and AUTOSTART=*NO. When NetServer is in play
+  # MSGAUT is graded from cap-netserver-attrs NSA_RAW (message_auth_mode:
+  # 2 *REQUIRED PASS, 1 negotiated FAIL, 0 not supported FAIL). NSA_OK=0
+  # is a typed NOT_ASSESSED naming NSA_WHY. Never invokes QZLSOLST/QZLSMAINT
+  # and never changes attributes.
+  NS_FIX="set NetServer message authentication to *REQUIRED with CHGNSVA MSGAUT(*REQUIRED); ENDNSV; STRNSV RESET(*YES). This scanner never changes NetServer attributes."
+  NS_PROBE_FIX="re-run the scan as the scan profile and confirm QSYS2.NETSTAT_INFO ports 139/445 and QUSRSYS.QATOCSTART *NETSVR AUTOSTART. This scanner never changes NetServer attributes."
+  NS_RAW=$(ibmi_sql netstat_smb_ports "SELECT VARCHAR(CHAR(LOCAL_PORT),6) CONCAT '|' CONCAT VARCHAR(TRIM(TCP_STATE),12) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT IN (139, 445, 25, 21, 990, 161)")
+  NS_RC=$?
+  CFG_RAW=$(ibmi_sql netserver_start_cfg "SELECT VARCHAR(TRIM(SERVER),30) CONCAT '|' CONCAT VARCHAR(TRIM(AUTOSTART),10) FROM QUSRSYS.QATOCSTART WHERE SERVER LIKE '%NETSVR%' OR SERVER LIKE '%NETSERVER%' OR SERVER LIKE '%SMTP%' OR SERVER LIKE '%FTP%' OR SERVER LIKE '%SNMP%'")
+  CFG_RC=$?
+  NS_PARSE=$(printf '%s\n' "$NS_RAW" | awk '
+    { gsub(/\r/, "") }
+    $2 == "RECORD(S)" && $3 ~ /^SELECTED/ {
+      if ($1 + 0 == 0) zerorow = 1
+      next
+    }
+    $1 == "LOCAL_PORT" && $2 == "TCP_STATE" { hdr = 1; next }
+    /\|/ {
+      split($0, f, "|")
+      p = f[1]; st = f[2]
+      gsub(/^[ \t]+|[ \t]+$/, "", p)
+      gsub(/^[ \t]+|[ \t]+$/, "", st)
+      if (p == "BOUND") { p = st; st = "LISTEN" }
+      if (p ~ /^[0-9]+$/) {
+        ports++
+        if ((p + 0 == 139 || p + 0 == 445) && st == "LISTEN") listen++
+      }
+      next
+    }
+    $1 ~ /^[0-9]+$/ {
+      ports++
+      if (($1 + 0 == 139 || $1 + 0 == 445) && $2 == "LISTEN") listen++
+    }
+    END {
+      ok = 0
+      if (ports > 0 || zerorow || hdr) ok = 1
+      printf "%d %d %d", listen + 0, ports + 0, ok
+    }
+  ')
+  NS_LISTEN=${NS_PARSE%% *}
+  NS_REST=${NS_PARSE#* }
+  NS_PORTS=${NS_REST%% *}
+  NS_LISTING=${NS_REST#* }
+  [ -n "$NS_LISTEN" ] || NS_LISTEN=0
+  [ -n "$NS_PORTS" ] || NS_PORTS=0
+  [ -n "$NS_LISTING" ] || NS_LISTING=0
+  CFG_AUTO=$(printf '%s\n' "$CFG_RAW" | awk '
+    { gsub(/\r/, "") }
+    /\|/ {
+      split($0, f, "|")
+      srv = f[1]; auto = f[2]
+      gsub(/^[ \t]+|[ \t]+$/, "", srv)
+      gsub(/^[ \t]+|[ \t]+$/, "", auto)
+      if (index(srv, "NETSVR") > 0) val = auto
+      next
+    }
+    $2 == "*NETSVR" { val = $3; gsub(/[ \t]+$/, "", val) }
+    END { if (val == "*YES" || val == "*NO") print val }
+  ')
+  NS_FAIL=0
+  CFG_FAIL=0
+  NS_WHY=""
+  CFG_WHY=""
+  if [ "$NS_RC" -ge 2 ]; then
+    NS_FAIL=1
+    NS_WHY="capture failed (rc=$NS_RC)"
+  elif [ "$NS_RC" -eq 0 ] && [ "$NS_LISTING" -eq 0 ]; then
+    NS_FAIL=1
+    NS_WHY="capture empty (rc=0)"
+  fi
+  if [ "$CFG_RC" -ge 2 ]; then
+    CFG_FAIL=1
+    CFG_WHY="capture failed (rc=$CFG_RC)"
+  elif [ "$CFG_RC" -eq 0 ] && [ -z "$CFG_RAW" ]; then
+    CFG_FAIL=1
+    CFG_WHY="capture empty (rc=0)"
+  fi
+  if [ "$NS_FAIL" -eq 1 ]; then
+    add security net_netserver_signing "NetServer SMB signing" NOT_ASSESSED low \
+        "not assessed — $NS_WHY" \
+        "The NETSTAT_INFO / QATOCSTART probes did not yield a readable listing, so NetServer exposure and MSGAUT cannot be graded." \
+        "$NS_PROBE_FIX" \
+        "cis-l1"
+  elif [ "$CFG_FAIL" -eq 1 ]; then
+    add security net_netserver_signing "NetServer SMB signing" NOT_ASSESSED low \
+        "not assessed — $CFG_WHY" \
+        "The NETSTAT_INFO / QATOCSTART probes did not yield a readable listing, so NetServer exposure and MSGAUT cannot be graded." \
+        "$NS_PROBE_FIX" \
+        "cis-l1"
+  elif [ "$NS_LISTEN" -eq 0 ] && [ "$CFG_AUTO" = "*NO" ]; then
+    add security net_netserver_signing "NetServer SMB signing" NOT_APPLICABLE low \
+        "ports 139/445 not bound and *NETSVR AUTOSTART=*NO; MSGAUT not read" \
+        "Neither SMB port 139 nor 445 is bound and *NETSVR AUTOSTART is *NO, so there is no NetServer SMB exposure to grade. Message authentication was not read." \
+        "n/a" \
+        "cis-l1"
+  elif [ "$NS_LISTEN" -eq 0 ] && [ -z "$CFG_AUTO" ]; then
+    add security net_netserver_signing "NetServer SMB signing" NOT_ASSESSED low \
+        "not assessed — *NETSVR AUTOSTART not read" \
+        "Ports 139/445 are unbound, but *NETSVR AUTOSTART was not a readable *YES/*NO value, so absence of SMB exposure cannot be confirmed." \
+        "$NS_PROBE_FIX" \
+        "cis-l1"
+  elif [ "${NSA_OK:-0}" -ne 1 ]; then
+    NSA_REFUSE=${NSA_WHY:-QZLSOLST read not wired}
+    add security net_netserver_signing "NetServer SMB signing" NOT_ASSESSED low \
+        "not assessed — $NSA_REFUSE" \
+        "CIS IBM i 5.3.3 (L1) requires NetServer message authentication *REQUIRED. Ports 139/445 or *NETSVR autostart show NetServer is in play, but the QZLSOLST capture did not yield a readable message_auth_mode, so MSGAUT is not graded." \
+        "$NS_FIX" \
+        "cis-l1"
+  else
+    MAM=$(printf '%s\n' "$NSA_RAW" | awk '
+      {
+        gsub(/\r/, "")
+        n = split($0, tok, " ")
+        for (i = 1; i <= n; i++) {
+          if (tok[i] ~ /^message_auth_mode=/) {
+            sub(/^message_auth_mode=/, "", tok[i])
+            print tok[i]
+            exit
+          }
+        }
+      }
+    ')
+    case "$MAM" in
+      2)
+        add security net_netserver_signing "NetServer SMB signing" PASS low \
+            "*REQUIRED (message_auth_mode=2)" \
+            "NetServer message authentication is *REQUIRED (QZLSOLST message_auth_mode=2), so SMB signing is required." \
+            "n/a" \
+            "cis-l1"
+        ;;
+      1)
+        add security net_netserver_signing "NetServer SMB signing" FAIL low \
+            "negotiated, not required (message_auth_mode=1)" \
+            "NetServer message authentication is negotiated, not required. CIS IBM i 5.3.3 (L1) requires *REQUIRED." \
+            "$NS_FIX" \
+            "cis-l1"
+        ;;
+      0)
+        add security net_netserver_signing "NetServer SMB signing" FAIL low \
+            "message authentication not supported (message_auth_mode=0)" \
+            "NetServer message authentication is not supported. CIS IBM i 5.3.3 (L1) requires *REQUIRED." \
+            "$NS_FIX" \
+            "cis-l1"
+        ;;
+      *)
+        add security net_netserver_signing "NetServer SMB signing" NOT_ASSESSED low \
+            "not assessed — message_auth_mode missing or unreadable in QZLSOLST dump" \
+            "The QZLSOLST capture was readable, but it did not contain a usable message_auth_mode (0, 1, or 2), so MSGAUT is not graded." \
+            "$NS_FIX" \
+            "cis-l1"
+        ;;
+    esac
+  fi
+
+# ck-ibmi-net-netserver-smb-versions — IBM i NetServer SMB protocol versions.
+# CIS IBM i v2.1.0 5.3.4 (L1): SMB2 & SMB3 only (SMB1 off).
+# PARTIAL-AUTO. QSYS2.NETSTAT_INFO ports 139/445 and QUSRSYS.QATOCSTART
+# *NETSVR AUTOSTART decide exposure. An rc-0 NETSTAT query with zero
+# rows is unbound (trustworthy empty result). Unbound and AUTOSTART=*NO
+# is NOT_APPLICABLE. CPF22xx / SQL0551 / "not authorized" is a typed
+# scan-profile authority refusal. After that, bound/unbound and
+# *YES/*NO are accepted only at rc 0; any other nonzero rc, including
+# parseable partial output, is a distinct typed probe-failed refusal.
+# When NetServer is in play, grade smb_negotiate from cap-netserver-attrs
+# NSA_RAW (key=value lines). Do not call QZLSOLST. NSA_OK=0 renders
+# NOT_ASSESSED with NSA_WHY. This scanner never invokes CALL QZLSMAINT
+# and never changes NetServer attributes.
+#
+# Probe keys match the 2026-08-26 NetServer read-only family
+# (ck-ibmi-net-netserver-guest live-capture commands.txt).
+SMB_FAIL_FIX="See IBM i NetServer SMB protocol version control. Confirm the flag word with CALL QZLSMAINT PARM('40' '0') (operator read-out only; writes spool QPCSMPRT). This scanner never changes NetServer attributes."
+SMB_NSA_FIX="re-run so QZLSOLST can be read as the scan profile. This scanner never changes NetServer attributes."
+SMB_AUTH_FIX="grant the scan profile *USE on QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART, then re-run. This scanner never changes NetServer attributes."
+SMB_PROBE_FIX="re-run so QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART can be read. This scanner never changes NetServer attributes."
+SMB_OBS_PASS="SMB2/SMB3 only (observed by negotiate; behavioural server response, not the QZLSMAINT flag word)"
+SMB_OBS_FAIL="SMB1 enabled (behavioural server response, not the QZLSMAINT flag word)"
+SMB_OBS_UNBOUND="smb1=unbound smb2=unbound smb3=unbound (behavioural; not the QZLSMAINT flag word)"
+SMB_EVID_PASS="SMB NEGOTIATE observed SMB1 refused and SMB2/SMB3 answered. This is behavioural (server response), not the QZLSMAINT flag word."
+SMB_EVID_FAIL="SMB NEGOTIATE observed SMB1 answered. This is behavioural (server response), not the QZLSMAINT flag word."
+SMB_EVID_UNBOUND="SMB NEGOTIATE reported smb1=unbound smb2=unbound smb3=unbound, so there is no SMB exposure to grade. This is behavioural (server response), not the QZLSMAINT flag word."
+
+NS_PORTS=$(ibmi_sql netstat_smb_ports "SELECT 'PORT' CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(LOCAL_PORT)),5) CONCAT '|' CONCAT VARCHAR(TRIM(TCP_STATE),12) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT IN (139, 445, 25, 21, 990, 161)")
+NS_PORTS_RC=$?
+NS_START=$(ibmi_sql netserver_start_cfg "SELECT 'START' CONCAT '|' CONCAT VARCHAR(TRIM(SERVER),30) CONCAT '|' CONCAT VARCHAR(TRIM(AUTOSTART),10) FROM QUSRSYS.QATOCSTART WHERE SERVER LIKE '%NETSVR%' OR SERVER LIKE '%NETSERVER%' OR SERVER LIKE '%SMTP%' OR SERVER LIKE '%FTP%' OR SERVER LIKE '%SNMP%'")
+NS_START_RC=$?
+
+NS_PORT_CLASS=$(printf '%s\n' "$NS_PORTS" | awk '
+  {
+    gsub(/\r/, "")
+    raw = $0
+    low = tolower(raw)
+    if (low ~ /sql0551/ || low ~ /sqlstate[ \t]*[:=][ \t]*42501/ || low ~ /cpf22[0-9][0-9]/ || low ~ /not authorized/)
+      auth = 1
+    if (raw ~ /RECORD[(]|DB2>|LOCAL_PORT|^[- \t]*$/) next
+    n = split(raw, a, "|")
+    if (n >= 3) {
+      key = a[1]; port = a[2]; state = a[3]
+      gsub(/^[ \t]+|[ \t]+$/, "", key)
+      gsub(/^[ \t]+|[ \t]+$/, "", port)
+      gsub(/^[ \t]+|[ \t]+$/, "", state)
+      if (key == "PORT") {
+        rec++
+        if ((port == "139" || port == "445") && state == "LISTEN") bound++
+      }
+      next
+    }
+    gsub(/\|/, " ", raw)
+    nf = split(raw, f, /[ \t]+/)
+    port = ""
+    state = ""
+    for (i = 1; i <= nf; i++) {
+      if (f[i] == "") continue
+      if (f[i] ~ /^(139|445|25|21|990|161)$/ && port == "") port = f[i]
+      if (f[i] == "LISTEN" || f[i] == "ESTABLISHED" || f[i] == "CLOSE-WAIT" || f[i] == "TIME-WAIT")
+        state = f[i]
+    }
+    if (port != "") {
+      rec++
+      if ((port == "139" || port == "445") && state == "LISTEN") bound++
+    }
+  }
+  END {
+    if (auth) print "auth"
+    else if (bound) print "bound"
+    else if (rec) print "unbound"
+    else print "empty"
+  }
+')
+
+NS_START_CLASS=$(printf '%s\n' "$NS_START" | awk '
+  {
+    gsub(/\r/, "")
+    raw = $0
+    low = tolower(raw)
+    if (low ~ /sql0551/ || low ~ /sqlstate[ \t]*[:=][ \t]*42501/ || low ~ /cpf22[0-9][0-9]/ || low ~ /not authorized/)
+      auth = 1
+    if (raw ~ /RECORD[(]|DB2>|SERVERTYPE|^[- \t]*$/) next
+    n = split(raw, a, "|")
+    if (n >= 3) {
+      key = a[1]; srv = a[2]; ast = a[3]
+      gsub(/^[ \t]+|[ \t]+$/, "", key)
+      gsub(/^[ \t]+|[ \t]+$/, "", srv)
+      gsub(/^[ \t]+|[ \t]+$/, "", ast)
+      if (key == "START" && (srv == "*NETSVR" || srv == "*NETSERVER")) val = ast
+      next
+    }
+    gsub(/\|/, " ", raw)
+    nf = split(raw, f, /[ \t]+/)
+    for (i = 1; i <= nf; i++) {
+      if ((f[i] == "*NETSVR" || f[i] == "*NETSERVER") && (i + 1) <= nf && (f[i + 1] == "*YES" || f[i + 1] == "*NO"))
+        val = f[i + 1]
+    }
+  }
+  END {
+    if (auth) print "auth"
+    else if (val == "*YES") print "yes"
+    else if (val == "*NO") print "no"
+    else print "empty"
+  }
+')
+
+NS_PORTS_STATE=unknown
+if [ "$NS_PORT_CLASS" = "auth" ]; then
+  NS_PORTS_STATE=auth
+elif [ "$NS_PORTS_RC" -eq 0 ]; then
+  if [ "$NS_PORT_CLASS" = "bound" ]; then
+    NS_PORTS_STATE=bound
+  else
+    NS_PORTS_STATE=unbound
+  fi
+elif [ "$NS_PORTS_RC" -eq 127 ]; then
+  NS_PORTS_STATE=missing
+else
+  NS_PORTS_STATE=failed
+fi
+
+NS_START_STATE=unknown
+if [ "$NS_START_CLASS" = "auth" ]; then
+  NS_START_STATE=auth
+elif [ "$NS_START_RC" -eq 0 ]; then
+  if [ "$NS_START_CLASS" = "yes" ]; then
+    NS_START_STATE=yes
+  elif [ "$NS_START_CLASS" = "no" ]; then
+    NS_START_STATE=no
+  else
+    NS_START_STATE=failed
+  fi
+elif [ "$NS_START_RC" -eq 127 ]; then
+  NS_START_STATE=missing
+else
+  NS_START_STATE=failed
+fi
+
+NS_AUTH_SRC=""
+if [ "$NS_PORTS_STATE" = "auth" ]; then
+  NS_AUTH_SRC="QSYS2.NETSTAT_INFO"
+fi
+if [ "$NS_START_STATE" = "auth" ]; then
+  if [ -n "$NS_AUTH_SRC" ]; then
+    NS_AUTH_SRC="$NS_AUTH_SRC and QUSRSYS.QATOCSTART"
+  else
+    NS_AUTH_SRC="QUSRSYS.QATOCSTART"
+  fi
+fi
+
+NS_FAIL_SRC=""
+if [ "$NS_PORTS_STATE" = "failed" ] || [ "$NS_PORTS_STATE" = "missing" ]; then
+  NS_FAIL_SRC="QSYS2.NETSTAT_INFO"
+fi
+if [ "$NS_START_STATE" = "failed" ] || [ "$NS_START_STATE" = "missing" ]; then
+  if [ -n "$NS_FAIL_SRC" ]; then
+    NS_FAIL_SRC="$NS_FAIL_SRC and QUSRSYS.QATOCSTART"
+  else
+    NS_FAIL_SRC="QUSRSYS.QATOCSTART"
+  fi
+fi
+
+if [ "$NS_PORTS_STATE" = "unbound" ] && [ "$NS_START_STATE" = "no" ]; then
+  add security net_netserver_smb_versions "NetServer SMB versions" NOT_APPLICABLE low \
+      "ports 139/445 not bound; *NETSVR AUTOSTART=*NO; SMB flags not read" \
+      "Ports 139 and 445 are not listening and *NETSVR AUTOSTART is *NO, so there is no SMB exposure to grade. SMB flags were not read." \
+      "n/a" \
+      "cis-l1"
+elif [ "$NS_PORTS_STATE" = "bound" ] || [ "$NS_START_STATE" = "yes" ]; then
+  if [ "${NSA_OK:-0}" -ne 1 ]; then
+    SMB_NSA_WHY="${NSA_WHY:-QZLSOLST capture missing}"
+    add security net_netserver_smb_versions "NetServer SMB versions" NOT_ASSESSED low \
+        "not assessed — $SMB_NSA_WHY" \
+        "The cap-netserver-attrs capture did not yield a readable smb_negotiate dump (QZLSOLST / NSA_WHY: $SMB_NSA_WHY), so SMB versions cannot be graded." \
+        "$SMB_NSA_FIX" \
+        "cis-l1"
+  else
+    SMB_NEG_CLASS=$(printf '%s\n' "$NSA_RAW" | awk '
+      {
+        gsub(/\r/, "")
+        for (i = 1; i <= NF; i++) {
+          eq = index($i, "=")
+          if (eq < 1) continue
+          k = substr($i, 1, eq - 1)
+          v = substr($i, eq + 1)
+          if (k == "smb1") s1 = v
+          if (k == "smb2") s2 = v
+          if (k == "smb3") s3 = v
+        }
+      }
+      END {
+        answered2 = 0
+        answered3 = 0
+        if (s2 == "answered" || s2 ~ /^0x[0-9A-Fa-f]+$/) answered2 = 1
+        if (s3 == "answered" || s3 ~ /^0x[0-9A-Fa-f]+$/) answered3 = 1
+        if (s1 == "unbound" && s2 == "unbound" && s3 == "unbound") print "na"
+        else if (s1 == "answered") print "fail"
+        else if (s1 == "refused" && answered2 && answered3) print "pass"
+        else print "refuse"
+      }
+    ')
+    if [ "$SMB_NEG_CLASS" = "fail" ]; then
+      add security net_netserver_smb_versions "NetServer SMB versions" FAIL high \
+          "$SMB_OBS_FAIL" \
+          "$SMB_EVID_FAIL" \
+          "$SMB_FAIL_FIX" \
+          "cis-l1"
+    elif [ "$SMB_NEG_CLASS" = "pass" ]; then
+      add security net_netserver_smb_versions "NetServer SMB versions" PASS low \
+          "$SMB_OBS_PASS" \
+          "$SMB_EVID_PASS" \
+          "n/a" \
+          "cis-l1"
+    elif [ "$SMB_NEG_CLASS" = "na" ]; then
+      add security net_netserver_smb_versions "NetServer SMB versions" NOT_APPLICABLE low \
+          "$SMB_OBS_UNBOUND" \
+          "$SMB_EVID_UNBOUND" \
+          "n/a" \
+          "cis-l1"
+    else
+      add security net_netserver_smb_versions "NetServer SMB versions" NOT_ASSESSED low \
+          "not assessed — QZLSOLST smb_negotiate not gradeable" \
+          "The cap-netserver-attrs capture was readable, but smb_negotiate was not gradeable (missing, refused, unbound, not_assessed, single-dialect, or malformed dialect), so SMB versions cannot be graded." \
+          "$SMB_NSA_FIX" \
+          "cis-l1"
+    fi
+  fi
+elif [ -n "$NS_AUTH_SRC" ]; then
+  add security net_netserver_smb_versions "NetServer SMB versions" NOT_ASSESSED low \
+      "not assessed — scan profile lacks authority to read $NS_AUTH_SRC" \
+      "The scan profile cannot read $NS_AUTH_SRC (CPF22xx / SQL0551 / not authorized). PTSCAN is *USER with no special authorities, so SMB exposure cannot be graded." \
+      "$SMB_AUTH_FIX" \
+      "cis-l1"
+else
+  [ -n "$NS_FAIL_SRC" ] || NS_FAIL_SRC="QSYS2.NETSTAT_INFO and QUSRSYS.QATOCSTART"
+  add security net_netserver_smb_versions "NetServer SMB versions" NOT_ASSESSED low \
+      "not assessed — $NS_FAIL_SRC probe failed" \
+      "The NetServer exposure probe of $NS_FAIL_SRC failed (not an authority error), so SMB flags cannot be graded. This is not the QZLSOLST residual." \
+      "$SMB_PROBE_FIX" \
+      "cis-l1"
+fi
+
+  # net_nfs_shares_l2 — IBM i NFS export NFSv4 + Kerberos enforcement.
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.2.6 (L2): disable NFS completely or
+  # force NFSv4 with Kerberos — every export carries VERS=4 and SEC=KRB5.
+  # One finding. Calls ibmi_sql for IFS_OBJECT_STATISTICS on /etc and
+  # IFS_READ of /etc/exports. Does not call ibmi_cl / QZNFRTVE / CHGNFSEXP.
+  # Missing /etc/exports is PASS (NFS disabled). Any export lacking both
+  # vers=4 and sec=krb5 (krb5i, krb5p) is FAIL.
+  NFS_PRES=$(ibmi_sql nfs_exports_present "SELECT 'PRESENT' CONCAT '|' CONCAT VARCHAR(PATH_NAME,1024) CONCAT '|' CONCAT VARCHAR(OBJECT_TYPE,10) FROM TABLE(QSYS2.IFS_OBJECT_STATISTICS(START_PATH_NAME => '/etc', SUBTREE_DIRECTORIES => 'NO', IGNORE_ERRORS => 'NO')) WHERE PATH_NAME = '/etc/exports'")
+  NFS_PRES_RC=$?
+  if [ "$NFS_PRES_RC" -ge 2 ]; then
+    add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+        "not assessed — capture failed (rc=$NFS_PRES_RC)" \
+        "The IFS_OBJECT_STATISTICS probe did not yield a readable /etc listing, so NFS exports cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.IFS_OBJECT_STATISTICS can list /etc. This scanner never changes NFS exports." \
+        "cis-l2"
+  elif [ "$NFS_PRES_RC" -eq 0 ] && [ -z "$NFS_PRES" ]; then
+    add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The IFS_OBJECT_STATISTICS probe returned no pipe row at rc 0, which is the swallowed mid-fetch-error signature, so NFS exports cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.IFS_OBJECT_STATISTICS can list /etc. This scanner never changes NFS exports." \
+        "cis-l2"
+  elif [ "$NFS_PRES_RC" -eq 1 ] && [ -z "$NFS_PRES" ]; then
+    add security net_nfs_shares_l2 "NFS shares (L2)" PASS low \
+        "no NFS exports" \
+        "No NFS export is configured, so this host does not share IFS directories over NFS." \
+        "n/a" \
+        "cis-l2"
+  else
+    NFS_PLINE=$(printf '%s\n' "$NFS_PRES" | awk -F'|' '$1=="PRESENT" && $2=="/etc/exports"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$NFS_PLINE" ]; then
+      add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+          "not assessed — unparseable /etc listing" \
+          "The /etc listing yielded no unique PRESENT|/etc/exports row, so NFS exports cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.IFS_OBJECT_STATISTICS can list /etc. This scanner never changes NFS exports." \
+          "cis-l2"
+    else
+      NFS_TYPE=$(printf '%s\n' "$NFS_PLINE" | awk -F'|' '{ v=$3; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$NFS_TYPE" != "*STMF" ]; then
+        add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+            "not assessed — /etc/exports is not a stream file" \
+            "The /etc listing named /etc/exports, but the object type was not *STMF, so NFS exports cannot be graded." \
+            "inspect /etc/exports and confirm it is an IFS stream file. This scanner never changes NFS exports." \
+            "cis-l2"
+      else
+        NFS_RAW=$(ibmi_sql nfs_exports "SELECT 'EXPORT' CONCAT '|' CONCAT VARCHAR(LINE,1024) FROM TABLE(QSYS2.IFS_READ(PATH_NAME => '/etc/exports', IGNORE_ERRORS => 'NO'))")
+        NFS_RC=$?
+        if [ "$NFS_RC" -ge 2 ]; then
+          add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+              "not assessed — capture failed (rc=$NFS_RC)" \
+              "The IFS_READ probe did not yield a readable /etc/exports, so NFS exports cannot be graded." \
+              "re-run the scan as the scan profile and confirm the scan profile has *R on /etc/exports. This scanner never changes NFS exports." \
+              "cis-l2"
+        elif [ "$NFS_RC" -eq 1 ] && [ -z "$NFS_RAW" ]; then
+          add security net_nfs_shares_l2 "NFS shares (L2)" PASS low \
+              "no NFS exports" \
+              "No NFS export is configured, so this host does not share IFS directories over NFS." \
+              "n/a" \
+              "cis-l2"
+        elif [ "$NFS_RC" -eq 0 ] && [ -z "$NFS_RAW" ]; then
+          add security net_nfs_shares_l2 "NFS shares (L2)" NOT_ASSESSED low \
+              "not assessed — capture empty (rc=0)" \
+              "The IFS_READ probe returned no pipe row at rc 0, which is the swallowed mid-fetch-error signature, so NFS exports cannot be graded." \
+              "re-run the scan as the scan profile and confirm the scan profile has *R on /etc/exports. This scanner never changes NFS exports." \
+              "cis-l2"
+        else
+          NFS_COUNTS=$(printf '%s\n' "$NFS_RAW" | awk '
+            function trim(s) {
+              sub(/\r$/, "", s)
+              sub(/^[ \t]+/, "", s)
+              sub(/[ \t]+$/, "", s)
+              return s
+            }
+            {
+              raw = $0
+              sub(/^EXPORT\|/, "", raw)
+              raw = trim(raw)
+              if (raw == "" || raw ~ /^#/) next
+              n++
+              l = tolower(raw)
+              if (l ~ /(^|[, \t]|-)vers=4([, \t]|$)/ && l ~ /(^|[, \t]|-)sec=krb5(i|p)?([, \t:]|$)/) l2++
+            }
+            END { printf "%d %d\n", n+0, l2+0 }')
+          NFS_N=$(printf '%s\n' "$NFS_COUNTS" | awk '{ print $1 }')
+          NFS_L2=$(printf '%s\n' "$NFS_COUNTS" | awk '{ print $2 }')
+          if [ "$NFS_N" -eq 0 ]; then
+            add security net_nfs_shares_l2 "NFS shares (L2)" PASS low \
+                "no NFS exports" \
+                "No NFS export is configured, so this host does not share IFS directories over NFS." \
+                "n/a" \
+                "cis-l2"
+          elif [ "$NFS_L2" -eq "$NFS_N" ]; then
+            add security net_nfs_shares_l2 "NFS shares (L2)" PASS low \
+                "NFS exports=$NFS_N VERS4_KRB5=$NFS_L2" \
+                "Every NFS export restricts the protocol to NFSv4 (vers=4) and requires Kerberos (sec=krb5, krb5i, or krb5p), so NFS mounts are authenticated and encrypted." \
+                "n/a" \
+                "cis-l2"
+          else
+            add security net_nfs_shares_l2 "NFS shares (L2)" FAIL high \
+                "NFS exports=$NFS_N VERS4_KRB5=$NFS_L2" \
+                "One or more NFS exports are not restricted to NFSv4 with Kerberos, so clients can mount with an older protocol or without Kerberos authentication." \
+                "force NFSv4 with Kerberos on every export using CHGNFSEXP '-O XX,VERS=4,SEC=KRB5' '/path' or add -vers=4,sec=krb5 to each /etc/exports line. This scanner never changes NFS exports." \
+                "cis-l2"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+  # net_smtp_relay — IBM i SMTP mail relay (CHGSMTPA ALWRLY/ALWAUTH).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.2.12 (L1). UNFINISHED PARTIAL-AUTO:
+  # decides only whether port 25 is bound. ALWRLY/ALWAUTH are not read
+  # (no verified SQL or file). CIS 5.2.12 stays open until a lab spike.
+  # One finding. Calls ibmi_sql for NETSTAT_INFO LOCAL_PORT=25.
+  # Does not call ibmi_cl / qsh / db2. Does not CHGSMTPA.
+  SMTP_LABEL="SMTP mail relay"
+  SMTP_FIX="CHGSMTPA ALWRLY(*NONE) ALWAUTH(*NONE). This scanner never changes SMTP attributes."
+  SMTP_RETRY="re-run the scan as the scan profile and confirm QSYS2.NETSTAT_INFO returns LOCAL_PORT = 25. This scanner never changes SMTP attributes."
+  SMTP_RAW=$(ibmi_sql net_smtp_relay_bound "SELECT 'BOUND' CONCAT '|' CONCAT VARCHAR(CHAR(LOCAL_PORT),6) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT = 25")
+  SMTP_RC=$?
+  if [ "$SMTP_RC" -ge 2 ]; then
+    add security net_smtp_relay "$SMTP_LABEL" NOT_ASSESSED low \
+        "not assessed — capture failed (rc=$SMTP_RC)" \
+        "The NETSTAT_INFO probe did not yield a readable port-25 row, so SMTP mail relay cannot be graded." \
+        "$SMTP_RETRY" \
+        "cis-l1"
+  elif [ -z "$SMTP_RAW" ] && [ "$SMTP_RC" -eq 1 ]; then
+    add security net_smtp_relay "$SMTP_LABEL" NOT_APPLICABLE low \
+        "port 25 not bound; ALWRLY not read" \
+        "Port 25 is not bound, so SMTP is not listening and there is no mail-relay exposure now. The ALWRLY/ALWAUTH attribute itself was not read." \
+        "n/a" \
+        "cis-l1"
+  elif [ -z "$SMTP_RAW" ]; then
+    add security net_smtp_relay "$SMTP_LABEL" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The NETSTAT_INFO probe returned no pipe row at rc 0, which is the swallowed mid-fetch-error signature, so SMTP mail relay cannot be graded." \
+        "$SMTP_RETRY" \
+        "cis-l1"
+  else
+    SMTP_PARSE=$(printf '%s\n' "$SMTP_RAW" | awk -F'|' '{
+      k=$1
+      p=$2
+      sub(/^[ \t]+/, "", k)
+      sub(/[ \t]+$/, "", k)
+      sub(/^[ \t]+/, "", p)
+      sub(/[ \t]+$/, "", p)
+      if (NF==2 && k=="BOUND" && p=="25") n++
+      else b++
+    } END { print n+0, b+0 }')
+    SMTP_NBOUND=${SMTP_PARSE%% *}
+    SMTP_NBAD=${SMTP_PARSE##* }
+    if [ "$SMTP_NBOUND" -ge 1 ] && [ "$SMTP_NBAD" -eq 0 ]; then
+      SMTP_BOUND_STATUS="NOT_ASSESSED"
+      add security net_smtp_relay "$SMTP_LABEL" "$SMTP_BOUND_STATUS" low \
+          "not assessed — port 25 bound; ALWRLY source unverified (QUSRSYS/QATMSMTP)" \
+          "Port 25 is bound, so SMTP is listening, but ALWRLY/ALWAUTH have no verified SQL or file source and are not graded. CIS 5.2.12 stays open until a lab spike." \
+          "$SMTP_FIX" \
+          "cis-l1"
+    else
+      add security net_smtp_relay "$SMTP_LABEL" NOT_ASSESSED low \
+          "not assessed — BOUND row unparseable" \
+          "The NETSTAT_INFO dump was readable, but it did not contain a parseable BOUND row, so SMTP mail relay cannot be graded." \
+          "inspect QSYS2.NETSTAT_INFO for LOCAL_PORT = 25. This scanner never changes SMTP attributes." \
+          "cis-l1"
+    fi
+  fi
+
+  # net_snmp_v3only — IBM i SNMP Access v3-only posture (ALWSNMPV3).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.2.13 (L1=*V3ONLY). No L2 rec.
+  # PARTIAL-AUTO. Decides only whether SNMP is bound on port 161. A host with
+  # nothing on 161 is not applicable; when 161 is bound, ALWSNMPV3 itself is
+  # NOT_ASSESSED because its data source is not yet verified. Never names the
+  # unverified ALWSNMPV3 attribute store. Uses the ibmi_sql probe verb only.
+  SNMP_RAW=$(ibmi_sql net_snmp_v3only_bound "SELECT 'BOUND' CONCAT '|' CONCAT VARCHAR(CHAR(LOCAL_PORT),6) FROM QSYS2.NETSTAT_INFO WHERE LOCAL_PORT = 161")
+  SNMP_RC=$?
+  if [ "$SNMP_RC" -ge 2 ]; then
+    add security net_snmp_v3only "SNMP v3-only" NOT_ASSESSED low \
+        "not assessed — capture failed (rc=$SNMP_RC)" \
+        "The NETSTAT_INFO probe did not yield a readable LOCAL_PORT listing, so SNMP binding cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.NETSTAT_INFO returns LOCAL_PORT rows. This scanner never changes SNMP attributes." \
+        "cis-l1"
+  elif [ "$SNMP_RC" -eq 1 ] && [ -z "$SNMP_RAW" ]; then
+    add security net_snmp_v3only "SNMP v3-only" NOT_APPLICABLE low \
+        "port 161 not bound; ALWSNMPV3 not read" \
+        "No process is listening on SNMP port 161, so there is no SNMP exposure to grade. The ALWSNMPV3 attribute itself was not read." \
+        "n/a" \
+        "cis-l1"
+  elif [ "$SNMP_RC" -eq 0 ] && [ -z "$SNMP_RAW" ]; then
+    add security net_snmp_v3only "SNMP v3-only" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The NETSTAT_INFO probe returned no pipe row at rc 0, which is the swallowed mid-fetch-error signature, so SNMP binding cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.NETSTAT_INFO returns LOCAL_PORT rows. This scanner never changes SNMP attributes." \
+        "cis-l1"
+  else
+    SNMP_BOUND=$(printf '%s\n' "$SNMP_RAW" | awk -F'|' '$1=="BOUND"{n++} END{print n+0}')
+    if [ "$SNMP_BOUND" -ge 1 ]; then
+      add security net_snmp_v3only "SNMP v3-only" NOT_ASSESSED low \
+          "not assessed — port 161 bound; ALWSNMPV3 source unverified" \
+          "SNMP is bound on port 161, but the ALWSNMPV3 attribute store is not verified, so this check cannot decide whether SNMP Access is v3-only." \
+          "set IBM i SNMP Access to v3-only using CHGSNMPA ALWSNMPV3(*V3ONLY). This scanner never changes SNMP attributes." \
+          "cis-l1"
+    else
+      add security net_snmp_v3only "SNMP v3-only" NOT_ASSESSED low \
+          "not assessed — SNMP probe row unreadable" \
+          "The NETSTAT_INFO probe returned rows, but none was a recognizable BOUND row, so SNMP binding cannot be graded." \
+          "inspect QSYS2.NETSTAT_INFO for LOCAL_PORT 161 rows." \
+          "cis-l1"
+    fi
+  fi
+
+  # sec_ibmi_cves — published IBM i CVEs vs QSYS2.PTF_INFO,
+  # then SYSTOOLS.GROUP_PTF_DETAILS for ids PTF_INFO never
+  # heard of. Partial: a named PTF absent from both views
+  # is unknown, never FAIL. PTF APPLIED / PTF MISSING in
+  # GROUP_PTF_DETAILS are determinate. Not a CIS rec.
+  # Read-only: ibmi_sql only; never ibmi_cl / DSPPTF / WRKPTFGRP.
+  # Never invent CURRENT; never hardcode a vintage, release,
+  # or PTF id. Date is used only for age vs a real as_of.
+  # One WHERE-less grp_ptf_details call per scan.
+function assess_ibmi_sec_cves {
+  typeset IC_TITLE IC_FIX_NA IC_FIX_FAIL IC_FIX_REF
+  typeset IC_LOADED IC_COUNT IC_ASOF IC_TH
+  typeset IC_DATE_OK IC_M IC_D IC_ASOF_J IC_ASOF_RC IC_TODAY_OK IC_AGE
+  typeset IC_OS_RAW IC_OS_RC IC_OS_LINE IC_OS_VER IC_OS_REL IC_REL
+  typeset IC_CVE_RAW IC_CVE_N
+  typeset IC_PTF_RAW IC_PTF_RC
+  typeset IC_GPD_RAW IC_GPD_RC
+  typeset IC_PARSE IC_KIND IC_FIXED IC_UNAPPLIED IC_UNKNOWN IC_UNMAPPED
+  typeset IC_RESOLVED IC_OBS IC_TOKEN
+
+  IC_TITLE="IBM i security CVEs vs applied PTFs"
+  IC_FIX_NA="n/a"
+  IC_FIX_FAIL="apply the IBM i security PTFs named by the bulletin table, or apply the current Security group PTF (see ck-sec-group-currency). This scanner never applies PTFs."
+  IC_FIX_REF="refresh the scanner from an assembly that embeds the IBM i security bulletin table, or inspect QSYS2.PTF_INFO offline. This scanner never applies PTFs."
+
+  if ! typeset -f ibmi_bulletins_for_release >/dev/null 2>&1 \
+     || ! typeset -f ibmi_srcreg_field >/dev/null 2>&1; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - embedded bulletin helper absent" \
+        "The embedded IBM i bulletin helper is not present in this scanner assembly, so published CVEs cannot be graded against PTF_INFO. This check is partial and does not close full CVE coverage." \
+        "refresh the scanner from an assembly that embeds the IBM i bulletin table and source registry. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_LOADED=${IBMI_BULLETINS_LOADED:-}
+  if [ -z "$IC_LOADED" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - embedded bulletin table absent" \
+        "The embedded IBM i bulletin table is not present in this scanner assembly, so published CVEs cannot be graded against PTF_INFO." \
+        "refresh the scanner from an assembly that embeds the IBM i bulletin table. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$IC_LOADED" != "1" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - IBM i security bulletins not loaded" \
+        "The embedded IBM i bulletin table is not loaded, so published CVEs cannot be graded against PTF_INFO." \
+        "supply an IBM i security bulletin index and re-assemble. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_COUNT=${IBMI_BULLETINS_COUNT:-}
+  case "$IC_COUNT" in
+    ''|*[!0-9]*) IC_COUNT=0 ;;
+  esac
+  if [ "$IC_COUNT" -eq 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - IBM i security bulletin table is empty" \
+        "The embedded IBM i bulletin table has no CVE rows, so published CVEs cannot be graded against PTF_INFO." \
+        "supply IBM i security bulletin records and re-assemble. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_TH=$(ibmi_srcreg_field ibmi-security-bulletins threshold)
+  case "$IC_TH" in
+    ''|*[!0-9]*)
+      add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+          "not assessed - security-bulletin freshness threshold unreadable" \
+          "The embedded IBM i security-bulletin registry row has no usable freshness threshold, so CVE rows cannot be graded against PTF_INFO." \
+          "supply a positive consumer_max_age_days for the IBM i security bulletin source and re-run. This scanner never applies PTFs."
+      return
+      ;;
+  esac
+
+  IC_ASOF=${IBMI_BULLETINS_ASOF:-}
+  IC_DATE_OK=0
+  case "$IC_ASOF" in
+    [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+      IC_M=${IC_ASOF#*-}
+      IC_M=${IC_M%%-*}
+      IC_D=${IC_ASOF##*-}
+      IC_M=${IC_M#0}
+      IC_D=${IC_D#0}
+      [ "$IC_M" -ge 1 ] && [ "$IC_M" -le 12 ] && [ "$IC_D" -ge 1 ] && [ "$IC_D" -le 31 ] && IC_DATE_OK=1
+      ;;
+  esac
+  if [ "$IC_DATE_OK" -ne 1 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - bulletin as_of ${IC_ASOF:-empty} unreadable" \
+        "The embedded IBM i bulletin as_of is not a calendar date, so CVE rows cannot be graded against PTF_INFO." \
+        "supply a YYYY-MM-DD as_of for the IBM i security bulletin table and re-run. This scanner never applies PTFs."
+    return
+  fi
+  IC_ASOF_J=$(d2j "$IC_ASOF" 2>/dev/null)
+  IC_ASOF_RC=$?
+  case "$IC_ASOF_J" in
+    ''|*[!0-9]*) IC_ASOF_RC=1 ;;
+  esac
+  if [ "$IC_ASOF_RC" -ne 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - bulletin as_of $IC_ASOF unreadable" \
+        "The embedded IBM i bulletin as_of is not a calendar date, so CVE rows cannot be graded against PTF_INFO." \
+        "supply a YYYY-MM-DD as_of for the IBM i security bulletin table and re-run. This scanner never applies PTFs."
+    return
+  fi
+  IC_TODAY_OK=1
+  case "${TODAY_J:-}" in
+    ''|*[!0-9]*) IC_TODAY_OK=0 ;;
+  esac
+  if [ "$IC_TODAY_OK" -ne 1 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - scan date unreadable" \
+        "The scan date was not a Julian day, so bulletin freshness cannot be graded." \
+        "re-run the scan so the prelude can set a calendar date. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$TODAY_J" -lt "$IC_ASOF_J" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - bulletin as_of $IC_ASOF is after today ${TODAY:-}" \
+        "The embedded IBM i bulletin as_of is later than the scan date, so CVE rows cannot be graded against PTF_INFO." \
+        "re-run with a real calendar date, or correct the bulletin as_of. This scanner never applies PTFs."
+    return
+  fi
+  IC_AGE=$(( TODAY_J - IC_ASOF_J ))
+  if [ "$IC_AGE" -gt "$IC_TH" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - bulletin as_of $IC_ASOF age=$IC_AGE past threshold $IC_TH" \
+        "The embedded IBM i bulletin table is older than the freshness window, so CVE rows cannot be graded against PTF_INFO." \
+        "refresh the IBM i security bulletin source so its as_of is within the freshness window. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_OS_RAW=$(ibmi_sql os_vrm "SELECT 'OS' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_VERSION,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_RELEASE,'-')),10) FROM SYSIBMADM.ENV_SYS_INFO")
+  IC_OS_RC=$?
+  if [ "$IC_OS_RC" -ne 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - os_vrm capture failed (rc=$IC_OS_RC)" \
+        "The IBM i OS-release probe did not yield a readable ENV_SYS_INFO dump, so published CVEs cannot be graded against PTF_INFO." \
+        "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never applies PTFs."
+    return
+  fi
+  if [ -z "$IC_OS_RAW" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - os_vrm capture empty" \
+        "The IBM i OS-release probe returned no pipe row, so published CVEs cannot be graded against PTF_INFO." \
+        "re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never applies PTFs."
+    return
+  fi
+  IC_OS_LINE=$(printf '%s\n' "$IC_OS_RAW" | awk -F'|' '$1=="OS"{n++; line=$0} END{if(n==1) print line}')
+  if [ -z "$IC_OS_LINE" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - OS row missing or not unique in ENV_SYS_INFO" \
+        "The IBM i OS-release dump was readable, but it did not contain exactly one OS row, so published CVEs cannot be graded against PTF_INFO." \
+        "inspect SYSIBMADM.ENV_SYS_INFO for OS_VERSION and OS_RELEASE."
+    return
+  fi
+  IC_OS_VER=$(printf '%s\n' "$IC_OS_LINE" | awk -F'|' '{ v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+  IC_OS_REL=$(printf '%s\n' "$IC_OS_LINE" | awk -F'|' '{ v=$3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+  IC_REL="$IC_OS_VER.$IC_OS_REL"
+
+  IC_CVE_RAW=$(ibmi_bulletins_for_release "$IC_REL")
+  IC_CVE_N=$(printf '%s\n' "$IC_CVE_RAW" | awk 'BEGIN{n=0} NF{n++} END{print n+0}')
+  if [ "$IC_CVE_N" -eq 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - no bulletin rows for release $IC_REL" \
+        "The embedded IBM i bulletin table has no CVE rows for this partition's OS release, so published CVEs cannot be graded against PTF_INFO." \
+        "confirm the bulletin table covers this IBM i release. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_PTF_RAW=$(ibmi_sql ptf_info "SELECT 'PTF' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_IDENTIFIER,'-')),7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_LOADED_STATUS,'-')),19) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_SUPERSEDED_BY_PTF,'-')),7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_PRODUCT_ID,'-')),7) FROM QSYS2.PTF_INFO")
+  IC_PTF_RC=$?
+  if [ "$IC_PTF_RC" -eq 1 ] && [ -z "$IC_PTF_RAW" ]; then
+    :
+  elif [ "$IC_PTF_RC" -ne 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - ptf_info capture failed (rc=$IC_PTF_RC)" \
+        "The QSYS2.PTF_INFO probe did not yield a readable dump, so published CVEs cannot be graded. If the table is absent this check refuses rather than inventing a clean result." \
+        "$IC_FIX_REF"
+    return
+  elif [ -z "$IC_PTF_RAW" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - ptf_info capture empty (rc=0)" \
+        "The QSYS2.PTF_INFO probe returned no pipe row after a successful rc, so the fetch may have been swallowed mid-query and published CVEs cannot be graded." \
+        "$IC_FIX_REF"
+    return
+  fi
+
+  IC_GPD_RAW=$(ibmi_sql grp_ptf_details "SELECT 'GPD' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_IDENTIFIER,'-')),7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_STATUS,'-')),11) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_LOADED_STATUS,'-')),19) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_SUPERSEDED_BY_PTF,'-')),7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_NAME,'-')),7) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(INCLUDED_IN_GROUP,ISO),'-'),10) FROM SYSTOOLS.GROUP_PTF_DETAILS")
+  IC_GPD_RC=$?
+  if [ "$IC_GPD_RC" -ne 0 ]; then
+    IC_GPD_RAW=""
+  fi
+
+  IC_PARSE=$(printf '%s\n' "PTFS" "$IC_PTF_RAW" "GPDS" "$IC_GPD_RAW" "CVES" "$IC_CVE_RAW" | awk -F'|' '
+    function trim(s) {
+      sub(/^[ \t]+/, "", s)
+      sub(/[ \t]+$/, "", s)
+      return s
+    }
+    function known(s) {
+      if (s == "NOT LOADED") return 1
+      if (s == "LOADED") return 1
+      if (s == "APPLIED") return 1
+      if (s == "PERMANENTLY APPLIED") return 1
+      if (s == "PERMANENTLY REMOVED") return 1
+      if (s == "DAMAGED") return 1
+      if (s == "SUPERSEDED") return 1
+      return 0
+    }
+    function applied(s) {
+      if (s == "APPLIED") return 1
+      if (s == "PERMANENTLY APPLIED") return 1
+      return 0
+    }
+    function ptf_ok(id, st, sup) {
+      if (applied(st)) return 1
+      if (st == "SUPERSEDED") {
+        if (sup == "" || sup == "-") return 0
+        if (!(sup in ptf_st)) return 0
+        return applied(ptf_st[sup])
+      }
+      return 0
+    }
+    $0 == "PTFS" { sec = "ptfs"; next }
+    $0 == "GPDS" { sec = "gpds"; next }
+    $0 == "CVES" { sec = "cves"; next }
+    NF == 0 { next }
+    sec == "ptfs" {
+      if ($1 != "PTF" || NF != 5) { badrow = 1; next }
+      id = trim($2)
+      st = trim($3)
+      sup = trim($4)
+      if (id == "" || id == "-") { badrow = 1; next }
+      if (!known(st)) { badtok = st; next }
+      ptf_st[id] = st
+      ptf_sup[id] = sup
+      next
+    }
+    sec == "gpds" {
+      if (index($0, "CLI ERROR") > 0) next
+      if ($1 != "GPD") next
+      if (NF != 7) { gpd_badrow = 1; next }
+      id = trim($2)
+      st = trim($3)
+      if (id == "" || id == "-") { gpd_badrow = 1; next }
+      gpd_n[id]++
+      if (st == "PTF APPLIED") gpd_app[id] = 1
+      else if (st == "PTF MISSING") gpd_miss[id] = 1
+      else if (!(id in gpd_tok)) gpd_tok[id] = st
+      next
+    }
+    sec == "cves" {
+      n++
+      cve = trim($1)
+      ptfs = trim($3)
+      basis = trim($6)
+      if (basis == "none" || ptfs == "" || ptfs == "-") {
+        unmapped++
+        next
+      }
+      np = split(ptfs, pa, ",")
+      has_unapp = 0
+      has_unk = 0
+      for (i = 1; i <= np; i++) {
+        pid = trim(pa[i])
+        if (pid == "") continue
+        if ((pid in gpd_n) && (pid in gpd_tok)) {
+          if (gpd_badtok == "") gpd_badtok = gpd_tok[pid]
+        }
+        if (pid in ptf_st) {
+          info_ok = ptf_ok(pid, ptf_st[pid], ptf_sup[pid])
+          if ((pid in gpd_n) && !(pid in gpd_tok)) {
+            gpd_ok = 0
+            if (pid in gpd_app) gpd_ok = 1
+            if (info_ok != gpd_ok) {
+              if (gpd_disagree == "") gpd_disagree = pid
+            }
+          }
+          if (!info_ok) has_unapp = 1
+        } else if (pid in gpd_n) {
+          if (!(pid in gpd_tok)) {
+            if (!(pid in gpd_res)) { gpd_res[pid] = 1; resolved++ }
+            if (!(pid in gpd_app)) has_unapp = 1
+          }
+        } else {
+          has_unk = 1
+        }
+      }
+      if (has_unapp) unapplied++
+      else if (has_unk) unknown++
+      else fixed++
+      next
+    }
+    END {
+      if (badtok != "") { print "BADSTATUS|" badtok; exit }
+      if (badrow) { print "BADROW"; exit }
+      if (gpd_badtok != "") { print "BADGPDSTATUS|" gpd_badtok; exit }
+      if (gpd_disagree != "") { print "DISAGREE|" gpd_disagree; exit }
+      if (gpd_badrow) { print "BADGPDROW"; exit }
+      print "GRADE|" n+0 "|" fixed+0 "|" unapplied+0 "|" unknown+0 "|" unmapped+0 "|" resolved+0
+    }')
+
+  IC_KIND=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $1 }')
+  if [ "$IC_KIND" = "BADSTATUS" ]; then
+    IC_TOKEN=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $2 }')
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - PTF_LOADED_STATUS token unreadable: $IC_TOKEN" \
+        "QSYS2.PTF_INFO carried a PTF_LOADED_STATUS token that is not in the observed vocabulary, so it is named and not bucketed. Published CVEs cannot be graded." \
+        "inspect QSYS2.PTF_INFO PTF_LOADED_STATUS for the unexpected token. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$IC_KIND" = "BADGPDSTATUS" ]; then
+    IC_TOKEN=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $2 }')
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - PTF_STATUS token unreadable: $IC_TOKEN" \
+        "SYSTOOLS.GROUP_PTF_DETAILS carried a PTF_STATUS token that is not in the observed vocabulary {PTF APPLIED, PTF MISSING}, so it is named and not bucketed. Published CVEs cannot be graded." \
+        "inspect SYSTOOLS.GROUP_PTF_DETAILS PTF_STATUS for the unexpected token. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$IC_KIND" = "DISAGREE" ]; then
+    IC_TOKEN=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $2 }')
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - PTF_INFO and GROUP_PTF_DETAILS disagree: $IC_TOKEN" \
+        "QSYS2.PTF_INFO and SYSTOOLS.GROUP_PTF_DETAILS disagree on whether a named PTF is applied, so that id is named and not graded." \
+        "inspect QSYS2.PTF_INFO and SYSTOOLS.GROUP_PTF_DETAILS for the named PTF. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$IC_PARSE" = "BADGPDROW" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - grp_ptf_details row unreadable" \
+        "The SYSTOOLS.GROUP_PTF_DETAILS dump contained a row that could not be parsed, so published CVEs cannot be graded." \
+        "inspect SYSTOOLS.GROUP_PTF_DETAILS for pipe-delimited GPD rows. This scanner never applies PTFs."
+    return
+  fi
+  if [ "$IC_PARSE" = "BADROW" ] || [ "$IC_KIND" != "GRADE" ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+        "not assessed - ptf_info row unreadable" \
+        "The QSYS2.PTF_INFO dump contained a row that could not be parsed, so published CVEs cannot be graded." \
+        "inspect QSYS2.PTF_INFO for pipe-delimited PTF rows. This scanner never applies PTFs."
+    return
+  fi
+
+  IC_CVE_N=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $2 }')
+  IC_FIXED=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $3 }')
+  IC_UNAPPLIED=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $4 }')
+  IC_UNKNOWN=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $5 }')
+  IC_UNMAPPED=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $6 }')
+  IC_RESOLVED=$(printf '%s\n' "$IC_PARSE" | awk -F'|' '{ print $7 }')
+  IC_OBS="rel=$IC_REL as_of=$IC_ASOF cves=$IC_CVE_N fixed=$IC_FIXED unapplied=$IC_UNAPPLIED unknown=$IC_UNKNOWN unmapped=$IC_UNMAPPED resolved=$IC_RESOLVED"
+
+  if [ "$IC_UNAPPLIED" -gt 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" FAIL high \
+        "$IC_OBS" \
+        "At least one named PTF for a published IBM i security CVE on this release is present in QSYS2.PTF_INFO in a status other than applied, or is PTF MISSING in every SYSTOOLS.GROUP_PTF_DETAILS row, so that CVE is not shown as fixed. A PTF absent from both views is not a failure. This check is partial; ck-sec-group-currency grades determinate group-level currency." \
+        "$IC_FIX_FAIL"
+    return
+  fi
+  if [ "$IC_FIXED" -eq "$IC_CVE_N" ] && [ "$IC_UNKNOWN" -eq 0 ] && [ "$IC_UNMAPPED" -eq 0 ]; then
+    add patch sec_ibmi_cves "$IC_TITLE" PASS low \
+        "$IC_OBS" \
+        "Every IBM i security CVE row for this release has each named PTF applied or superseded-and-applied in QSYS2.PTF_INFO, or PTF APPLIED in SYSTOOLS.GROUP_PTF_DETAILS. This check is partial: a PTF absent from both views does not prove the CVE unfixed. ck-sec-group-currency grades determinate group-level currency." \
+        "$IC_FIX_NA"
+    return
+  fi
+  add patch sec_ibmi_cves "$IC_TITLE" NOT_ASSESSED low \
+      "not assessed - $IC_OBS" \
+      "Some published IBM i security CVE rows for this release have named PTFs absent from both QSYS2.PTF_INFO and SYSTOOLS.GROUP_PTF_DETAILS, or have no PTF mapping, so they cannot be graded. Absence from both views is never a failure. This check is partial; ck-sec-group-currency grades determinate group-level currency." \
+      "$IC_FIX_REF"
+}
+assess_ibmi_sec_cves
 
   # ibmi_ssh_banner — IBM i OpenSSH Banner in sshd_config.
   # Authority: CIS IBM i V7R5M0/V7R4M0 5.4.2 (L1=approved Banner path).
@@ -1319,6 +4361,2147 @@ add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSE
         fi
       fi
     fi
+  fi
+
+# sst_pwd_exit_programs — IBM i SST allow add and remove of password
+# exit programs (CHGSSTSECA PWDEXITPGM).
+# Authority: CIS IBM i V7R5M0 5.6.9 (L1=NO). No 7.4 counterpart and no
+# L2 rec. One finding. Calls ibmi_sql for SECURITY_INFO
+# ALLOW_PASSWORD_EXIT_PROGRAM_ADD_REMOVE. Does not call ibmi_cl /
+# DSPSSTSECA / CHGSSTSECA / STRSST / CHGSYSVAL. Does not SELECT
+# SST_SECURITY_INFO (that view is absent). Does not SELECT
+# ALLOW_SECURITY_SYSVAL_CHANGE (ck-sst-lock-sysval). Exact NO is
+# PASS. Exact YES is FAIL. *NO / 0 are not catalog tokens.
+PWD_RAW=$(ibmi_sql sst_pwdexit "SELECT 'PWDEXIT' CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(ALLOW_PASSWORD_EXIT_PROGRAM_ADD_REMOVE),''),3) FROM QSYS2.SECURITY_INFO")
+PWD_RC=$?
+if [ "$PWD_RC" -ne 0 ]; then
+  add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" NOT_ASSESSED low \
+      "not assessed — capture failed (rc=$PWD_RC)" \
+      "The SST security-attribute probe did not yield a readable allow-add-or-remove-of-password-exit-programs flag, so the SST password-exit-program lock cannot be graded." \
+      "re-run the scan as the scan profile and confirm QSYS2.SECURITY_INFO returns ALLOW_PASSWORD_EXIT_PROGRAM_ADD_REMOVE. This scanner never changes SST security attributes." \
+      "cis-l1"
+elif [ -z "$PWD_RAW" ]; then
+  add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" NOT_ASSESSED low \
+      "not assessed — capture empty (rc=0)" \
+      "The SST security-attribute probe returned no pipe row, so the SST password-exit-program lock cannot be graded." \
+      "re-run the scan as the scan profile and confirm QSYS2.SECURITY_INFO returns ALLOW_PASSWORD_EXIT_PROGRAM_ADD_REMOVE. This scanner never changes SST security attributes." \
+      "cis-l1"
+else
+  PWD_LINE=$(printf '%s\n' "$PWD_RAW" | awk -F'|' '$1=="PWDEXIT"{n++; line=$0} END{if(n==1) print line}')
+  if [ -z "$PWD_LINE" ]; then
+    add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" NOT_ASSESSED low \
+        "not assessed — PWDEXIT row missing or not unique in SST security attributes" \
+        "The SST security-attribute dump was readable, but it did not contain exactly one PWDEXIT row, so the value cannot be graded." \
+        "inspect QSYS2.SECURITY_INFO for ALLOW_PASSWORD_EXIT_PROGRAM_ADD_REMOVE." \
+        "cis-l1"
+  else
+    PWD_VAL=$(printf '%s\n' "$PWD_LINE" | awk -F'|' '{ v=$2; sub(/[ \t]+$/, "", v); print v }')
+    if [ -z "$PWD_VAL" ]; then
+      add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" NOT_ASSESSED low \
+          "not assessed — SST PWDEXIT value unreadable" \
+          "The PWDEXIT row was present, but the catalog value was empty, so it is not graded." \
+          "inspect SST allow add/remove of password exit programs on QSYS2.SECURITY_INFO." \
+          "cis-l1"
+    elif [ "$PWD_VAL" = "NO" ]; then
+      add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" PASS low \
+          "PWDEXIT=NO" \
+          "SST allow-add-and-remove of password exit programs is NO, so password exit programs cannot be added or removed through System Service Tools." \
+          "n/a" \
+          "cis-l1"
+    elif [ "$PWD_VAL" = "YES" ]; then
+      add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" FAIL high \
+          "PWDEXIT=YES" \
+          "SST allow-add-and-remove of password exit programs is YES, so password exit programs can be added or removed through System Service Tools." \
+          "set SST allow add/remove of password exit programs to *NO using CHGSSTSECA PWDEXITPGM(*NO). This scanner never changes SST security attributes." \
+          "cis-l1"
+    else
+      add security sst_pwd_exit_programs "SST allow add/remove of password exit programs" NOT_ASSESSED low \
+          "not assessed — SST PWDEXIT value unreadable" \
+          "The PWDEXIT row was present, but the catalog value was not YES or NO, so it is not graded." \
+          "inspect SST allow add/remove of password exit programs on QSYS2.SECURITY_INFO." \
+          "cis-l1"
+    fi
+  fi
+fi
+
+  # sst_user_ids — IBM i SST user IDs and privileges.
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.6.6 (L1).
+  # Probes DSPSSTUSR and DSPSSTSECA via ibmi_cl. Keys match
+  # live-capture-2026-08-26-manual (dspsstusr / dspsstseca).
+  # Rule: 11111111 / 22222222 / QSRV *ENABLED -> FAIL;
+  # any other *ENABLED ID (not QSECOFR) with Service tools
+  # security *GRANTED -> WARN naming it; else PASS.
+  # QSECOFR is exempt. A user ID without Status, or an
+  # *ENABLED non-shipped non-QSECOFR ID without Service tools
+  # security, is unreadable (NOT_ASSESSED), never PASS.
+  # CPF22xx / CPFB304 / not-authorized on DSPSSTUSR is
+  # NOT_ASSESSED typed "scan profile lacks *SERVICE".
+  # Other DSPSSTUSR non-zero rc is typed probe-failed (rc and
+  # first message id). A determinate DSPSSTUSR grade is not
+  # blocked by a DSPSSTSECA failure; the SECA gap is detail.
+  # SERVICE_TOOLS_SERVER_INFO is the LAN console server, not
+  # SST users; this fragment does not call ibmi_sql.
+  SST_USR_RAW=$(ibmi_cl dspsstusr "DSPSSTUSR")
+  SST_USR_RC=$?
+  SST_SECA_RAW=$(ibmi_cl dspsstseca "DSPSSTSECA")
+  SST_SECA_RC=$?
+  SST_USR_AUTH=$(printf '%s\n' "$SST_USR_RAW" | awk '
+    tolower($0) ~ /cpfb304/ { n=1 }
+    tolower($0) ~ /cpf22[0-9][0-9]/ { n=1 }
+    tolower($0) ~ /not authorized/ { n=1 }
+    END { if (n) print 1 }
+  ')
+  SST_SECA_AUTH=$(printf '%s\n' "$SST_SECA_RAW" | awk '
+    tolower($0) ~ /cpfb304/ { n=1 }
+    tolower($0) ~ /cpf22[0-9][0-9]/ { n=1 }
+    tolower($0) ~ /not authorized/ { n=1 }
+    END { if (n) print 1 }
+  ')
+  SST_USR_MSG=$(printf '%s\n' "$SST_USR_RAW" | awk '
+    {
+      if (match($0, /[Cc][Pp][Ff][A-Za-z0-9][0-9][0-9][0-9]/)) {
+        print toupper(substr($0, RSTART, RLENGTH))
+        exit
+      }
+    }
+  ')
+  SST_SECA_MSG=$(printf '%s\n' "$SST_SECA_RAW" | awk '
+    {
+      if (match($0, /[Cc][Pp][Ff][A-Za-z0-9][0-9][0-9][0-9]/)) {
+        print toupper(substr($0, RSTART, RLENGTH))
+        exit
+      }
+    }
+  ')
+  if [ -n "$SST_USR_MSG" ]; then
+    SST_USR_FAIL="not assessed — DSPSSTUSR probe failed (rc=$SST_USR_RC, $SST_USR_MSG)"
+  else
+    SST_USR_FAIL="not assessed — DSPSSTUSR probe failed (rc=$SST_USR_RC)"
+  fi
+  if [ -n "$SST_SECA_MSG" ]; then
+    SST_SECA_GAP="DSPSSTSECA probe failed (rc=$SST_SECA_RC, $SST_SECA_MSG)"
+  else
+    SST_SECA_GAP="DSPSSTSECA probe failed (rc=$SST_SECA_RC)"
+  fi
+  SST_FIX_AUTH="grant the scan profile *SECADM and *SERVICE (CHGUSRPRF SPCAUT(*SECADM *SERVICE)) so DSPSSTUSR can display SST user IDs, then re-run. This scanner never changes SST user IDs or privileges."
+  SST_FIX_PROBE="re-run so DSPSSTUSR can display SST user IDs. This scanner never changes SST user IDs or privileges."
+  SST_FIX_FAIL="disable or remove default and inactive SST IDs (CHGSSTUSR). This scanner never changes SST user IDs or privileges."
+  SST_FIX_WARN="review SST user ID privileges (CHGSSTUSR); revoke Service tools security where it is not required. This scanner never changes SST user IDs or privileges."
+  if [ -n "$SST_USR_AUTH" ]; then
+    add security sst_user_ids "SST user IDs and privileges" NOT_ASSESSED low \
+        "not assessed — scan profile lacks *SERVICE" \
+        "DSPSSTUSR requires *SECADM and *SERVICE special authority; the scan profile cannot display SST user IDs." \
+        "$SST_FIX_AUTH" \
+        "cis-l1"
+  elif [ "$SST_USR_RC" -eq 0 ] && [ -n "$SST_USR_RAW" ]; then
+    SST_GRADE=$(printf '%s\n' "$SST_USR_RAW" | awk '
+      function trim(v) {
+        sub(/^[ \t]+/, "", v)
+        sub(/[ \t\r]+$/, "", v)
+        return v
+      }
+      function last_colon(line, n, a, v) {
+        n = split(line, a, ":")
+        v = a[n]
+        return trim(v)
+      }
+      function flush() {
+        if (uid == "") return
+        nrec++
+        if (ustatus == "") {
+          incomplete = 1
+        } else if (ustatus == "*ENABLED") {
+          if (uid == "11111111" || uid == "22222222" || uid == "QSRV") {
+            if (fail != "") fail = fail ", "
+            fail = fail uid " *ENABLED"
+          } else if (uid != "QSECOFR") {
+            if (usec == "") {
+              incomplete = 1
+            } else if (usec == "*GRANTED") {
+              if (warn != "") warn = warn "; "
+              warn = warn uid " *ENABLED, Service tools security *GRANTED"
+            }
+          }
+        }
+        uid = ""
+        ustatus = ""
+        usec = ""
+      }
+      index($0, "Service tools user ID") {
+        flush()
+        uid = last_colon($0)
+        next
+      }
+      index($0, "Service tools security") {
+        usec = last_colon($0)
+        next
+      }
+      $0 ~ /^[ \t]*Status[ .]/ {
+        ustatus = last_colon($0)
+        next
+      }
+      END {
+        flush()
+        if (nrec < 1 || incomplete) {
+          print "EMPTY|"
+          exit
+        }
+        if (fail != "") {
+          print "FAIL|" fail
+          exit
+        }
+        if (warn != "") {
+          print "WARN|" warn
+          exit
+        }
+        print "PASS|shipped IDs 11111111/22222222 not *ENABLED; QSRV not *ENABLED; no other *ENABLED ID with Service tools security *GRANTED"
+      }
+    ')
+    SST_GSTATUS=$(printf '%s\n' "$SST_GRADE" | awk -F'|' '{ print $1 }')
+    SST_GOBS=$(printf '%s\n' "$SST_GRADE" | awk -F'|' '{ print $2 }')
+    SST_SECA_DET=
+    if [ -z "$SST_SECA_AUTH" ] && { [ "$SST_SECA_RC" -ne 0 ] || [ -z "$SST_SECA_RAW" ]; }; then
+      SST_SECA_DET=$SST_SECA_GAP
+    fi
+    if [ -n "$SST_SECA_DET" ] && [ -n "$SST_GOBS" ]; then
+      SST_GOBS="$SST_GOBS; $SST_SECA_DET"
+    fi
+    if [ "$SST_GSTATUS" = "FAIL" ]; then
+      add security sst_user_ids "SST user IDs and privileges" FAIL high \
+          "$SST_GOBS" \
+          "A shipped IBM SST user ID (11111111, 22222222, or QSRV) is *ENABLED." \
+          "$SST_FIX_FAIL" \
+          "cis-l1"
+    elif [ "$SST_GSTATUS" = "WARN" ]; then
+      add security sst_user_ids "SST user IDs and privileges" WARN med \
+          "$SST_GOBS" \
+          "An *ENABLED SST user ID other than QSECOFR has Service tools security *GRANTED." \
+          "$SST_FIX_WARN" \
+          "cis-l1"
+    elif [ "$SST_GSTATUS" = "PASS" ]; then
+      add security sst_user_ids "SST user IDs and privileges" PASS low \
+          "$SST_GOBS" \
+          "Shipped SST IDs 11111111 and 22222222 are not *ENABLED, QSRV is not *ENABLED, and no other *ENABLED ID has Service tools security *GRANTED besides QSECOFR." \
+          "n/a" \
+          "cis-l1"
+    else
+      add security sst_user_ids "SST user IDs and privileges" NOT_ASSESSED low \
+          "not assessed — DSPSSTUSR dump unreadable" \
+          "The DSPSSTUSR dump did not contain complete Service tools user ID records, so SST user IDs cannot be graded." \
+          "$SST_FIX_PROBE" \
+          "cis-l1"
+    fi
+  elif [ "$SST_USR_RC" -ne 0 ]; then
+    add security sst_user_ids "SST user IDs and privileges" NOT_ASSESSED low \
+        "$SST_USR_FAIL" \
+        "DSPSSTUSR returned a non-authority failure (rc=$SST_USR_RC), so SST user IDs cannot be graded." \
+        "$SST_FIX_PROBE" \
+        "cis-l1"
+  else
+    add security sst_user_ids "SST user IDs and privileges" NOT_ASSESSED low \
+        "not assessed — DSPSSTUSR dump unreadable" \
+        "The SST user-ID probe returned no text, so SST user IDs cannot be graded." \
+        "$SST_FIX_PROBE" \
+        "cis-l1"
+  fi
+
+  # sv_qalwobjrst_l2 — IBM i QALWOBJRST, CIS 5.1.2.1 L2.
+  # Parses the shared dump the same way as ck-sv-qalwobjrst: unique-row
+  # awk, numeric column when non-empty else character column, leading
+  # zeros stripped. Does not change system values. This tool is the only
+  # L2 verdict for QALWOBJRST; the L1 sibling keeps its own boundary.
+  # Exact *NONE is PASS. Any other documented token list is FAIL.
+  # *NOTAVL, missing/non-unique row, unreadable token, and capture
+  # failure are NOT_ASSESSED. Determinate values never refuse.
+  QAL_LABEL="Allow restore of security-sensitive objects"
+  QAL_FAILFIX="CHGSYSVAL SYSVAL(QALWOBJRST) VALUE('*NONE'). This scanner never changes system values."
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qalwobjrst_l2 "$QAL_LABEL" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QALWOBJRST cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QAL_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QALWOBJRST"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QAL_LINE" ]; then
+      add security sv_qalwobjrst_l2 "$QAL_LABEL" NOT_ASSESSED low \
+          "not assessed — QALWOBJRST row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QALWOBJRST row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QALWOBJRST. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QAL_VAL=$(printf '%s\n' "$QAL_LINE" | awk -F'|' '{
+        v=$2
+        sub(/^[ \t]+/, "", v)
+        sub(/[ \t]+$/, "", v)
+        if (v=="") {
+          v=$3
+          sub(/^[ \t]+/, "", v)
+          sub(/[ \t]+$/, "", v)
+        }
+        if (v ~ /^0+$/) v="0"
+        else sub(/^0+/, "", v)
+        print v
+      }')
+      QAL_TOK=$(printf '%s\n' "$QAL_VAL" | awk '
+        {
+          n=split($0, a, /[ \t]+/)
+          for (i=1; i<=n; i++) {
+            if (a[i]=="") continue
+            nt++
+            if (a[i]=="*NOTAVL") nv=1
+            if (a[i]=="*NONE") none=1
+            if (a[i]=="*ALL" || a[i]=="*NONE" || a[i]=="*ALWSYSSTT" || a[i]=="*ALWPGMADP" || a[i]=="*ALWPTF" || a[i]=="*ALWSETUID" || a[i]=="*ALWSETGID" || a[i]=="*ALWVLDERR") d++
+            else j++
+          }
+        }
+        END {
+          if (nv) print "NOTAVL"
+          else if (j || nt<1) print "BAD"
+          else if (nt==1 && none) print "PASS"
+          else print "FAIL"
+        }')
+      if [ "$QAL_TOK" = NOTAVL ]; then
+        add security sv_qalwobjrst_l2 "$QAL_LABEL" NOT_ASSESSED low \
+            "not assessed — QALWOBJRST=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QALWOBJRST — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QALWOBJRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QAL_TOK" = PASS ]; then
+        add security sv_qalwobjrst_l2 "$QAL_LABEL" PASS low \
+            "QALWOBJRST=$QAL_VAL" \
+            "QALWOBJRST is *NONE, so restore of security-sensitive objects is not allowed." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QAL_TOK" = FAIL ]; then
+        add security sv_qalwobjrst_l2 "$QAL_LABEL" FAIL high \
+            "QALWOBJRST=$QAL_VAL" \
+            "QALWOBJRST is not *NONE, so restore of security-sensitive objects is allowed." \
+            "$QAL_FAILFIX" \
+            "cis-l2"
+      else
+        add security sv_qalwobjrst_l2 "$QAL_LABEL" NOT_ASSESSED low \
+            "not assessed — QALWOBJRST value unreadable" \
+            "The QALWOBJRST row was present, but the catalog value was not a documented restore-allow token set or *NOTAVL, so it is not graded." \
+            "inspect the QALWOBJRST row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QALWOBJRST). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qaudctl_l2 — CIS IBM i 5.1.2.3 (L2) Set Auditing Control.
+  # Parses the shared cap-system-values dump. Never calls ibmi_sql,
+  # ibmi_cl, qsh, db2, or capture_cap_system_values. Never CHGSYSVAL.
+  # L2 PASS when tokens include both *OBJAUD and *AUDLVL; extra *NOQTEMP
+  # is tolerated. *NONE or a missing required token FAILs. *NOTAVL,
+  # a missing/non-unique row, capture failure, or a token outside
+  # {*NONE,*OBJAUD,*AUDLVL,*NOQTEMP} is NOT_ASSESSED.
+  QAUD_LABEL="Auditing control"
+  QAUD_FAILFIX="CHGSYSVAL SYSVAL(QAUDCTL) VALUE('*OBJAUD *AUDLVL'). This scanner never changes system values."
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qaudctl_l2 "$QAUD_LABEL" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QAUDCTL cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QAUD_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QAUDCTL"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QAUD_LINE" ]; then
+      add security sv_qaudctl_l2 "$QAUD_LABEL" NOT_ASSESSED low \
+          "not assessed — QAUDCTL row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QAUDCTL row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QAUDCTL. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QAUD_VAL=$(printf '%s\n' "$QAUD_LINE" | awk -F'|' '{
+        v=$2
+        sub(/^[ \t]+/, "", v)
+        sub(/[ \t]+$/, "", v)
+        if (v=="") {
+          v=$3
+          sub(/^[ \t]+/, "", v)
+          sub(/[ \t]+$/, "", v)
+        }
+        if (v ~ /^[0-9]+$/) {
+          if (v ~ /^0+$/) v="0"
+          else sub(/^0+/, "", v)
+        }
+        print v
+      }')
+      QAUD_KIND=$(printf '%s\n' "$QAUD_VAL" | awk '
+        {
+          n=split($0, a, /[ \t]+/)
+          for (i=1; i<=n; i++) {
+            if (a[i]=="") continue
+            nt++
+            if (a[i]=="*NOTAVL") nv=1
+            else if (a[i]=="*NONE") none=1
+            else if (a[i]=="*AUDLVL") aud=1
+            else if (a[i]=="*OBJAUD") obj=1
+            else if (a[i]=="*NOQTEMP") nqt=1
+            else bad=1
+          }
+        }
+        END {
+          if (nv) print "NOTAVL"
+          else if (bad || nt<1) print "BAD"
+          else if (none) print "NONE"
+          else if (aud && obj) print "PASS"
+          else print "FAIL"
+        }')
+      if [ "$QAUD_KIND" = NOTAVL ]; then
+        add security sv_qaudctl_l2 "$QAUD_LABEL" NOT_ASSESSED low \
+            "not assessed — QAUDCTL=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QAUDCTL — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QAUDCTL and re-take cap-system-values. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QAUD_KIND" = BAD ]; then
+        add security sv_qaudctl_l2 "$QAUD_LABEL" NOT_ASSESSED low \
+            "not assessed — QAUDCTL value unreadable" \
+            "The QAUDCTL row was present, but the catalog value was not a documented token set, so it is not graded." \
+            "inspect the QAUDCTL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDCTL). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QAUD_KIND" = PASS ]; then
+        add security sv_qaudctl_l2 "$QAUD_LABEL" PASS low \
+            "QAUDCTL=$QAUD_VAL" \
+            "QAUDCTL includes *OBJAUD and *AUDLVL, so IBM i action and object auditing are on." \
+            "n/a" \
+            "cis-l2"
+      else
+        add security sv_qaudctl_l2 "$QAUD_LABEL" FAIL high \
+            "QAUDCTL=$QAUD_VAL" \
+            "QAUDCTL is *NONE or is missing *OBJAUD or *AUDLVL, so IBM i security auditing is not fully on." \
+            "$QAUD_FAILFIX" \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qaudendacn_l2 — IBM i QAUDENDACN (auditing end action), CIS 5.1.2.4 L2.
+  # Parses the shared cap-system-values dump the same way as ck-sv-qaudendacn:
+  # unique-row awk, numeric column when non-empty else character column,
+  # leading zeros stripped. Does not CHGSYSVAL. This tool is the only L2
+  # verdict for QAUDENDACN; the L1 sibling keeps its own boundary.
+  # Exact *PWRDWNSYS is PASS. Exact *NOTIFY (L1 / IBM default) is FAIL.
+  # *NOTAVL, missing/non-unique row, unreadable token, and capture failure
+  # are NOT_ASSESSED. Determinate values never refuse.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qaudendacn_l2 "Auditing end action" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QAUDENDACN cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QEND_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QAUDENDACN"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QEND_LINE" ]; then
+      add security sv_qaudendacn_l2 "Auditing end action" NOT_ASSESSED low \
+          "not assessed — QAUDENDACN row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QAUDENDACN row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QAUDENDACN. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QEND_RAW=$(printf '%s\n' "$QEND_LINE" | awk -F'|' '{
+        v=$3
+        if (v=="") v=$2
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^0+$/) v="0"
+        else sub(/^0+/, "", v)
+        print v
+      }')
+      if [ "$QEND_RAW" = "*NOTAVL" ]; then
+        add security sv_qaudendacn_l2 "Auditing end action" NOT_ASSESSED low \
+            "not assessed — QAUDENDACN=*NOTAVL" \
+            "The catalog returned *NOTAVL for QAUDENDACN. That is not a configured value and is not a clean result." \
+            "grant the scan profile authority to read QAUDENDACN, re-take cap-system-values, and re-run. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QEND_RAW" = "*PWRDWNSYS" ]; then
+        add security sv_qaudendacn_l2 "Auditing end action" PASS low \
+            "QAUDENDACN=*PWRDWNSYS" \
+            "QAUDENDACN is *PWRDWNSYS, so if the audit journal cannot be written the system powers down." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QEND_RAW" = "*NOTIFY" ]; then
+        add security sv_qaudendacn_l2 "Auditing end action" FAIL high \
+            "QAUDENDACN=*NOTIFY" \
+            "QAUDENDACN is *NOTIFY (the L1 value and IBM default), so if the audit journal cannot be written the system keeps running and notifies the operator." \
+            "CHGSYSVAL SYSVAL(QAUDENDACN) VALUE('*PWRDWNSYS'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        add security sv_qaudendacn_l2 "Auditing end action" NOT_ASSESSED low \
+            "not assessed — QAUDENDACN value unreadable" \
+            "The QAUDENDACN row was present, but the catalog value was not *PWRDWNSYS, *NOTIFY, or *NOTAVL, so it is not graded." \
+            "inspect the QAUDENDACN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDENDACN). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qaudfrclvl_l2 — IBM i QAUDFRCLVL (auditing force level, L2).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.2.5 (L2=1). One finding.
+  # Parses the shared cap-system-values dump. Does not call ibmi_sql.
+  # Does not CHGSYSVAL. Integer exactly 1 is PASS. *SYS (catalog -1 or 0)
+  # and integers 2-100 are FAIL. *NOTAVL or a missing dump is not assessed.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qaudfrclvl_l2 "Auditing force level" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QAUDFRCLVL cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QFRC_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QAUDFRCLVL"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QFRC_LINE" ]; then
+      add security sv_qaudfrclvl_l2 "Auditing force level" NOT_ASSESSED low \
+          "not assessed — QAUDFRCLVL row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QAUDFRCLVL row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QAUDFRCLVL. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QFRC_RAW=$(printf '%s\n' "$QFRC_LINE" | awk -F'|' '{ v=$2; if (v=="") v=$3; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$QFRC_RAW" = "*NOTAVL" ]; then
+        add security sv_qaudfrclvl_l2 "Auditing force level" NOT_ASSESSED low \
+            "not assessed — QAUDFRCLVL=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QAUDFRCLVL — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QAUDFRCLVL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ -z "$QFRC_RAW" ]; then
+        add security sv_qaudfrclvl_l2 "Auditing force level" NOT_ASSESSED low \
+            "not assessed — QAUDFRCLVL value unreadable" \
+            "The QAUDFRCLVL row was present, but the catalog value was not *SYS, -1, 0, an integer 1-100, or *NOTAVL, so it is not graded." \
+            "inspect the QAUDFRCLVL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDFRCLVL). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QFRC_RAW" = "*SYS" ] || [ "$QFRC_RAW" = "-1" ]; then
+        add security sv_qaudfrclvl_l2 "Auditing force level" FAIL high \
+            "QAUDFRCLVL=$QFRC_RAW" \
+            "QAUDFRCLVL is not 1, so new audit journal entries are not forced to auxiliary storage after every entry." \
+            "set QAUDFRCLVL to 1 using CHGSYSVAL SYSVAL(QAUDFRCLVL) VALUE('1'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QFRC_N=$(printf '%s\n' "$QFRC_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -n "$QFRC_N" ] && [ "$QFRC_N" -ge 0 ] && [ "$QFRC_N" -le 100 ]; then
+          if [ "$QFRC_N" -eq 1 ]; then
+            add security sv_qaudfrclvl_l2 "Auditing force level" PASS low \
+                "QAUDFRCLVL=$QFRC_N" \
+                "QAUDFRCLVL is 1, so each new audit journal entry is forced to auxiliary storage immediately." \
+                "n/a" \
+                "cis-l2"
+          else
+            add security sv_qaudfrclvl_l2 "Auditing force level" FAIL high \
+                "QAUDFRCLVL=$QFRC_N" \
+                "QAUDFRCLVL is not 1, so new audit journal entries are not forced to auxiliary storage after every entry." \
+                "set QAUDFRCLVL to 1 using CHGSYSVAL SYSVAL(QAUDFRCLVL) VALUE('1'). This scanner never changes system values." \
+                "cis-l2"
+          fi
+        else
+          add security sv_qaudfrclvl_l2 "Auditing force level" NOT_ASSESSED low \
+              "not assessed — QAUDFRCLVL value unreadable" \
+              "The QAUDFRCLVL row was present, but the catalog value was not *SYS, -1, 0, an integer 1-100, or *NOTAVL, so it is not graded." \
+              "inspect the QAUDFRCLVL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDFRCLVL). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qautovrt_l2 — IBM i QAUTOVRT, CIS IBM i 5.1.2.6 L2 (exact 0).
+  # Parses the shared cap-system-values dump. Integer 0 PASSes. Integers
+  # 1..32500 and *NOMAX FAIL. Integers above 32500, *NOTAVL, a missing
+  # or non-unique row, an unreadable token, or a failed/empty capture is
+  # not assessed. Sibling ck-sv-qautovrt keeps the L1 boundary. This tool
+  # never changes values.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qautovrt_l2 "Automatic virtual device creation" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QAUTOVRT cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QAV_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QAUTOVRT"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QAV_LINE" ]; then
+      add security sv_qautovrt_l2 "Automatic virtual device creation" NOT_ASSESSED low \
+          "not assessed — QAUTOVRT row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QAUTOVRT row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QAUTOVRT." \
+          "cis-l2"
+    else
+      QAV_NUM=$(printf '%s\n' "$QAV_LINE" | awk -F'|' '{print $2}')
+      QAV_CHR=$(printf '%s\n' "$QAV_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QAV_NUM" ]; then
+        QAV_RAW=$QAV_NUM
+      else
+        QAV_RAW=$QAV_CHR
+      fi
+      if [ "$QAV_RAW" = "*NOTAVL" ]; then
+        add security sv_qautovrt_l2 "Automatic virtual device creation" NOT_ASSESSED low \
+            "not assessed — QAUTOVRT=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QAUTOVRT — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QAUTOVRT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "cis-l2"
+      elif [ "$QAV_RAW" = "*NOMAX" ]; then
+        add security sv_qautovrt_l2 "Automatic virtual device creation" FAIL high \
+            "QAUTOVRT=*NOMAX" \
+            "QAUTOVRT is not 0, so automatic virtual-device creation is not disabled." \
+            "CHGSYSVAL SYSVAL(QAUTOVRT) VALUE('0'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QAVN=$(printf '%s\n' "$QAV_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -n "$QAVN" ] && [ "$QAVN" -eq 0 ]; then
+          add security sv_qautovrt_l2 "Automatic virtual device creation" PASS low \
+              "QAUTOVRT=$QAVN" \
+              "QAUTOVRT is 0, so automatic virtual-device creation is disabled." \
+              "n/a" \
+              "cis-l2"
+        elif [ -n "$QAVN" ] && [ "$QAVN" -ge 1 ] && [ "$QAVN" -le 32500 ]; then
+          add security sv_qautovrt_l2 "Automatic virtual device creation" FAIL high \
+              "QAUTOVRT=$QAVN" \
+              "QAUTOVRT is not 0, so automatic virtual-device creation is not disabled." \
+              "CHGSYSVAL SYSVAL(QAUTOVRT) VALUE('0'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qautovrt_l2 "Automatic virtual device creation" NOT_ASSESSED low \
+              "not assessed — QAUTOVRT value unreadable" \
+              "The QAUTOVRT row was present, but the catalog value was not an integer 0..32500, *NOMAX, or *NOTAVL, so it is not graded." \
+              "inspect the QAUTOVRT row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUTOVRT)." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qcrtaut_l2 — IBM i QCRTAUT create authority, L2 token *EXCLUDE only.
+  # CIS IBM i 5.1.2.7. One finding. Parses the shared system-value dump.
+  # Never changes system values. *NOTAVL is a refusal, never PASS.
+  # Exact *EXCLUDE is PASS. *USE (L1), *CHANGE, and *ALL are FAIL.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qcrtaut_l2 "Create authority" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QCRTAUT cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QCRT_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QCRTAUT"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QCRT_LINE" ]; then
+      add security sv_qcrtaut_l2 "Create authority" NOT_ASSESSED low \
+          "not assessed — QCRTAUT row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QCRTAUT row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QCRTAUT. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QCRT_RAW=$(printf '%s\n' "$QCRT_LINE" | awk -F'|' '{
+        v=$2
+        sub(/^[ \t]+/, "", v)
+        sub(/[ \t]+$/, "", v)
+        if (v=="") {
+          v=$3
+          sub(/^[ \t]+/, "", v)
+          sub(/[ \t]+$/, "", v)
+        }
+        if (v ~ /^0+$/) v="0"
+        else sub(/^0+/, "", v)
+        print v
+      }')
+      if [ "$QCRT_RAW" = "*NOTAVL" ]; then
+        add security sv_qcrtaut_l2 "Create authority" NOT_ASSESSED low \
+            "not assessed — QCRTAUT=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QCRTAUT — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QCRTAUT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QCRT_RAW" = "*EXCLUDE" ]; then
+        add security sv_qcrtaut_l2 "Create authority" PASS low \
+            "QCRTAUT=$QCRT_RAW" \
+            "QCRTAUT is *EXCLUDE, so *PUBLIC cannot use newly created objects that inherit the system value." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QCRT_RAW" = "*USE" ] || [ "$QCRT_RAW" = "*CHANGE" ] || [ "$QCRT_RAW" = "*ALL" ]; then
+        add security sv_qcrtaut_l2 "Create authority" FAIL high \
+            "QCRTAUT=$QCRT_RAW" \
+            "QCRTAUT is not *EXCLUDE, so *PUBLIC can use, change, or fully control newly created objects that inherit the system value." \
+            "set QCRTAUT to *EXCLUDE using CHGSYSVAL SYSVAL(QCRTAUT) VALUE('*EXCLUDE'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        add security sv_qcrtaut_l2 "Create authority" NOT_ASSESSED low \
+            "not assessed — QCRTAUT value unreadable" \
+            "The QCRTAUT row was present, but the catalog value was not *EXCLUDE, *USE, *CHANGE, *ALL, or *NOTAVL, so it is not graded." \
+            "inspect the QCRTAUT row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QCRTAUT). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qdscjobitv_l2 — IBM i QDSCJOBITV (disconnected-job interval, L2).
+  # Integer 5-15 inclusive is PASS. *NONE or integer 16-1440 is FAIL.
+  # *NOTAVL, a missing or non-unique row, a token outside that domain,
+  # or an unreadable dump is NOT_ASSESSED. Does not change system values.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qdscjobitv_l2 "Disconnect-job interval" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO dump was not readable, so QDSCJOBITV cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QDSC_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QDSCJOBITV"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QDSC_LINE" ]; then
+      add security sv_qdscjobitv_l2 "Disconnect-job interval" NOT_ASSESSED low \
+          "not assessed — QDSCJOBITV row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QDSCJOBITV row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QDSCJOBITV. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QDSC_NUM=$(printf '%s\n' "$QDSC_LINE" | awk -F'|' '{print $2}')
+      QDSC_CHR=$(printf '%s\n' "$QDSC_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QDSC_NUM" ]; then
+        QDSC_RAW=$QDSC_NUM
+      else
+        QDSC_RAW=$QDSC_CHR
+      fi
+      if [ "$QDSC_RAW" = "*NOTAVL" ]; then
+        add security sv_qdscjobitv_l2 "Disconnect-job interval" NOT_ASSESSED low \
+            "not assessed — QDSCJOBITV=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QDSCJOBITV — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QDSCJOBITV and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QDSC_RAW" = "*NONE" ]; then
+        add security sv_qdscjobitv_l2 "Disconnect-job interval" FAIL high \
+            "QDSCJOBITV=*NONE" \
+            "QDSCJOBITV is *NONE or greater than 15 minutes, so a disconnected interactive job can stay allocated longer than the Level 2 interval." \
+            "CHGSYSVAL SYSVAL(QDSCJOBITV) VALUE('15'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QDSCN=$(printf '%s\n' "$QDSC_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QDSCN" ] || [ "$QDSCN" -lt 5 ] || [ "$QDSCN" -gt 1440 ]; then
+          add security sv_qdscjobitv_l2 "Disconnect-job interval" NOT_ASSESSED low \
+              "not assessed — QDSCJOBITV value unreadable" \
+              "The QDSCJOBITV row was present, but the catalog value was not an integer 5-1440, *NONE, or *NOTAVL, so it is not graded." \
+              "inspect the QDSCJOBITV row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QDSCJOBITV). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QDSCN" -gt 15 ]; then
+          add security sv_qdscjobitv_l2 "Disconnect-job interval" FAIL high \
+              "QDSCJOBITV=$QDSCN" \
+              "QDSCJOBITV is *NONE or greater than 15 minutes, so a disconnected interactive job can stay allocated longer than the Level 2 interval." \
+              "CHGSYSVAL SYSVAL(QDSCJOBITV) VALUE('15'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qdscjobitv_l2 "Disconnect-job interval" PASS low \
+              "QDSCJOBITV=$QDSCN" \
+              "QDSCJOBITV ends disconnected interactive jobs after a short interval (at most 15 minutes), so a disconnected job does not hold resources indefinitely." \
+              "n/a" \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qfrccvnrst_l2 — IBM i QFRCCVNRST Level 2 (force conversion on restore).
+  # Authority: CIS IBM i 5.1.2.10 (L2=7). Integer 3 is the L1 value and FAIL here.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Exact integer 7 is PASS. Integers 0-6 FAIL. live Phase 0 dump is
+  # QFRCCVNRST||4 -> 4 (FAIL).
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qfrccvnrst_l2 "Force conversion on restore" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QFRCCVNRST cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QFRC_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QFRCCVNRST"{n++; line=$0} END{if(n==1) print line}')
+    QFRC_RC=$?
+    if [ -z "$QFRC_LINE" ]; then
+      add security sv_qfrccvnrst_l2 "Force conversion on restore" NOT_ASSESSED low \
+          "not assessed — QFRCCVNRST row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QFRCCVNRST row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QFRCCVNRST. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QFRC_NUM=$(printf '%s\n' "$QFRC_LINE" | awk -F'|' '{print $2}')
+      QFRC_CHR=$(printf '%s\n' "$QFRC_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QFRC_NUM" ]; then
+        QFRC_RAW=$QFRC_NUM
+      else
+        QFRC_RAW=$QFRC_CHR
+      fi
+      if [ "$QFRC_RAW" = "*NOTAVL" ]; then
+        add security sv_qfrccvnrst_l2 "Force conversion on restore" NOT_ASSESSED low \
+            "not assessed — QFRCCVNRST=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QFRCCVNRST — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QFRCCVNRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      else
+        QFRN=$(printf '%s\n' "$QFRC_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QFRN" ] || [ "$QFRN" -gt 7 ]; then
+          add security sv_qfrccvnrst_l2 "Force conversion on restore" NOT_ASSESSED low \
+              "not assessed — QFRCCVNRST value unreadable" \
+              "The QFRCCVNRST row was present, but the catalog value was not an integer 0-7 or *NOTAVL, so it is not graded." \
+              "inspect the QFRCCVNRST row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QFRCCVNRST). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QFRN" -eq 7 ]; then
+          add security sv_qfrccvnrst_l2 "Force conversion on restore" PASS low \
+              "QFRCCVNRST=$QFRN" \
+              "QFRCCVNRST is 7, so every restored object is converted." \
+              "n/a" \
+              "cis-l2"
+        else
+          add security sv_qfrccvnrst_l2 "Force conversion on restore" FAIL high \
+              "QFRCCVNRST=$QFRN" \
+              "QFRCCVNRST is not 7, so restore does not force conversion of every object. Integer 3 is the Level 1 value and is not sufficient here." \
+              "CHGSYSVAL SYSVAL(QFRCCVNRST) VALUE('7'). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qinactitv_l2 — IBM i QINACTITV (inactive job time-out interval) L2.
+  # Authority: CIS IBM i Benchmark v2.1.0 5.1.2.11 (L2=15). The L1 sibling
+  # ck-sv-qinactitv keeps its own 5-30 boundary; this fragment is the only
+  # L2 verdict. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Integer 5-15 inclusive is PASS (below 5 is NOT_ASSESSED). *NONE or
+  # integer 16-300 is FAIL. Above 300 is unreadable. live Phase 0 dump is
+  # QINACTITV||0000000015 -> 15.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qinactitv_l2 "Inactivity time-out interval" NOT_ASSESSED low \
+        "not assessed — capture rc=$SYSVAL_RC (${SYSVAL_WHY:-capture unavailable})" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QINACTITV cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QIN_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QINACTITV"{n++; line=$0} END{if(n==1) print line}')
+    QIN_PARSE_RC=$?   # record this fragment's own capture-parse exit status; non-zero empties QIN_LINE -> row-missing below
+    if [ -z "$QIN_LINE" ]; then
+      add security sv_qinactitv_l2 "Inactivity time-out interval" NOT_ASSESSED low \
+          "not assessed — QINACTITV row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QINACTITV row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QINACTITV. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QIN_NUM=$(printf '%s\n' "$QIN_LINE" | awk -F'|' '{print $2}')
+      QIN_CHR=$(printf '%s\n' "$QIN_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QIN_NUM" ]; then
+        QIN_RAW=$QIN_NUM
+      else
+        QIN_RAW=$QIN_CHR
+      fi
+      if [ "$QIN_RAW" = "*NOTAVL" ]; then
+        add security sv_qinactitv_l2 "Inactivity time-out interval" NOT_ASSESSED low \
+            "not assessed — QINACTITV=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QINACTITV — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QINACTITV and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QIN_RAW" = "*NONE" ]; then
+        add security sv_qinactitv_l2 "Inactivity time-out interval" FAIL high \
+            "QINACTITV=*NONE" \
+            "QINACTITV is *NONE or greater than 15 minutes, so an inactive interactive job can stay signed on longer than the L2 interval." \
+            "CHGSYSVAL SYSVAL(QINACTITV) VALUE('15'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QINN=$(printf '%s\n' "$QIN_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QINN" ] || [ "$QINN" -lt 5 ]; then
+          add security sv_qinactitv_l2 "Inactivity time-out interval" NOT_ASSESSED low \
+              "not assessed — QINACTITV value unreadable" \
+              "The QINACTITV row was present, but the catalog value was not an integer 5-300, *NONE, or *NOTAVL, so it is not graded." \
+              "inspect the QINACTITV row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QINACTITV). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QINN" -gt 15 ]; then
+          if [ "$QINN" -le 300 ]; then
+            add security sv_qinactitv_l2 "Inactivity time-out interval" FAIL high \
+                "QINACTITV=$QINN" \
+                "QINACTITV is *NONE or greater than 15 minutes, so an inactive interactive job can stay signed on longer than the L2 interval." \
+                "CHGSYSVAL SYSVAL(QINACTITV) VALUE('15'). This scanner never changes system values." \
+                "cis-l2"
+          else
+            add security sv_qinactitv_l2 "Inactivity time-out interval" NOT_ASSESSED low \
+                "not assessed — QINACTITV value unreadable" \
+                "The QINACTITV row was present, but the catalog value was not an integer 5-300, *NONE, or *NOTAVL, so it is not graded." \
+                "inspect the QINACTITV row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QINACTITV). This scanner never changes system values." \
+                "cis-l2"
+          fi
+        else
+          add security sv_qinactitv_l2 "Inactivity time-out interval" PASS low \
+              "QINACTITV=$QINN" \
+              "QINACTITV times out inactive interactive jobs after a short interval (at most 15 minutes), so a signed-on workstation is not left open indefinitely." \
+              "n/a" \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qinactmsgq_l2 — IBM i QINACTMSGQ L2 (inactivity message queue).
+  # Authority: CIS IBM i 5.1.2.12 (L2=*ENDJOB). Sibling ck-sv-qinactmsgq
+  # keeps its own L1 boundary. Parses the shared cap-system-values dump.
+  # Never CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Exact *ENDJOB is PASS. *DSCJOB (L1 alt) and a named message queue FAIL.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qinactmsgq_l2 "Inactivity message queue" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QINACTMSGQ cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QIM_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QINACTMSGQ"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QIM_LINE" ]; then
+      add security sv_qinactmsgq_l2 "Inactivity message queue" NOT_ASSESSED low \
+          "not assessed — QINACTMSGQ row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QINACTMSGQ row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QINACTMSGQ. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QIM_RAW=$(printf '%s\n' "$QIM_LINE" | awk -F'|' '{
+        v=$2
+        if (v=="") v=$3
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^[0-9]+$/) {
+          if (v ~ /^0+$/) v="0"
+          else sub(/^0+/, "", v)
+        }
+        print v
+      }')
+      QIM_FIX="CHGSYSVAL SYSVAL(QINACTMSGQ) VALUE('*ENDJOB'). This scanner never changes system values."
+      if [ "$QIM_RAW" = "*NOTAVL" ]; then
+        add security sv_qinactmsgq_l2 "Inactivity message queue" NOT_ASSESSED low \
+            "not assessed — QINACTMSGQ=*NOTAVL" \
+            "The catalog returned *NOTAVL for QINACTMSGQ — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QINACTMSGQ and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ -z "$QIM_RAW" ]; then
+        add security sv_qinactmsgq_l2 "Inactivity message queue" NOT_ASSESSED low \
+            "not assessed — QINACTMSGQ value unreadable" \
+            "The QINACTMSGQ row was present, but the catalog value was not *ENDJOB, *DSCJOB, *NOTAVL, or a message-queue name, so it is not graded." \
+            "inspect the QINACTMSGQ row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QINACTMSGQ). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QIM_RAW" = "*ENDJOB" ]; then
+        add security sv_qinactmsgq_l2 "Inactivity message queue" PASS low \
+            "QINACTMSGQ=$QIM_RAW" \
+            "QINACTMSGQ is *ENDJOB, so an inactive interactive job is ended rather than disconnected or left signed on." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QIM_RAW" = "*DSCJOB" ]; then
+        add security sv_qinactmsgq_l2 "Inactivity message queue" FAIL high \
+            "QINACTMSGQ=$QIM_RAW" \
+            "QINACTMSGQ is *DSCJOB or a named message queue, so an inactive interactive job is disconnected or stays signed on instead of being ended." \
+            "$QIM_FIX" \
+            "cis-l2"
+      else
+        # Unqualified names are IBM i system objects (Q*); qualified LIB/OBJ
+        # also fails. Tokens outside that domain are unreadable, never PASS.
+        QIM_MSGQ_RC=0
+        printf '%s\n' "$QIM_RAW" | awk '
+          function ok(s) {
+            if (s == "") return 0
+            if (s ~ /^.........../) return 0
+            if (s !~ /^[A-Z@#$][A-Z0-9@#$]*$/) return 0
+            return 1
+          }
+          BEGIN { FS = "/" }
+          {
+            if ($0 ~ /^\*/) exit 1
+            if (NF == 1) {
+              if (ok($0) && substr($0, 1, 1) == "Q") exit 0
+              exit 1
+            }
+            if (NF == 2) {
+              if (ok($1) && ok($2)) exit 0
+              exit 1
+            }
+            exit 1
+          }
+        ' || QIM_MSGQ_RC=$?
+        if [ "$QIM_MSGQ_RC" -eq 0 ]; then
+          add security sv_qinactmsgq_l2 "Inactivity message queue" FAIL high \
+              "QINACTMSGQ=$QIM_RAW" \
+              "QINACTMSGQ is *DSCJOB or a named message queue, so an inactive interactive job is disconnected or stays signed on instead of being ended." \
+              "$QIM_FIX" \
+              "cis-l2"
+        else
+          add security sv_qinactmsgq_l2 "Inactivity message queue" NOT_ASSESSED low \
+              "not assessed — QINACTMSGQ value unreadable" \
+              "The QINACTMSGQ row was present, but the catalog value was not *ENDJOB, *DSCJOB, *NOTAVL, or a message-queue name, so it is not graded." \
+              "inspect the QINACTMSGQ row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QINACTMSGQ). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qlmtdevssn_l2 — IBM i QLMTDEVSSN (limit concurrent device sessions).
+  # CIS IBM i 5.1.2.13 (L2): integer exactly 1. 0 and 2-9 fail.
+  # Parses the shared cap-system-values dump. One finding. *NOTAVL refuses.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QLMTDEVSSN cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QLMT_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QLMTDEVSSN"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QLMT_LINE" ]; then
+      add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+          "not assessed — QLMTDEVSSN row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QLMTDEVSSN row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QLMTDEVSSN." \
+          "cis-l2"
+    else
+      QLMT_VAL=$(printf '%s\n' "$QLMT_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$QLMT_VAL" = "*NOTAVL" ]; then
+        add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+            "not assessed — QLMTDEVSSN=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QLMTDEVSSN — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QLMTDEVSSN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "cis-l2"
+      elif [ -z "$QLMT_VAL" ]; then
+        add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+            "not assessed — QLMTDEVSSN value unreadable" \
+            "The QLMTDEVSSN row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QLMTDEVSSN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTDEVSSN)." \
+            "cis-l2"
+      else
+        QLMTN=$(printf '%s\n' "$QLMT_VAL" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QLMTN" ]; then
+          add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+              "not assessed — QLMTDEVSSN value unreadable" \
+              "The QLMTDEVSSN row was present, but the catalog value was not an integer 0-9 or *NOTAVL, so it is not graded." \
+              "inspect the QLMTDEVSSN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTDEVSSN)." \
+              "cis-l2"
+        elif [ "$QLMTN" -eq 1 ]; then
+          add security sv_qlmtdevssn_l2 "Limit device sessions" PASS low \
+              "QLMTDEVSSN=$QLMTN" \
+              "QLMTDEVSSN limits each profile to one concurrent device session." \
+              "n/a" \
+              "cis-l2"
+        elif [ "$QLMTN" -le 9 ]; then
+          add security sv_qlmtdevssn_l2 "Limit device sessions" FAIL high \
+              "QLMTDEVSSN=$QLMTN" \
+              "QLMTDEVSSN is not 1, so a profile is not limited to a single concurrent device session." \
+              "CHGSYSVAL SYSVAL(QLMTDEVSSN) VALUE('1'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qlmtdevssn_l2 "Limit device sessions" NOT_ASSESSED low \
+              "not assessed — QLMTDEVSSN value unreadable" \
+              "The QLMTDEVSSN row was present, but the catalog value was not an integer 0-9 or *NOTAVL, so it is not graded." \
+              "inspect the QLMTDEVSSN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTDEVSSN)." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qlmtsecofr_l2 — IBM i QLMTSECOFR (limit security officer workstations).
+  # Authority: CIS IBM i Benchmark v2.1.0 5.1.2.14 (L2). 5.1.1.18 (L1) is
+  # owned by ck-sv-qlmtsecofr.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # probe verbs or re-run the capture. Does not CHGSYSVAL. *NOTAVL is a
+  # refusal, never PASS.
+  # The CIS L2 benchmark value is 1: exact 1 is PASS low. Exact 0 is the
+  # CIS L1 value and FAIL high. live Phase 0 dump is QLMTSECOFR||1.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QLMTSECOFR cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QLS_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QLMTSECOFR"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QLS_LINE" ]; then
+      add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" NOT_ASSESSED low \
+          "not assessed — QLMTSECOFR row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QLMTSECOFR row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QLMTSECOFR. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QLS_VAL=$(printf '%s\n' "$QLS_LINE" | awk -F'|' '{ v=$2; if (v=="") v=$3; sub(/[ \t]+$/, "", v); print v }')
+      QLS_NUM=$(printf '%s\n' "$QLS_VAL" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+      [ -n "$QLS_NUM" ] && QLS_VAL=$QLS_NUM
+      if [ "$QLS_VAL" = "*NOTAVL" ]; then
+        add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" NOT_ASSESSED low \
+            "not assessed — QLMTSECOFR=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QLMTSECOFR — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QLMTSECOFR and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ -z "$QLS_VAL" ]; then
+        add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" NOT_ASSESSED low \
+            "not assessed — QLMTSECOFR value unreadable" \
+            "The QLMTSECOFR row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QLMTSECOFR row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTSECOFR). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QLS_VAL" = "1" ]; then
+        add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" PASS low \
+            "QLMTSECOFR=$QLS_VAL" \
+            "QLMTSECOFR is 1, so only profiles with private *CHANGE authority to the workstation device may sign on." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QLS_VAL" = "0" ]; then
+        add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" FAIL high \
+            "QLMTSECOFR=$QLS_VAL" \
+            "QLMTSECOFR is 0, the CIS L1 value; *ALLOBJ/*SERVICE profiles may sign on at any workstation." \
+            "CHGSYSVAL SYSVAL(QLMTSECOFR) VALUE('1'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        add security sv_qlmtsecofr_l2 "Limit security officer access to workstations (L2)" NOT_ASSESSED low \
+            "not assessed — QLMTSECOFR value unreadable" \
+            "The QLMTSECOFR row was present, but the catalog value was not 0, 1, or *NOTAVL, so it is not graded." \
+            "inspect the QLMTSECOFR row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTSECOFR). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qmaxsgnacn_l2 — IBM i QMAXSGNACN (action when max sign-on attempts reached).
+  # Authority: CIS IBM i 5.1.2.15 (L2=3). L1 5.1.1.19 is ck-sv-qmaxsgnacn.
+  # One finding. Parses the shared cap-system-values dump the same way as
+  # ck-sv-qmaxsgnacn: unique-row awk, character column when non-empty else
+  # numeric column, leading zeros stripped. Does not call ibmi_sql. Does
+  # not CHGSYSVAL. This tool is the only L2 verdict for QMAXSGNACN.
+  # Exact 3 is PASS (disable profile and device). Exact 1 or 2 is FAIL
+  # (2 is the L1 alternative). *NOTAVL, missing/non-unique row, unreadable
+  # token, and capture failure are NOT_ASSESSED. Determinate 1/2/3 never refuse.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qmaxsgnacn_l2 "Maximum sign-on action" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QMAXSGNACN cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QACN_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QMAXSGNACN"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QACN_LINE" ]; then
+      add security sv_qmaxsgnacn_l2 "Maximum sign-on action" NOT_ASSESSED low \
+          "not assessed — QMAXSGNACN row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QMAXSGNACN row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QMAXSGNACN. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QACN_VAL=$(printf '%s\n' "$QACN_LINE" | awk -F'|' '{
+        v=$3
+        if (v=="") v=$2
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^0+$/) v="0"
+        else sub(/^0+/, "", v)
+        print v
+      }')
+      if [ "$QACN_VAL" = "*NOTAVL" ]; then
+        add security sv_qmaxsgnacn_l2 "Maximum sign-on action" NOT_ASSESSED low \
+            "not assessed — QMAXSGNACN=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QMAXSGNACN — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QMAXSGNACN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QACN_VAL" = "3" ]; then
+        add security sv_qmaxsgnacn_l2 "Maximum sign-on action" PASS low \
+            "QMAXSGNACN=$QACN_VAL" \
+            "QMAXSGNACN is 3, so reaching the invalid sign-on limit disables the user profile and varies off the device." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QACN_VAL" = "1" ] || [ "$QACN_VAL" = "2" ]; then
+        add security sv_qmaxsgnacn_l2 "Maximum sign-on action" FAIL high \
+            "QMAXSGNACN=$QACN_VAL" \
+            "QMAXSGNACN is 1 or 2 (2 is the L1 alternative), so reaching the invalid sign-on limit does not disable both the user profile and the device." \
+            "CHGSYSVAL SYSVAL(QMAXSGNACN) VALUE('3'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        add security sv_qmaxsgnacn_l2 "Maximum sign-on action" NOT_ASSESSED low \
+            "not assessed — QMAXSGNACN value unreadable" \
+            "The QMAXSGNACN row was present, but the catalog value was not 1, 2, 3, or *NOTAVL, so it is not graded." \
+            "inspect the QMAXSGNACN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QMAXSGNACN). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qmaxsign_l2 — IBM i QMAXSIGN (maximum invalid sign-on attempts, L2).
+  # Integer 1-3 inclusive is PASS. Integer 4-25 or *NOMAX is FAIL.
+  # *NOTAVL, a missing or non-unique row, a token outside that domain,
+  # or an unreadable dump is NOT_ASSESSED. Does not change system values.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qmaxsign_l2 "Maximum sign-on attempts" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO dump was not readable, so QMAXSIGN cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QMAX_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QMAXSIGN"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QMAX_LINE" ]; then
+      add security sv_qmaxsign_l2 "Maximum sign-on attempts" NOT_ASSESSED low \
+          "not assessed — QMAXSIGN row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QMAXSIGN row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QMAXSIGN. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QMAX_NUM=$(printf '%s\n' "$QMAX_LINE" | awk -F'|' '{print $2}')
+      QMAX_CHR=$(printf '%s\n' "$QMAX_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QMAX_NUM" ]; then
+        QMAX_RAW=$QMAX_NUM
+      else
+        QMAX_RAW=$QMAX_CHR
+      fi
+      if [ "$QMAX_RAW" = "*NOTAVL" ]; then
+        add security sv_qmaxsign_l2 "Maximum sign-on attempts" NOT_ASSESSED low \
+            "not assessed — QMAXSIGN=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QMAXSIGN — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QMAXSIGN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QMAX_RAW" = "*NOMAX" ]; then
+        add security sv_qmaxsign_l2 "Maximum sign-on attempts" FAIL high \
+            "QMAXSIGN=*NOMAX" \
+            "QMAXSIGN is *NOMAX or greater than 3, so invalid sign-on attempts are not bounded to the Level 2 maximum of 3 before the sign-on action runs." \
+            "CHGSYSVAL SYSVAL(QMAXSIGN) VALUE('3'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QMAXN=$(printf '%s\n' "$QMAX_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QMAXN" ] || [ "$QMAXN" -lt 1 ] || [ "$QMAXN" -gt 25 ]; then
+          add security sv_qmaxsign_l2 "Maximum sign-on attempts" NOT_ASSESSED low \
+              "not assessed — QMAXSIGN value unreadable" \
+              "The QMAXSIGN row was present, but the catalog value was not an integer 1-25, *NOMAX, or *NOTAVL, so it is not graded." \
+              "inspect the QMAXSIGN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QMAXSIGN). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QMAXN" -gt 3 ]; then
+          add security sv_qmaxsign_l2 "Maximum sign-on attempts" FAIL high \
+              "QMAXSIGN=$QMAXN" \
+              "QMAXSIGN is *NOMAX or greater than 3, so invalid sign-on attempts are not bounded to the Level 2 maximum of 3 before the sign-on action runs." \
+              "CHGSYSVAL SYSVAL(QMAXSIGN) VALUE('3'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qmaxsign_l2 "Maximum sign-on attempts" PASS low \
+              "QMAXSIGN=$QMAXN" \
+              "QMAXSIGN limits invalid sign-on attempts to a small count (at most 3) before the sign-on action runs." \
+              "n/a" \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qpwdchgblk_l2 — IBM i QPWDCHGBLK (block password change), CIS L2.
+  # Authority: CIS IBM i 5.1.2.17 (L2=99). L1 5.1.1.21 is ck-ibmi-sv-qpwdchgblk.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Integer exactly 99 is PASS. *NONE or integer 1-98 is FAIL (24 is L1).
+  # Token outside {*NONE,*NOTAVL,1..99} is unreadable.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qpwdchgblk_l2 "Block password change (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDCHGBLK cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QPWD_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDCHGBLK"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QPWD_LINE" ]; then
+      add security sv_qpwdchgblk_l2 "Block password change (L2)" NOT_ASSESSED low \
+          "not assessed — QPWDCHGBLK row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWDCHGBLK row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDCHGBLK. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QPWD_NUM=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $2}')
+      QPWD_CHR=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QPWD_NUM" ]; then
+        QPWD_RAW=$QPWD_NUM
+      else
+        QPWD_RAW=$QPWD_CHR
+      fi
+      if [ "$QPWD_RAW" = "*NOTAVL" ]; then
+        add security sv_qpwdchgblk_l2 "Block password change (L2)" NOT_ASSESSED low \
+            "not assessed — QPWDCHGBLK=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QPWDCHGBLK — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QPWDCHGBLK and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QPWD_RAW" = "*NONE" ]; then
+        add security sv_qpwdchgblk_l2 "Block password change (L2)" FAIL high \
+            "QPWDCHGBLK=*NONE" \
+            "QPWDCHGBLK is *NONE or less than 99, so a password can be changed sooner than the L2 block interval." \
+            "CHGSYSVAL SYSVAL(QPWDCHGBLK) VALUE('99'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QPWDN=$(printf '%s\n' "$QPWD_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QPWDN" ] || [ "$QPWDN" -lt 1 ] || [ "$QPWDN" -gt 99 ]; then
+          add security sv_qpwdchgblk_l2 "Block password change (L2)" NOT_ASSESSED low \
+              "not assessed — QPWDCHGBLK value unreadable" \
+              "The QPWDCHGBLK row was present, but the catalog value was not an integer 1-99, *NONE, or *NOTAVL, so it is not graded." \
+              "inspect the QPWDCHGBLK row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDCHGBLK). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QPWDN" -eq 99 ]; then
+          add security sv_qpwdchgblk_l2 "Block password change (L2)" PASS low \
+              "QPWDCHGBLK=$QPWDN" \
+              "QPWDCHGBLK blocks password changes for 99 hours." \
+              "n/a" \
+              "cis-l2"
+        else
+          add security sv_qpwdchgblk_l2 "Block password change (L2)" FAIL high \
+              "QPWDCHGBLK=$QPWDN" \
+              "QPWDCHGBLK is *NONE or less than 99, so a password can be changed sooner than the L2 block interval." \
+              "CHGSYSVAL SYSVAL(QPWDCHGBLK) VALUE('99'). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qpwdchgblk_l1 — IBM i QPWDCHGBLK (block password change).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.21 (L1=24). L2 5.1.2.17
+  # is ck-ibmi-sv-qpwdchgblk-l2.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Integer 24-99 inclusive is PASS (higher blocks longer). *NONE or
+  # integer 1-23 is FAIL. live Phase 0 dump is QPWDCHGBLK||0000000024
+  # -> 24 and is PASS.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qpwdchgblk_l1 "Block password change" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDCHGBLK cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l1"
+  else
+    QBLK_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDCHGBLK"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QBLK_LINE" ]; then
+      add security sv_qpwdchgblk_l1 "Block password change" NOT_ASSESSED low \
+          "not assessed — QPWDCHGBLK row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWDCHGBLK row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDCHGBLK. This scanner never changes system values." \
+          "cis-l1"
+    else
+      QBLK_NUM=$(printf '%s\n' "$QBLK_LINE" | awk -F'|' '{print $2}')
+      QBLK_CHR=$(printf '%s\n' "$QBLK_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QBLK_NUM" ]; then
+        QBLK_RAW=$QBLK_NUM
+      else
+        QBLK_RAW=$QBLK_CHR
+      fi
+      if [ "$QBLK_RAW" = "*NOTAVL" ]; then
+        add security sv_qpwdchgblk_l1 "Block password change" NOT_ASSESSED low \
+            "not assessed — QPWDCHGBLK=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QPWDCHGBLK — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QPWDCHGBLK and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l1"
+      elif [ "$QBLK_RAW" = "*NONE" ]; then
+        add security sv_qpwdchgblk_l1 "Block password change" FAIL high \
+            "QPWDCHGBLK=*NONE" \
+            "QPWDCHGBLK is *NONE or fewer than 24 hours, so a password can be changed again before a 24-hour block." \
+            "set QPWDCHGBLK to 24 or more, not *NONE, using CHGSYSVAL SYSVAL(QPWDCHGBLK) VALUE('24'). This scanner never changes system values." \
+            "cis-l1"
+      else
+        QBLKN=$(printf '%s\n' "$QBLK_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QBLKN" ] || [ "$QBLKN" -lt 1 ] || [ "$QBLKN" -gt 99 ]; then
+          add security sv_qpwdchgblk_l1 "Block password change" NOT_ASSESSED low \
+              "not assessed — QPWDCHGBLK value unreadable" \
+              "The QPWDCHGBLK row was present, but the catalog value was not an integer 1-99, *NONE, or *NOTAVL, so it is not graded." \
+              "inspect the QPWDCHGBLK row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDCHGBLK). This scanner never changes system values." \
+              "cis-l1"
+        elif [ "$QBLKN" -lt 24 ]; then
+          add security sv_qpwdchgblk_l1 "Block password change" FAIL high \
+              "QPWDCHGBLK=$QBLKN" \
+              "QPWDCHGBLK is *NONE or fewer than 24 hours, so a password can be changed again before a 24-hour block." \
+              "set QPWDCHGBLK to 24 or more, not *NONE, using CHGSYSVAL SYSVAL(QPWDCHGBLK) VALUE('24'). This scanner never changes system values." \
+              "cis-l1"
+        else
+          add security sv_qpwdchgblk_l1 "Block password change" PASS low \
+              "QPWDCHGBLK=$QBLKN" \
+              "QPWDCHGBLK blocks password changes for at least 24 hours, so a newly changed password cannot be changed again immediately." \
+              "n/a" \
+              "cis-l1"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qpwdexpitv_l2 — IBM i QPWDEXPITV (password expiration interval).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.2.18 (L2=365). L1=45 is
+  # ck-sv-qpwdexpitv. One finding. Parses the shared system-value dump.
+  # Does not invoke SQL or CL probes. Does not change system values.
+  # *NOTAVL is a refusal, never PASS. Integer 1-365 inclusive is PASS.
+  # *NOMAX or 366 is FAIL. live Phase 0 dump is QPWDEXPITV||000090 -> 90
+  # and is PASS under the L2 maximum.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qpwdexpitv_l2 "Password expiration interval" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDEXPITV cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QPWD_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDEXPITV"{n++; line=$0} END{if(n==1) print line}')
+    QPWD_RC=$?
+    if [ -z "$QPWD_LINE" ]; then
+      add security sv_qpwdexpitv_l2 "Password expiration interval" NOT_ASSESSED low \
+          "not assessed — QPWDEXPITV row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWDEXPITV row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDEXPITV. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QPWD_NUM=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $2}')
+      QPWD_CHR=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QPWD_NUM" ]; then
+        QPWD_RAW=$QPWD_NUM
+      else
+        QPWD_RAW=$QPWD_CHR
+      fi
+      if [ "$QPWD_RAW" = "*NOTAVL" ]; then
+        add security sv_qpwdexpitv_l2 "Password expiration interval" NOT_ASSESSED low \
+            "not assessed — QPWDEXPITV=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QPWDEXPITV — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QPWDEXPITV and re-take the system-value capture. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QPWD_RAW" = "*NOMAX" ]; then
+        add security sv_qpwdexpitv_l2 "Password expiration interval" FAIL high \
+            "QPWDEXPITV=*NOMAX" \
+            "QPWDEXPITV is *NOMAX or greater than 365 days, so a password can stay valid longer than the Level 2 interval." \
+            "CHGSYSVAL SYSVAL(QPWDEXPITV) VALUE('365'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QPWDN=$(printf '%s\n' "$QPWD_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QPWDN" ] || [ "$QPWDN" -lt 1 ] || [ "$QPWDN" -gt 366 ]; then
+          add security sv_qpwdexpitv_l2 "Password expiration interval" NOT_ASSESSED low \
+              "not assessed — QPWDEXPITV value unreadable" \
+              "The QPWDEXPITV row was present, but the catalog value was not an integer 1-366, *NOMAX, or *NOTAVL, so it is not graded." \
+              "inspect the QPWDEXPITV row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDEXPITV). This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QPWDN" -gt 365 ]; then
+          add security sv_qpwdexpitv_l2 "Password expiration interval" FAIL high \
+              "QPWDEXPITV=$QPWDN" \
+              "QPWDEXPITV is *NOMAX or greater than 365 days, so a password can stay valid longer than the Level 2 interval." \
+              "CHGSYSVAL SYSVAL(QPWDEXPITV) VALUE('365'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qpwdexpitv_l2 "Password expiration interval" PASS low \
+              "QPWDEXPITV=$QPWDN" \
+              "QPWDEXPITV expires passwords within the Level 2 maximum of 365 days." \
+              "n/a" \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qpwdrqddif_l2 — IBM i QPWDRQDDIF (required difference in passwords).
+  # Authority: CIS IBM i 5.1.2.19 (L2=1, 32 previous). One finding.
+  # Parses the shared cap-system-values dump. Does not call ibmi_sql.
+  # Does not CHGSYSVAL. Exact 1 is PASS. 0 and 2..8 (including L1=2) are
+  # FAIL. *NOTAVL, missing/non-unique row, unreadable token, empty or
+  # failed capture are NOT_ASSESSED. Token is a history code, not a
+  # character-count.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qpwdrqddif_l2 "Required difference in passwords" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDRQDDIF cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QDIF_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDRQDDIF"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QDIF_LINE" ]; then
+      add security sv_qpwdrqddif_l2 "Required difference in passwords" NOT_ASSESSED low \
+          "not assessed — QPWDRQDDIF row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWDRQDDIF row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDRQDDIF. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QDIF_VAL=$(printf '%s\n' "$QDIF_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$QDIF_VAL" = "*NOTAVL" ]; then
+        add security sv_qpwdrqddif_l2 "Required difference in passwords" NOT_ASSESSED low \
+            "not assessed — QPWDRQDDIF=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QPWDRQDDIF — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QPWDRQDDIF and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ -z "$QDIF_VAL" ]; then
+        add security sv_qpwdrqddif_l2 "Required difference in passwords" NOT_ASSESSED low \
+            "not assessed — QPWDRQDDIF value unreadable" \
+            "The QPWDRQDDIF row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QPWDRQDDIF row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDRQDDIF). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QDIFN=$(printf '%s\n' "$QDIF_VAL" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        case "$QDIFN" in
+          1)
+            add security sv_qpwdrqddif_l2 "Required difference in passwords" PASS low \
+                "QPWDRQDDIF=$QDIFN" \
+                "QPWDRQDDIF is 1 (32 previous passwords), so a recently used password cannot be reused immediately." \
+                "n/a" \
+                "cis-l2"
+            ;;
+          0|2|3|4|5|6|7|8)
+            add security sv_qpwdrqddif_l2 "Required difference in passwords" FAIL high \
+                "QPWDRQDDIF=$QDIFN" \
+                "QPWDRQDDIF is $QDIFN, which is not the L2 required difference of 1 (32 previous passwords)." \
+                "CHGSYSVAL SYSVAL(QPWDRQDDIF) VALUE('1'). This scanner never changes system values." \
+                "cis-l2"
+            ;;
+          *)
+            add security sv_qpwdrqddif_l2 "Required difference in passwords" NOT_ASSESSED low \
+                "not assessed — QPWDRQDDIF value unreadable" \
+                "The QPWDRQDDIF row was present, but the catalog value was not an integer 0-8 or *NOTAVL, so it is not graded." \
+                "inspect the QPWDRQDDIF row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDRQDDIF). This scanner never changes system values." \
+                "cis-l2"
+            ;;
+        esac
+      fi
+    fi
+  fi
+
+  # sv_qpwdrules_l2 — IBM i QPWDRULES (password composition rules), CIS L2.
+  # Authority: CIS IBM i 5.1.2.20 (L2 *ALLCRTCHG *LMTPRFNAME *MAXLEN128
+  # *MINLENnn>=14 *REQANY3). L1 5.1.1.26 is ck-sv-qpwdrules; do not touch
+  # that sibling. This tool is the only L2 verdict for QPWDRULES.
+  # One finding. Parses the shared cap-system-values dump the same way as
+  # ck-sv-qpwdrules: unique-row awk, character column when non-empty else
+  # numeric, leading zeros stripped on *MINLEN/*MAXLEN. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Extra documented tokens are tolerated. *PWDSYSVAL and *NONE fail.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qpwdrules_l2 "Password rules (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDRULES cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QPWD_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDRULES"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QPWD_LINE" ]; then
+      add security sv_qpwdrules_l2 "Password rules (L2)" NOT_ASSESSED low \
+          "not assessed — QPWDRULES row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWDRULES row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDRULES. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QPWD_VAL=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      if [ -z "$QPWD_VAL" ]; then
+        add security sv_qpwdrules_l2 "Password rules (L2)" NOT_ASSESSED low \
+            "not assessed — QPWDRULES value unreadable" \
+            "The QPWDRULES row was present, but a token was not a documented QPWDRULES rule, so it is not graded." \
+            "inspect the QPWDRULES row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDRULES). This scanner never changes system values." \
+            "cis-l2"
+      else
+        QPWD_TOK=$(printf '%s\n' "$QPWD_VAL" | awk '
+          {
+            n=split($0, a, /[ \t]+/)
+            for (i=1; i<=n; i++) {
+              t=a[i]
+              if (t=="") continue
+              nt++
+              if (t=="*NOTAVL") nv=1
+              else if (t=="*PWDSYSVAL") ps=1
+              else if (t=="*NONE") none=1
+              else if (t=="*ALLCRTCHG") allc=1
+              else if (t=="*LMTPRFNAME") lprf=1
+              else if (t=="*REQANY3") req3=1
+              else if (t=="*CHRLMTAJC" || t=="*CHRLMTREP" || t=="*DGTLMTAJC" || t=="*DGTLMTFST" || t=="*DGTLMTLST" || t=="*SPCCHRLMTAJC" || t=="*SPCCHRLMTFST" || t=="*SPCCHRLMTLST") extra=1
+              else if (t ~ /^\*MIXCASE[0-9]$/) extra=1
+              else if (t ~ /^\*MINLEN[0-9]+$/) {
+                nmin++
+                m=t
+                sub(/^\*MINLEN/, "", m)
+                if (m ~ /^0+$/) minn=0
+                else { sub(/^0+/, "", m); minn=m+0 }
+              }
+              else if (t ~ /^\*MAXLEN[0-9]+$/) {
+                nmax++
+                x=t
+                sub(/^\*MAXLEN/, "", x)
+                if (x ~ /^0+$/) maxn=0
+                else { sub(/^0+/, "", x); maxn=x+0 }
+                if (maxn==128) max128=1
+              }
+              else bad=1
+            }
+          }
+          END {
+            if (nv) print "NOTAVL"
+            else if (nt<1) print "BAD"
+            else if (bad) print "BAD"
+            else if (nmin>1 || nmax>1) print "BAD"
+            else if (nmin==1 && (minn<1 || minn>128)) print "BAD"
+            else if (nmax==1 && (maxn<1 || maxn>128)) print "BAD"
+            else if (nmin==1 && nmax==1 && maxn<minn) print "BAD"
+            else if (ps || none) print "FAIL"
+            else if (!allc || !lprf || !req3 || !max128) print "FAIL"
+            else if (nmin==0 || minn<14) print "FAIL"
+            else print "PASS"
+          }')
+        if [ "$QPWD_TOK" = NOTAVL ]; then
+          add security sv_qpwdrules_l2 "Password rules (L2)" NOT_ASSESSED low \
+              "not assessed — QPWDRULES=*NOTAVL (scan profile cannot read this system value)" \
+              "The catalog returned *NOTAVL for QPWDRULES — the scan profile lacks authority to read this system value, so the value is not graded." \
+              "grant the scan profile read access to QPWDRULES and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+              "cis-l2"
+        elif [ "$QPWD_TOK" = PASS ]; then
+          add security sv_qpwdrules_l2 "Password rules (L2)" PASS low \
+              "QPWDRULES=$QPWD_VAL" \
+              "QPWDRULES applies composition rules on create and change, blocks the profile name, requires three character classes, a maximum length of 128, and a minimum length of at least 14." \
+              "n/a" \
+              "cis-l2"
+        elif [ "$QPWD_TOK" = FAIL ]; then
+          add security sv_qpwdrules_l2 "Password rules (L2)" FAIL high \
+              "QPWDRULES=$QPWD_VAL" \
+              "QPWDRULES is *PWDSYSVAL, *NONE, or is missing a required L2 rule, so a password can skip create/change enforcement, reuse the profile name, skip mixed character classes, exceed 128 characters, or be shorter than 14 characters." \
+              "CHGSYSVAL SYSVAL(QPWDRULES) VALUE('*ALLCRTCHG *LMTPRFNAME *MAXLEN128 *MINLEN14 *REQANY3'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qpwdrules_l2 "Password rules (L2)" NOT_ASSESSED low \
+              "not assessed — QPWDRULES value unreadable" \
+              "The QPWDRULES row was present, but a token was not a documented QPWDRULES rule, so it is not graded." \
+              "inspect the QPWDRULES row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDRULES). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qrmtsign_l2 — IBM i QRMTSIGN L2 (remote sign-on value).
+  # CIS IBM i Benchmark v2.1.0: 7.5 5.1.2.22 / 7.4 5.1.2.23.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Exact *FRCSIGNON PASSes. *REJECT also PASSes (refuses every remote
+  # sign-on; strictly stronger than *FRCSIGNON). *VERIFY, *SAMEPRF, or a
+  # library/program qualified name FAIL. A slash alone is not a program;
+  # any other token is unreadable.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qrmtsign_l2 "Remote sign-on value" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QRMTSIGN cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QRM_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QRMTSIGN"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QRM_LINE" ]; then
+      add security sv_qrmtsign_l2 "Remote sign-on value" NOT_ASSESSED low \
+          "not assessed — QRMTSIGN row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QRMTSIGN row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QRMTSIGN. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QRM_VAL=$(printf '%s\n' "$QRM_LINE" | awk -F'|' '{
+        v=$2
+        if (v=="") v=$3
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^0+$/) v=0
+        else sub(/^0+/, "", v)
+        print v
+      }')
+      if [ -z "$QRM_VAL" ]; then
+        add security sv_qrmtsign_l2 "Remote sign-on value" NOT_ASSESSED low \
+            "not assessed — QRMTSIGN value unreadable" \
+            "The QRMTSIGN row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QRMTSIGN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QRMTSIGN). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QRM_VAL" = "*NOTAVL" ]; then
+        add security sv_qrmtsign_l2 "Remote sign-on value" NOT_ASSESSED low \
+            "not assessed — QRMTSIGN=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QRMTSIGN — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QRMTSIGN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QRM_VAL" = "*FRCSIGNON" ] || [ "$QRM_VAL" = "*REJECT" ]; then
+        add security sv_qrmtsign_l2 "Remote sign-on value" PASS low \
+            "QRMTSIGN=$QRM_VAL" \
+            "QRMTSIGN is *FRCSIGNON or *REJECT, so remote automatic sign-on is forced through the sign-on display or refused entirely." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QRM_VAL" = "*VERIFY" ] || [ "$QRM_VAL" = "*SAMEPRF" ]; then
+        add security sv_qrmtsign_l2 "Remote sign-on value" FAIL high \
+            "QRMTSIGN=$QRM_VAL" \
+            "QRMTSIGN is *VERIFY, *SAMEPRF, or a named program, so remote sign-on is not forced through the sign-on display." \
+            "CHGSYSVAL SYSVAL(QRMTSIGN) VALUE('*FRCSIGNON'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        # Captured program form is library/program: exactly two IBM i names.
+        # A slash is not enough — A/B/C, /PGM, and LIB/ are unreadable.
+        QRM_PGM_RC=0
+        printf '%s\n' "$QRM_VAL" | awk -F/ '
+          function ok(s) {
+            if (s == "") return 0
+            if (s ~ /^.........../) return 0
+            if (s !~ /^[A-Z$#@][A-Z0-9$#@]*$/) return 0
+            return 1
+          }
+          NF != 2 { exit 1 }
+          { if (ok($1) && ok($2)) exit 0; exit 1 }
+        ' || QRM_PGM_RC=$?
+        if [ "$QRM_PGM_RC" -eq 0 ]; then
+          add security sv_qrmtsign_l2 "Remote sign-on value" FAIL high \
+              "QRMTSIGN=$QRM_VAL" \
+              "QRMTSIGN is *VERIFY, *SAMEPRF, or a named program, so remote sign-on is not forced through the sign-on display." \
+              "CHGSYSVAL SYSVAL(QRMTSIGN) VALUE('*FRCSIGNON'). This scanner never changes system values." \
+              "cis-l2"
+        else
+          add security sv_qrmtsign_l2 "Remote sign-on value" NOT_ASSESSED low \
+              "not assessed — QRMTSIGN value unreadable" \
+              "The QRMTSIGN row was present, but the catalog value was not a documented remote sign-on token or a qualified program name, so it is not graded." \
+              "inspect the QRMTSIGN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QRMTSIGN). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # sv_qsecurity_l2 — IBM i QSECURITY, CIS IBM i 5.1.2.23 (L2).
+  # Parses the shared cap-system-values dump the same way as ck-sv-qsecurity:
+  # unique-row awk, numeric column when non-empty else character column,
+  # leading zeros stripped. Does not CHGSYSVAL. This tool is the only L2
+  # verdict for QSECURITY; the L1 sibling keeps its own boundary.
+  # Integer 50 is PASS. Integers 10, 20, 30, and 40 (40 is the L1 minimum)
+  # are FAIL. *NOTAVL, missing/non-unique row, unreadable token, and capture
+  # failure are NOT_ASSESSED. Determinate values never refuse.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qsecurity_l2 "System security level (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QSECURITY cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QSEC_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSECURITY"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QSEC_LINE" ]; then
+      add security sv_qsecurity_l2 "System security level (L2)" NOT_ASSESSED low \
+          "not assessed — QSECURITY row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QSECURITY row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSECURITY. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QSEC_RAW=$(printf '%s\n' "$QSEC_LINE" | awk -F'|' '{
+        v=$2
+        if (v=="") v=$3
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^[0-9]+$/) {
+          if (v ~ /^0+$/) v="0"
+          else sub(/^0+/, "", v)
+        }
+        print v
+      }')
+      if [ "$QSEC_RAW" = "*NOTAVL" ]; then
+        add security sv_qsecurity_l2 "System security level (L2)" NOT_ASSESSED low \
+            "not assessed — QSECURITY=*NOTAVL" \
+            "The catalog returned *NOTAVL for QSECURITY. That is not a configured value and is not a clean result." \
+            "grant the scan profile authority to read QSECURITY, re-take the system-value dump, and re-run. This scanner never changes system values." \
+            "cis-l2"
+      else
+        case "$QSEC_RAW" in
+          10|20|30|40|50)
+            if [ "$QSEC_RAW" -ge 50 ]; then
+              add security sv_qsecurity_l2 "System security level (L2)" PASS low \
+                  "QSECURITY=$QSEC_RAW" \
+                  "QSECURITY is 50, so the system is at the Level 2 security level." \
+                  "n/a" \
+                  "cis-l2"
+            else
+              add security sv_qsecurity_l2 "System security level (L2)" FAIL high \
+                  "QSECURITY=$QSEC_RAW" \
+                  "QSECURITY is below 50. Level 40 is the Level 1 minimum and fails this Level 2 control." \
+                  "CHGSYSVAL SYSVAL(QSECURITY) VALUE('50'). This scanner never changes system values." \
+                  "cis-l2"
+            fi
+            ;;
+          *)
+            add security sv_qsecurity_l2 "System security level (L2)" NOT_ASSESSED low \
+                "not assessed — QSECURITY value unreadable" \
+                "The QSECURITY row was present, but the catalog value was not 10, 20, 30, 40, 50, or *NOTAVL, so it is not graded." \
+                "inspect the QSECURITY row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSECURITY). This scanner never changes system values." \
+                "cis-l2"
+            ;;
+        esac
+      fi
+    fi
+  fi
+
+  # sv_qshrmemctl_l2 — IBM i QSHRMEMCTL (shared memory control).
+  # Authority: CIS IBM i Benchmark v2.1.0 5.1.2.24 (L2; 7.4 5.1.2.25).
+  # 5.1.1.34 (L1) is owned by ck-sv-qshrmemctl.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # probe verbs or re-run the capture. Does not CHGSYSVAL. *NOTAVL is a
+  # refusal, never PASS.
+  # The CIS L2 benchmark value is 0: exact 0 is PASS low. Exact 1 is the
+  # CIS L1 value and FAIL high. live Phase 0 dump is QSHRMEMCTL||1.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qshrmemctl_l2 "Shared memory control (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QSHRMEMCTL cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QSHM_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSHRMEMCTL"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QSHM_LINE" ]; then
+      add security sv_qshrmemctl_l2 "Shared memory control (L2)" NOT_ASSESSED low \
+          "not assessed — QSHRMEMCTL row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QSHRMEMCTL row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSHRMEMCTL. This scanner never changes system values." \
+          "cis-l2"
+    else
+      QSHM_VAL=$(printf '%s\n' "$QSHM_LINE" | awk -F'|' '{
+        v=$2
+        if (v=="") v=$3
+        sub(/[ \t]+$/, "", v)
+        if (v ~ /^[0-9]+$/) {
+          if (v ~ /^0+$/) v="0"
+          else sub(/^0+/, "", v)
+        }
+        print v
+      }')
+      if [ "$QSHM_VAL" = "*NOTAVL" ]; then
+        add security sv_qshrmemctl_l2 "Shared memory control (L2)" NOT_ASSESSED low \
+            "not assessed — QSHRMEMCTL=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QSHRMEMCTL — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QSHRMEMCTL and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap. This scanner never changes system values." \
+            "cis-l2"
+      elif [ -z "$QSHM_VAL" ]; then
+        add security sv_qshrmemctl_l2 "Shared memory control (L2)" NOT_ASSESSED low \
+            "not assessed — QSHRMEMCTL value unreadable" \
+            "The QSHRMEMCTL row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QSHRMEMCTL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSHRMEMCTL). This scanner never changes system values." \
+            "cis-l2"
+      elif [ "$QSHM_VAL" = "0" ]; then
+        add security sv_qshrmemctl_l2 "Shared memory control (L2)" PASS low \
+            "QSHRMEMCTL=$QSHM_VAL" \
+            "QSHRMEMCTL is 0, so users cannot use shared-memory APIs (shmat) or mapped memory with write capability (mmap)." \
+            "n/a" \
+            "cis-l2"
+      elif [ "$QSHM_VAL" = "1" ]; then
+        add security sv_qshrmemctl_l2 "Shared memory control (L2)" FAIL high \
+            "QSHRMEMCTL=$QSHM_VAL" \
+            "QSHRMEMCTL is 1, the CIS L1 value; users can use shared-memory APIs and mapped memory with write capability." \
+            "CHGSYSVAL SYSVAL(QSHRMEMCTL) VALUE('0'). This scanner never changes system values." \
+            "cis-l2"
+      else
+        add security sv_qshrmemctl_l2 "Shared memory control (L2)" NOT_ASSESSED low \
+            "not assessed — QSHRMEMCTL value unreadable" \
+            "The QSHRMEMCTL row was present, but the catalog value was not 0, 1, or *NOTAVL, so it is not graded." \
+            "inspect the QSHRMEMCTL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSHRMEMCTL). This scanner never changes system values." \
+            "cis-l2"
+      fi
+    fi
+  fi
+
+  # sv_qvfyobjrst_l2 — IBM i QVFYOBJRST, CIS IBM i 5.1.2.25 L2 (exact 5).
+  # Parses the shared cap-system-values dump. Integer 5 PASSes. Integers
+  # 1..4 FAIL (3 is the L1 value). *NOTAVL, a missing or non-unique row,
+  # an unreadable token, or a failed/empty capture is not assessed.
+  # Sibling ck-sv-qvfyobjrst keeps the L1 boundary. This tool never
+  # changes values.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QVFYOBJRST cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "cis-l2"
+  else
+    QVFY_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QVFYOBJRST"{n++; line=$0} END{if(n==1) print line}')
+    if [ -z "$QVFY_LINE" ]; then
+      add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" NOT_ASSESSED low \
+          "not assessed — QVFYOBJRST row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QVFYOBJRST row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QVFYOBJRST." \
+          "cis-l2"
+    else
+      QVFY_NUM=$(printf '%s\n' "$QVFY_LINE" | awk -F'|' '{print $2}')
+      QVFY_CHR=$(printf '%s\n' "$QVFY_LINE" | awk -F'|' '{print $3}')
+      if [ -n "$QVFY_NUM" ]; then
+        QVFY_RAW=$QVFY_NUM
+      else
+        QVFY_RAW=$QVFY_CHR
+      fi
+      if [ "$QVFY_RAW" = "*NOTAVL" ]; then
+        add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" NOT_ASSESSED low \
+            "not assessed — QVFYOBJRST=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QVFYOBJRST — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QVFYOBJRST and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "cis-l2"
+      else
+        QVFN=$(printf '%s\n' "$QVFY_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
+        if [ -z "$QVFN" ] || [ "$QVFN" -lt 1 ] || [ "$QVFN" -gt 5 ]; then
+          add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" NOT_ASSESSED low \
+              "not assessed — QVFYOBJRST value unreadable" \
+              "The QVFYOBJRST row was present, but the catalog value was not an integer 1-5 or *NOTAVL, so it is not graded." \
+              "inspect the QVFYOBJRST row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QVFYOBJRST)." \
+              "cis-l2"
+        elif [ "$QVFN" -eq 5 ]; then
+          add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" PASS low \
+              "QVFYOBJRST=$QVFN" \
+              "QVFYOBJRST is 5, so restore verifies signatures and unsigned user-state objects are blocked." \
+              "n/a" \
+              "cis-l2"
+        else
+          add security sv_qvfyobjrst_l2 "Verify object on restore (L2)" FAIL high \
+              "QVFYOBJRST=$QVFN" \
+              "QVFYOBJRST is not 5, so restore may skip signature verification or restore unsigned user-state objects." \
+              "CHGSYSVAL SYSVAL(QVFYOBJRST) VALUE('5'). This scanner never changes system values." \
+              "cis-l2"
+        fi
+      fi
+    fi
+  fi
+
+  # svc_malware_defenses — CIS IBM i 5.3.7 Malware Defenses.
+  # Grades QSYS2.EXIT_POINT_INFO QIBM_QP0L_SCAN_OPEN / SCAN_CLOSE.
+  # 0+0 exit programs and no non-IBM product is FAIL.
+  # >=1 program: report counts; typed NOT_ASSESSED only for
+  # currency/coverage. QSCANFS / QSCANFSCTL are observed detail
+  # from cap-system-values (ck-sv-qscanfs grades them).
+  # Live SELECT concatenates pipes so ibmi_sql can drop db2
+  # headers; fixture keys match the 2026-08-26 capture.
+  MAL_QUESTION="Which anti-virus / IFS scanning product is installed, is it current, and does it cover NetServer-shared paths?"
+  MAL_MEANING="Evaluate your system requirements and ensure that any installed anti-virus product is updated and meets your organization's requirements."
+  MAL_FIX="Evaluate scanning options and 3rd party anti-virus products; review QSCANFS and QSCANFSCTL. This scanner never changes system values."
+  MAL_FIX_FAIL="Register an IFS scan exit program on QIBM_QP0L_SCAN_OPEN and QIBM_QP0L_SCAN_CLOSE, or install a product that does. This scanner never changes exit-point registration."
+  MAL_FIX_PROD="Grant the scan profile authority to SELECT QSYS2.SOFTWARE_PRODUCT_INFO, then re-run. This scanner never changes exit-point registration."
+  MAL_QSCAN_DETAIL=""
+  if [ "${SYSVAL_OK:-0}" -eq 1 ]; then
+    MAL_QSCANFS=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSCANFS"{n++; v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); if (n==1) print v}')
+    MAL_QSCANFSCTL=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSCANFSCTL"{n++; v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); if (n==1) print v}')
+    MAL_QSCAN_DETAIL=" QSCANFS=$MAL_QSCANFS QSCANFSCTL=$MAL_QSCANFSCTL"
+  fi
+  MAL_SCAN_RAW=$(ibmi_sql exit_points_scan "SELECT VARCHAR(TRIM(EXIT_POINT_NAME),20) CONCAT '|' CONCAT VARCHAR(TRIM(EXIT_POINT_FORMAT),8) CONCAT '|' CONCAT TRIM(CHAR(EXIT_PROGRAMS)) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(TEXT_DESCRIPTION,'')),80) FROM QSYS2.EXIT_POINT_INFO WHERE EXIT_POINT_NAME LIKE 'QIBM_QP0L_SCAN%'")
+  MAL_SCAN_RC=$?
+  MAL_PROD_RAW=$(ibmi_sql nonibm_products "SELECT DISTINCT VARCHAR(TRIM(PRODUCT_ID),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(RELEASE_LEVEL,'')),12) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(TEXT_DESCRIPTION,'')),80) FROM QSYS2.SOFTWARE_PRODUCT_INFO WHERE PRODUCT_ID NOT LIKE '57%' AND PRODUCT_ID NOT LIKE 'AJ%'")
+  MAL_PROD_RC=$?
+  MAL_PROD_N=$(printf '%s\n' "$MAL_PROD_RAW" | awk '
+    /RECORD\(S\)/ { next }
+    /^DB2>/ { next }
+    /^PRODUCT_ID/ { next }
+    /^[ \t]*[-][-]/ { next }
+    /^[ \t]*$/ { next }
+    /\|/ {
+      n = split($0, a, "|")
+      id = a[1]; gsub(/^[ \t]+|[ \t]+$/, "", id)
+      if (id == "PROD") { id = a[2]; gsub(/^[ \t]+|[ \t]+$/, "", id) }
+      if (id ~ /^[A-Z0-9][A-Z0-9._-]*$/) nprod++
+      next
+    }
+    NF >= 1 && $1 ~ /^[A-Z0-9][A-Z0-9._-]*$/ { nprod++ }
+    END { print nprod + 0 }')
+  MAL_SCAN_PARSE=$(printf '%s\n' "$MAL_SCAN_RAW" | awk '
+    BEGIN { open_n = -1; close_n = -1 }
+    /RECORD\(S\)/ { next }
+    /^DB2>/ { next }
+    /^EXIT_POINT_NAME/ { next }
+    /^[ \t]*[-][-]/ { next }
+    /\|/ {
+      n = split($0, a, "|")
+      name = a[1]; gsub(/^[ \t]+|[ \t]+$/, "", name)
+      cnt = a[3]; gsub(/^[ \t]+|[ \t]+$/, "", cnt)
+      if (name == "SCAN") {
+        name = a[2]; gsub(/^[ \t]+|[ \t]+$/, "", name)
+        cnt = a[4]; gsub(/^[ \t]+|[ \t]+$/, "", cnt)
+      }
+      if (cnt !~ /^[0-9]+$/) next
+      if (name == "QIBM_QP0L_SCAN_OPEN") open_n = cnt + 0
+      if (name == "QIBM_QP0L_SCAN_CLOSE") close_n = cnt + 0
+      next
+    }
+    $1 == "QIBM_QP0L_SCAN_OPEN" && $3 ~ /^[0-9]+$/ { open_n = $3 + 0; next }
+    $1 == "QIBM_QP0L_SCAN_CLOSE" && $3 ~ /^[0-9]+$/ { close_n = $3 + 0; next }
+    END {
+      if (open_n < 0 || close_n < 0) print "MISS"
+      else printf "OK %d %d\n", open_n, close_n
+    }')
+  # rc=1 with no SQL error is IBM i db2 zero-row SELECT (SQLSTATE 02000).
+  # Any other nonzero rc, or an authority/SQL token, is untrusted: MAL_PROD_N=0
+  # must not be read as "no non-IBM product is installed".
+  MAL_PROD_ERR=$(printf '%s\n' "$MAL_PROD_RAW" | awk '
+    tolower($0) ~ /sqlstate:[ \t]*42501/ { n=1 }
+    tolower($0) ~ /not authorized/ { n=1 }
+    $0 ~ /SQL[0-9][0-9][0-9][0-9]/ { n=1 }
+    END { if (n) print 1 }')
+  MAL_PROD_TRUST=0
+  if [ -z "$MAL_PROD_ERR" ]; then
+    if [ "$MAL_PROD_RC" -eq 0 ] || [ "$MAL_PROD_RC" -eq 1 ]; then
+      MAL_PROD_TRUST=1
+    fi
+  fi
+  if [ "$MAL_SCAN_RC" -eq 127 ]; then
+    MAL_OBS="not assessed — manual: $MAL_QUESTION$MAL_QSCAN_DETAIL"
+    add security svc_malware_defenses "Malware defenses" NOT_ASSESSED low \
+        "$MAL_OBS" \
+        "$MAL_MEANING" \
+        "$MAL_FIX" \
+        "cis-l1"
+  elif [ "$MAL_SCAN_PARSE" = "MISS" ]; then
+    if [ "$MAL_SCAN_RC" -ne 0 ]; then
+      MAL_OBS="not assessed — EXIT_POINT_INFO QIBM_QP0L_SCAN_* unreadable (rc=$MAL_SCAN_RC); scan profile PTSCAN is *USER with no special authorities$MAL_QSCAN_DETAIL"
+    else
+      MAL_OBS="not assessed — EXIT_POINT_INFO QIBM_QP0L_SCAN_* unreadable$MAL_QSCAN_DETAIL"
+    fi
+    add security svc_malware_defenses "Malware defenses" NOT_ASSESSED low \
+        "$MAL_OBS" \
+        "The SCAN_OPEN/SCAN_CLOSE exit-point dump was not readable, so IFS scanner registration cannot be graded. PTSCAN is *USER with no special authorities; a *PUBLIC *EXCLUDE object needs a higher-authority scan." \
+        "$MAL_FIX" \
+        "cis-l1"
+  else
+    MAL_OPEN=$(printf '%s\n' "$MAL_SCAN_PARSE" | awk '{ print $2 }')
+    MAL_CLOSE=$(printf '%s\n' "$MAL_SCAN_PARSE" | awk '{ print $3 }')
+    if [ "$MAL_OPEN" -eq 0 ] && [ "$MAL_CLOSE" -eq 0 ]; then
+      if [ "$MAL_PROD_TRUST" -eq 0 ]; then
+        MAL_OBS="not assessed — QIBM_QP0L_SCAN_OPEN=0 QIBM_QP0L_SCAN_CLOSE=0; SOFTWARE_PRODUCT_INFO unreadable (rc=$MAL_PROD_RC); scan profile PTSCAN is *USER with no special authorities$MAL_QSCAN_DETAIL"
+        add security svc_malware_defenses "Malware defenses" NOT_ASSESSED low \
+            "$MAL_OBS" \
+            "QIBM_QP0L_SCAN_OPEN and QIBM_QP0L_SCAN_CLOSE have zero exit programs, but SOFTWARE_PRODUCT_INFO was unreadable (authority or missing view), so the absence of a non-IBM product cannot be confirmed. PTSCAN is *USER with no special authorities." \
+            "$MAL_FIX_PROD" \
+            "cis-l1"
+      else
+        MAL_OBS="no IFS scanner registered QIBM_QP0L_SCAN_OPEN=0 QIBM_QP0L_SCAN_CLOSE=0$MAL_QSCAN_DETAIL"
+        if [ "$MAL_PROD_N" -eq 0 ]; then
+          MAL_FAIL_MEAN="QIBM_QP0L_SCAN_OPEN and QIBM_QP0L_SCAN_CLOSE have zero exit programs and no non-IBM product is installed, so no IFS scanner is registered."
+        else
+          MAL_FAIL_MEAN="QIBM_QP0L_SCAN_OPEN and QIBM_QP0L_SCAN_CLOSE have zero exit programs, so no IFS scanner is registered."
+        fi
+        add security svc_malware_defenses "Malware defenses" FAIL high \
+            "$MAL_OBS" \
+            "$MAL_FAIL_MEAN" \
+            "$MAL_FIX_FAIL" \
+            "cis-l1"
+      fi
+    else
+      MAL_OBS="not assessed — scanner registered QIBM_QP0L_SCAN_OPEN=$MAL_OPEN QIBM_QP0L_SCAN_CLOSE=$MAL_CLOSE; currency and coverage of NetServer-shared paths remain a manual question$MAL_QSCAN_DETAIL"
+      add security svc_malware_defenses "Malware defenses" NOT_ASSESSED low \
+          "$MAL_OBS" \
+          "$MAL_MEANING" \
+          "$MAL_FIX" \
+          "cis-l1"
+    fi
+  fi
+
+  # usr_mfa — CIS IBM i 4.12 Implement Multi-factor authentication (L1).
+  # Grades from QSYS2.SOFTWARE_PRODUCT_INFO and QSYS2.EXIT_POINT_INFO
+  # (column EXIT_PROGRAMS, not NUMBER_OF_EXIT_PROGRAMS). IBM-only 57xx/AJ*
+  # products and 0 programs on QIBM_QSY_CHK_PASSWRD, QIBM_QSY_VLD_PASSWRD,
+  # QIBM_QTG_DEVINIT, QIBM_QZSO_SIGNONSRV is FAIL. A non-IBM product or a
+  # registered program on those points is NOT_ASSESSED naming it. Never PASS.
+  # Residual (authority or missing view) is the only other refusal.
+  MFA_FIX="Evaluate 3rd party MFA solutions available from various vendors or develop an in-house MFA solution. This scanner never changes the MFA configuration."
+  MFA_AUTH_FIX="Re-run as a profile that can SELECT QSYS2.SOFTWARE_PRODUCT_INFO and QSYS2.EXIT_POINT_INFO. This scanner never changes the MFA configuration."
+  MFA_PROD_RAW=$(ibmi_sql software_products "SELECT VARCHAR(TRIM(PRODUCT_ID),15) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(RELEASE_LEVEL,'')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(TEXT_DESCRIPTION,'')),80) FROM QSYS2.SOFTWARE_PRODUCT_INFO")
+  MFA_PROD_RC=$?
+  MFA_EXIT_RAW=$(ibmi_sql exit_points_signon "SELECT VARCHAR(TRIM(EXIT_POINT_NAME),20) CONCAT '|' CONCAT VARCHAR(TRIM(EXIT_POINT_FORMAT),10) CONCAT '|' CONCAT VARCHAR(CHAR(EXIT_PROGRAMS),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(TEXT_DESCRIPTION,'')),80) FROM QSYS2.EXIT_POINT_INFO WHERE EXIT_POINT_NAME LIKE 'QIBM_QSY_%' OR EXIT_POINT_NAME LIKE 'QIBM_QTG_%' OR EXIT_POINT_NAME LIKE 'QIBM_QZSO_%' OR EXIT_POINT_NAME LIKE 'QIBM_QWT_%'")
+  MFA_EXIT_RC=$?
+  MFA_KIND=residual
+  MFA_OBS=""
+  MFA_MEANING=""
+  MFA_ADD_FIX="$MFA_AUTH_FIX"
+  if [ "$MFA_PROD_RC" -ne 0 ]; then
+    MFA_OBS="not assessed — SOFTWARE_PRODUCT_INFO not readable (authority or missing view, rc=$MFA_PROD_RC)"
+    MFA_MEANING="The scan profile could not read QSYS2.SOFTWARE_PRODUCT_INFO, so MFA product presence is not graded."
+  elif [ "$MFA_EXIT_RC" -ne 0 ]; then
+    MFA_OBS="not assessed — EXIT_POINT_INFO not readable (authority or missing view, rc=$MFA_EXIT_RC)"
+    MFA_MEANING="The scan profile could not read QSYS2.EXIT_POINT_INFO, so sign-on exit programs are not graded."
+  else
+    MFA_PROD_CLASS=$(printf '%s\n' "$MFA_PROD_RAW" | awk '
+      /^[ \t]*$/ { next }
+      /^DB2>/ { next }
+      /RECORD\(S\) SELECTED/ { next }
+      /^PRODUCT_ID/ { next }
+      /^-/ { next }
+      {
+        if (index($0, "|") > 0) {
+          split($0, a, "|")
+          pid = a[1]
+        } else {
+          pid = $1
+        }
+        gsub(/^[ \t]+/, "", pid)
+        gsub(/[ \t]+$/, "", pid)
+        if (pid == "" || pid == "PRODUCT_ID") next
+        n++
+        if (pid ~ /^AJ/ || pid ~ /^57/) next
+        if (nonibm == "") nonibm = pid
+      }
+      END {
+        if (n + 0 == 0) print "empty"
+        else if (nonibm != "") print "nonibm:" nonibm
+        else print "ibm"
+      }
+    ')
+    MFA_EXIT_CLASS=$(printf '%s\n' "$MFA_EXIT_RAW" | awk '
+      /^[ \t]*$/ { next }
+      /^DB2>/ { next }
+      /RECORD\(S\) SELECTED/ { next }
+      /^EXIT_POINT_NAME/ { next }
+      /^-/ { next }
+      {
+        if (index($0, "|") > 0) {
+          split($0, a, "|")
+          name = a[1]
+          nprog = a[3]
+        } else {
+          name = $1
+          nprog = $3
+        }
+        gsub(/^[ \t]+/, "", name)
+        gsub(/[ \t]+$/, "", name)
+        gsub(/^[ \t]+/, "", nprog)
+        gsub(/[ \t]+$/, "", nprog)
+        if (name == "QIBM_QSY_CHK_PASSWRD" || name == "QIBM_QSY_VLD_PASSWRD" || name == "QIBM_QTG_DEVINIT" || name == "QIBM_QZSO_SIGNONSRV") {
+          if (name == "QIBM_QSY_CHK_PASSWRD") s_chk = 1
+          if (name == "QIBM_QSY_VLD_PASSWRD") s_vld = 1
+          if (name == "QIBM_QTG_DEVINIT") s_dev = 1
+          if (name == "QIBM_QZSO_SIGNONSRV") s_sgn = 1
+          if (nprog ~ /^[0-9]+$/) {
+            if (name == "QIBM_QSY_CHK_PASSWRD") n_chk = 1
+            if (name == "QIBM_QSY_VLD_PASSWRD") n_vld = 1
+            if (name == "QIBM_QTG_DEVINIT") n_dev = 1
+            if (name == "QIBM_QZSO_SIGNONSRV") n_sgn = 1
+            if (nprog + 0 > 0) {
+              if (hit == "") hit = name
+              else if (index(hit, name) == 0) hit = hit " " name
+            }
+          } else {
+            bad = 1
+          }
+        }
+      }
+      END {
+        nseen = 0
+        if (s_chk) nseen++
+        if (s_vld) nseen++
+        if (s_dev) nseen++
+        if (s_sgn) nseen++
+        nnum = 0
+        if (n_chk) nnum++
+        if (n_vld) nnum++
+        if (n_dev) nnum++
+        if (n_sgn) nnum++
+        if (nseen < 4) print "incomplete"
+        else if (bad || nnum < 4) print "unparseable"
+        else if (hit != "") print "prog:" hit
+        else print "zero"
+      }
+    ')
+    MFA_NONIBM=""
+    MFA_PROG=""
+    case "$MFA_PROD_CLASS" in
+      nonibm:*) MFA_NONIBM=${MFA_PROD_CLASS#nonibm:} ;;
+    esac
+    case "$MFA_EXIT_CLASS" in
+      prog:*) MFA_PROG=${MFA_EXIT_CLASS#prog:} ;;
+    esac
+    if [ "$MFA_PROD_CLASS" = "empty" ]; then
+      MFA_OBS="not assessed — SOFTWARE_PRODUCT_INFO empty or unparseable (missing view)"
+      MFA_MEANING="QSYS2.SOFTWARE_PRODUCT_INFO returned no product rows, so MFA product presence is not graded."
+    elif [ "$MFA_EXIT_CLASS" = "incomplete" ] || [ -z "$MFA_EXIT_CLASS" ]; then
+      MFA_OBS="not assessed — EXIT_POINT_INFO missing required sign-on point (missing view)"
+      MFA_MEANING="QSYS2.EXIT_POINT_INFO did not report all four sign-on/password exit points, so MFA presence is not graded."
+    elif [ "$MFA_EXIT_CLASS" = "unparseable" ]; then
+      MFA_OBS="not assessed — EXIT_POINT_INFO EXIT_PROGRAMS unparseable (missing view)"
+      MFA_MEANING="QSYS2.EXIT_POINT_INFO did not report a numeric program count on every required sign-on/password exit point, so MFA presence is not graded."
+    elif [ -n "$MFA_NONIBM" ] || [ -n "$MFA_PROG" ]; then
+      MFA_KIND=named
+      MFA_ADD_FIX="$MFA_FIX"
+      if [ -n "$MFA_NONIBM" ] && [ -n "$MFA_PROG" ]; then
+        MFA_OBS="not assessed — non-IBM product $MFA_NONIBM present; exit program registered on $MFA_PROG; a human confirms it is MFA"
+      elif [ -n "$MFA_NONIBM" ]; then
+        MFA_OBS="not assessed — non-IBM product $MFA_NONIBM present; a human confirms it is MFA"
+      else
+        MFA_OBS="not assessed — exit program registered on $MFA_PROG; a human confirms it is MFA"
+      fi
+      MFA_MEANING="A non-IBM product or a sign-on/password exit program is present; a human must confirm it is MFA and which interfaces and user classes it covers."
+    elif [ "$MFA_PROD_CLASS" = "ibm" ] && [ "$MFA_EXIT_CLASS" = "zero" ]; then
+      MFA_KIND=none
+      MFA_OBS="no MFA product or sign-on exit program present"
+      MFA_MEANING="SOFTWARE_PRODUCT_INFO lists only IBM 57xx/AJ* products and EXIT_POINT_INFO reports 0 programs on the sign-on/password exit points, so no MFA mechanism is present."
+      MFA_ADD_FIX="$MFA_FIX"
+    else
+      MFA_OBS="not assessed — SOFTWARE_PRODUCT_INFO or EXIT_POINT_INFO unparseable (missing view)"
+      MFA_MEANING="The product or exit-point catalog was not a readable IBM-only / zero-program shape, so MFA presence is not graded."
+    fi
+  fi
+  if [ "$MFA_KIND" = none ]; then
+    add security usr_mfa "Multi-factor authentication" FAIL low \
+        "$MFA_OBS" \
+        "$MFA_MEANING" \
+        "$MFA_ADD_FIX" \
+        "cis-l1"
+  else
+    add security usr_mfa "Multi-factor authentication" NOT_ASSESSED low \
+        "$MFA_OBS" \
+        "$MFA_MEANING" \
+        "$MFA_ADD_FIX" \
+        "cis-l1"
   fi
 
 # net_ddm_sna — IBM i QAPPNRMT SECURELOC (DDM SNA).
@@ -1955,56 +7138,103 @@ fi
     fi
   fi
 
-  # sec_bulletin_vintage — vintage of the embedded
-  # IBM i security-data table. WARN when as_of is
-  # older than 30 days (AIX registry as_of STALE
-  # rule). v1 does not ship a per-CVE bulletin
-  # table (no verified feed). Not a CIS rec.
-  # One finding. Does not call ibmi_sql / ibmi_cl.
-  # Does not query GROUP_PTF_CURRENCY
-  # (ck-sec-group-currency) or FIRMWARE_CURRENCY
-  # or ENV_SYS_INFO. Does not emit one row per CVE.
-  # Stamp variable is SEC_BULLETIN_VINTAGE, not
-  # DATA_VINTAGE (that name is ck-cur-os-lifecycle).
-  SEC_BULLETIN_VINTAGE="2026-08-20"
-  SEC_BULLETIN_THRESHOLD=30
-  BV_TODAY_OK=1
-  case "$TODAY_J" in
-    ''|*[!0-9]*) BV_TODAY_OK=0 ;;
-  esac
-  if [ "$BV_TODAY_OK" -eq 0 ]; then
-    add patch sec_bulletin_vintage "IBM i security-data vintage" NOT_ASSESSED low \
-        "not assessed — scan date unreadable" \
-        "The scan date was not a Julian day, so the scanner build/release date cannot be graded." \
-        "re-run the scan so the prelude can set a calendar date. This scanner never applies PTFs."
+# sec_bulletin_vintage — vintage of the embedded IBM i
+# security-bulletin registry row. Grades the bulletin
+# source's as_of against the scan date, never a build
+# date. loaded=false or a missing as_of refuses
+# NOT_ASSESSED; a current as_of passes, a stale as_of
+# fails, a future as_of refuses. One finding. Read-only:
+# no ibmi_sql, no ibmi_cl, no clock-derived vintage.
+if ! typeset -f ibmi_srcreg_field >/dev/null 2>&1; then
+  add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+      "not assessed - embedded registry helper absent" \
+      "The embedded IBM i source registry helper is not present in this scanner assembly, so the security-bulletin vintage cannot be graded." \
+      "refresh the scanner from an assembly that embeds the IBM i source registry. This scanner never applies PTFs."
+else
+  BV_LOADED=$(ibmi_srcreg_field ibmi-security-bulletins loaded)
+  BV_AS_OF=$(ibmi_srcreg_field ibmi-security-bulletins as_of)
+  BV_THRESHOLD=$(ibmi_srcreg_field ibmi-security-bulletins threshold)
+  if [ "$BV_LOADED" != "true" ]; then
+    add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+        "not assessed - no IBM i security bulletin source is loaded" \
+        "The embedded IBM i source registry reports that no IBM i security bulletin source is loaded, so the bulletin vintage cannot be graded." \
+        "supply an IBM i security bulletin index to the registry and re-run. This scanner never applies PTFs."
+  elif [ -z "$BV_AS_OF" ] || [ "$BV_AS_OF" = "unknown" ]; then
+    add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+        "not assessed - no IBM i security bulletin as_of is available" \
+        "The embedded IBM i security bulletin source has no usable as_of, so the bulletin vintage cannot be graded." \
+        "supply a YYYY-MM-DD as_of for the IBM i security bulletin source and re-run. This scanner never applies PTFs."
   else
-    BV_J=$(d2j "$SEC_BULLETIN_VINTAGE")
-    BV_RC=$?
-    if [ "$BV_RC" -ne 0 ] || [ -z "$BV_J" ]; then
-      add patch sec_bulletin_vintage "IBM i security-data vintage" NOT_ASSESSED low \
-          "not assessed — security-data as_of unreadable" \
-          "The scanner build/release date was not a calendar date, so it cannot be graded." \
-          "refresh the scanner from a current release so the security-data stamp is a YYYY-MM-DD date. This scanner never applies PTFs."
-    elif [ "$TODAY_J" -lt "$BV_J" ]; then
-      add patch sec_bulletin_vintage "IBM i security-data vintage" NOT_ASSESSED low \
-          "not assessed — security-data as_of $SEC_BULLETIN_VINTAGE is after today $TODAY" \
-          "The scanner build/release date is later than the scan date, so age cannot be graded." \
-          "re-run with a real calendar date, or refresh the scanner if the stamp is wrong. This scanner never applies PTFs."
+    BV_DATE_OK=0
+    case "$BV_AS_OF" in
+      [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
+        BV_M=${BV_AS_OF#*-}
+        BV_M=${BV_M%%-*}
+        BV_D=${BV_AS_OF##*-}
+        BV_M=${BV_M#0}
+        BV_D=${BV_D#0}
+        [ "$BV_M" -ge 1 ] && [ "$BV_M" -le 12 ] && [ "$BV_D" -ge 1 ] && [ "$BV_D" -le 31 ] && BV_DATE_OK=1
+        ;;
+    esac
+    if [ "$BV_DATE_OK" -ne 1 ]; then
+      add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+          "not assessed - security-bulletin as_of $BV_AS_OF unreadable" \
+          "The IBM i security-bulletin as_of is not a calendar date, so the bulletin vintage cannot be graded." \
+          "supply a YYYY-MM-DD as_of for the IBM i security bulletin source and re-run. This scanner never applies PTFs."
     else
-      BV_AGE=$(( TODAY_J - BV_J ))
-      if [ "$BV_AGE" -gt "$SEC_BULLETIN_THRESHOLD" ]; then
-        add patch sec_bulletin_vintage "IBM i security-data vintage" WARN high \
-            "as_of=$SEC_BULLETIN_VINTAGE today=$TODAY age=$BV_AGE threshold=$SEC_BULLETIN_THRESHOLD" \
-            "The scanner build/release date is older than 30 days, so security findings from this scanner may not reflect current IBM bulletins." \
-            "refresh the scanner from a current release so the security-data stamp is current. This scanner never applies PTFs."
+      BV_J=$(d2j "$BV_AS_OF" 2>/dev/null)
+      BV_D2J_RC=$?
+      case "$BV_J" in
+        ''|*[!0-9]*) BV_D2J_RC=1 ;;
+      esac
+      if [ "$BV_D2J_RC" -ne 0 ]; then
+        add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+            "not assessed - security-bulletin as_of $BV_AS_OF unreadable" \
+            "The IBM i security-bulletin as_of is not a calendar date, so the bulletin vintage cannot be graded." \
+            "supply a YYYY-MM-DD as_of for the IBM i security bulletin source and re-run. This scanner never applies PTFs."
       else
-        add patch sec_bulletin_vintage "IBM i security-data vintage" PASS low \
-            "as_of=$SEC_BULLETIN_VINTAGE today=$TODAY age=$BV_AGE threshold=$SEC_BULLETIN_THRESHOLD" \
-            "The scanner build/release date is within the 30-day freshness window. This scanner does not enumerate IBM i CVEs from a bulletin feed." \
-            "n/a"
+        BV_TODAY_OK=1
+        case "$TODAY_J" in
+          ''|*[!0-9]*) BV_TODAY_OK=0 ;;
+        esac
+        if [ "$BV_TODAY_OK" -ne 1 ]; then
+          add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+              "not assessed - scan date unreadable" \
+              "The scan date was not a Julian day, so the security-bulletin vintage cannot be graded against it." \
+              "re-run the scan so the prelude can set a calendar date. This scanner never applies PTFs."
+        elif [ "$TODAY_J" -lt "$BV_J" ]; then
+          add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+              "not assessed - security-bulletin as_of $BV_AS_OF is after today $TODAY" \
+              "The IBM i security-bulletin as_of is later than the scan date, so the bulletin vintage cannot be graded." \
+              "re-run with a real calendar date, or correct the registry as_of. This scanner never applies PTFs."
+        else
+          BV_AGE=$(( TODAY_J - BV_J ))
+          BV_TH_OK=0
+          case "$BV_THRESHOLD" in
+            ''|*[!0-9]*) ;;
+            *) BV_TH_OK=1 ;;
+          esac
+          if [ "$BV_TH_OK" -ne 1 ]; then
+            add patch sec_bulletin_vintage "IBM i security-bulletin vintage" NOT_ASSESSED low \
+                "not assessed - security-bulletin freshness threshold unreadable" \
+                "The embedded IBM i security-bulletin registry row has no usable freshness threshold, so the bulletin vintage cannot be graded." \
+                "supply a positive consumer_max_age_days for the IBM i security bulletin source and re-run. This scanner never applies PTFs."
+          elif [ "$BV_AGE" -gt "$BV_THRESHOLD" ]; then
+            add patch sec_bulletin_vintage "IBM i security-bulletin vintage" FAIL high \
+                "as_of=$BV_AS_OF age=$BV_AGE threshold=$BV_THRESHOLD" \
+                "The embedded IBM i security-bulletin reference data is older than the freshness window, so it may not reflect current IBM bulletins." \
+                "refresh the IBM i security bulletin source so its as_of is within the freshness window. This scanner never applies PTFs."
+          else
+            add patch sec_bulletin_vintage "IBM i security-bulletin vintage" PASS low \
+                "as_of=$BV_AS_OF age=$BV_AGE threshold=$BV_THRESHOLD" \
+                "The embedded IBM i security-bulletin reference data is within the freshness window. This check does not enumerate IBM i CVEs from a bulletin feed." \
+                "n/a"
+          fi
+        fi
       fi
     fi
   fi
+fi
 
   # ssh_hostbased_auth — IBM i OpenSSH host-based authentication
   # (sshd_config HostbasedAuthentication).
@@ -3286,7 +8516,7 @@ fi
     fi
   fi
 
-  # sv_qaudctl — IBM i QAUDCTL auditing control (5.1.2.3 L2).
+  # sv_qaudctl — IBM i QAUDCTL auditing control; 5.1.1.3 (L1 = *NOQTEMP *OBJAUD *AUDLVL); 5.1.2.3 is ck-ibmi-sv-qaudctl-l2.
   # Parses cap-system-values SYSVAL_RAW. Never calls qsh/db2/system/ibmi_sql.
   # *NOTAVL is a missing-*AUDIT refusal, never PASS. Read-only.
   OK=${SYSVAL_OK:-0}
@@ -3296,7 +8526,7 @@ fi
         "not assessed — system-value capture $WHY" \
         "The shared system-value capture did not yield a usable QSYS2.SYSTEM_VALUE_INFO dump, so QAUDCTL cannot be scored." \
         "re-run as the scan profile after confirming Qshell db2 can select QSYS2.SYSTEM_VALUE_INFO; then re-take cap-system-values." \
-        "cis-l2"
+        "cis-l1"
   else
     RAW=${SYSVAL_RAW:-}
     QAUDVAL=$(printf '%s\n' "$RAW" | awk -F'|' '
@@ -3313,13 +8543,13 @@ fi
           "not assessed — QAUDCTL row absent from system-value capture" \
           "The system-value capture ran, but it did not contain a QAUDCTL row, so auditing control cannot be scored." \
           "confirm QSYS2.SYSTEM_VALUE_INFO returns a QAUDCTL row under the scan profile, then re-take cap-system-values." \
-          "cis-l2"
+          "cis-l1"
     elif [ -z "$QAUDVAL" ]; then
       add security sv_qaudctl "IBM i auditing control (QAUDCTL)" NOT_ASSESSED low \
           "not assessed — QAUDCTL character value empty" \
           "The QAUDCTL row was present but its character value was empty, so the setting cannot be scored." \
           "confirm the QAUDCTL character column is populated in QSYS2.SYSTEM_VALUE_INFO, then re-take cap-system-values." \
-          "cis-l2"
+          "cis-l1"
     else
       TOK=$(printf '%s\n' "$QAUDVAL" | awk '
         {
@@ -3349,26 +8579,34 @@ fi
             "not assessed — QAUDCTL=*NOTAVL (scan profile lacks *AUDIT)" \
             "The scan profile cannot read QAUDCTL. IBM returns *NOTAVL when the job lacks *AUDIT (or equivalent catalog authority). That is not a configured value and is not a clean result." \
             "grant the scan profile *AUDIT (or the catalog authority to read QAUDCTL), re-take cap-system-values, and re-run. This scanner never grants authority and never changes QAUDCTL." \
-            "cis-l2"
+            "cis-l1"
       elif [ "$TOK" = NONE ]; then
         add security sv_qaudctl "IBM i auditing control (QAUDCTL)" FAIL high \
             "QAUDCTL=$QAUDVAL" \
             "IBM i security auditing is not fully on. QAUDCTL is the on/off switch for action and object auditing; IBM ships it off, and an incident then leaves no security-audit-journal trail." \
             "from a profile that may change system values, set QAUDCTL so it includes *AUDLVL *OBJAUD *NOQTEMP (CHGSYSVAL SYSVAL(QAUDCTL) VALUE('*NOQTEMP *OBJAUD *AUDLVL')) and confirm with DSPSYSVAL SYSVAL(QAUDCTL). This scanner never changes QAUDCTL." \
-            "cis-l2"
+            "cis-l1"
       elif [ "$TOK" = PASS ]; then
         add security sv_qaudctl "IBM i auditing control (QAUDCTL)" PASS low \
             "QAUDCTL=$QAUDVAL" \
             "QAUDCTL includes action auditing, object auditing, and the no-QTEMP flag, so IBM i security auditing is on." \
             "n/a" \
-            "cis-l2"
+            "cis-l1"
       else
         MISSING=${TOK#PARTIAL}
-        add security sv_qaudctl "IBM i auditing control (QAUDCTL)" FAIL medium \
-            "QAUDCTL=$QAUDVAL" \
-            "IBM i security auditing is only partially configured: QAUDCTL is missing:$MISSING. The required CIS token set is *AUDLVL *OBJAUD *NOQTEMP; *NOQTEMP suppresses audit-journal noise from QTEMP." \
-            "from a profile that may change system values, set QAUDCTL so it includes *AUDLVL *OBJAUD *NOQTEMP (CHGSYSVAL SYSVAL(QAUDCTL) VALUE('*NOQTEMP *OBJAUD *AUDLVL')) and confirm with DSPSYSVAL SYSVAL(QAUDCTL). This scanner never changes QAUDCTL." \
-            "cis-l2"
+        if [ "$MISSING" = " *NOQTEMP" ]; then
+          add security sv_qaudctl "IBM i auditing control (QAUDCTL)" FAIL medium \
+              "QAUDCTL=$QAUDVAL" \
+              "IBM i security auditing is only partially configured: QAUDCTL=$QAUDVAL is the CIS L2 value (5.1.2.3); the L1 posture (5.1.1.3) also requires *NOQTEMP, which suppresses audit-journal noise from QTEMP." \
+              "from a profile that may change system values, set QAUDCTL so it includes *AUDLVL *OBJAUD *NOQTEMP (CHGSYSVAL SYSVAL(QAUDCTL) VALUE('*NOQTEMP *OBJAUD *AUDLVL')) and confirm with DSPSYSVAL SYSVAL(QAUDCTL). This scanner never changes QAUDCTL." \
+              "cis-l1"
+        else
+          add security sv_qaudctl "IBM i auditing control (QAUDCTL)" FAIL medium \
+              "QAUDCTL=$QAUDVAL" \
+              "IBM i security auditing is only partially configured: QAUDCTL is missing:$MISSING. The required CIS token set is *AUDLVL *OBJAUD *NOQTEMP; *NOQTEMP suppresses audit-journal noise from QTEMP." \
+              "from a profile that may change system values, set QAUDCTL so it includes *AUDLVL *OBJAUD *NOQTEMP (CHGSYSVAL SYSVAL(QAUDCTL) VALUE('*NOQTEMP *OBJAUD *AUDLVL')) and confirm with DSPSYSVAL SYSVAL(QAUDCTL). This scanner never changes QAUDCTL." \
+              "cis-l1"
+        fi
       fi
     fi
   fi
@@ -3424,8 +8662,8 @@ fi
   fi
 
   # sv_qaudfrclvl — IBM i QAUDFRCLVL (auditing force level).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.5 (L1=*SYS) and 5.1.2.5
-  # (L2=*SYS, tag only). One finding. Parses the shared
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.5 (L1=*SYS); 5.1.2.5 (L2=1)
+  # is ck-ibmi-sv-qaudfrclvl-l2. One finding. Parses the shared
   # cap-system-values dump. Does not call ibmi_sql. Does not CHGSYSVAL.
   # *NOTAVL is a refusal, never PASS. Exact *SYS or catalog -1/0 is PASS.
   # Integer 1-100 is FAIL. live Phase 0 dump is QAUDFRCLVL|-1|; live QSECOFR
@@ -3435,7 +8673,7 @@ fi
         "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
         "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QAUDFRCLVL cannot be graded." \
         "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
-        "cis-l1 cis-l2"
+        "cis-l1"
   else
     QFRC_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QAUDFRCLVL"{n++; line=$0} END{if(n==1) print line}')
     if [ -z "$QFRC_LINE" ]; then
@@ -3443,7 +8681,7 @@ fi
           "not assessed — QAUDFRCLVL row missing or not unique in SYSTEM_VALUE_INFO" \
           "The system-value dump was readable, but it did not contain exactly one QAUDFRCLVL row, so the value cannot be graded." \
           "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QAUDFRCLVL." \
-          "cis-l1 cis-l2"
+          "cis-l1"
     else
       QFRC_RAW=$(printf '%s\n' "$QFRC_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
       if [ "$QFRC_RAW" = "*NOTAVL" ]; then
@@ -3451,33 +8689,38 @@ fi
             "not assessed — QAUDFRCLVL=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QAUDFRCLVL — the scan profile lacks authority to read this system value, so the value is not graded." \
             "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       elif [ -z "$QFRC_RAW" ]; then
         add security sv_qaudfrclvl "Auditing force level" NOT_ASSESSED low \
             "not assessed — QAUDFRCLVL value unreadable" \
             "The QAUDFRCLVL row was present, but the catalog value was not *SYS, -1, an integer 1-100, or *NOTAVL, so it is not graded." \
             "inspect the QAUDFRCLVL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDFRCLVL)." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       elif [ "$QFRC_RAW" = "*SYS" ] || [ "$QFRC_RAW" = "-1" ] || [ "$QFRC_RAW" = "0" ]; then
         add security sv_qaudfrclvl "Auditing force level" PASS low \
             "QAUDFRCLVL=*SYS" \
             "QAUDFRCLVL is *SYS, so the system writes new audit journal entries to auxiliary storage as needed rather than waiting for a count." \
             "n/a" \
-            "cis-l1 cis-l2"
+            "cis-l1"
       else
         QFRC_N=$(printf '%s\n' "$QFRC_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
         if [ -n "$QFRC_N" ] && [ "$QFRC_N" -ge 1 ] && [ "$QFRC_N" -le 100 ]; then
+          if [ "$QFRC_N" -eq 1 ]; then
+            QFRC_MEANING="QAUDFRCLVL=1 is the CIS L2 value (5.1.2.5); under L1 the benchmark requires *SYS, so this fails the L1 check."
+          else
+            QFRC_MEANING="QAUDFRCLVL is a record count, so new audit journal entries can sit in memory until that many accumulate and can be lost on a crash."
+          fi
           add security sv_qaudfrclvl "Auditing force level" FAIL high \
               "QAUDFRCLVL=$QFRC_N" \
-              "QAUDFRCLVL is a record count, so new audit journal entries can sit in memory until that many accumulate and can be lost on a crash." \
+              "$QFRC_MEANING" \
               "set QAUDFRCLVL to *SYS using CHGSYSVAL SYSVAL(QAUDFRCLVL) VALUE('*SYS'). This scanner never changes system values." \
-              "cis-l1 cis-l2"
+              "cis-l1"
         else
           add security sv_qaudfrclvl "Auditing force level" NOT_ASSESSED low \
               "not assessed — QAUDFRCLVL value unreadable" \
               "The QAUDFRCLVL row was present, but the catalog value was not *SYS, -1, an integer 1-100, or *NOTAVL, so it is not graded." \
               "inspect the QAUDFRCLVL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QAUDFRCLVL)." \
-              "cis-l1 cis-l2"
+              "cis-l1"
         fi
       fi
     fi
@@ -4298,19 +9541,20 @@ fi
   fi
 
   # sv_qlmtsecofr — IBM i QLMTSECOFR (limit security officer workstations).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.18 (L1) and 5.1.2.14 (L2).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.18 (L1). 5.1.2.14 (L2) is owned
+  # by ck-ibmi-sv-qlmtsecofr-l2.
   # One finding. Parses the shared cap-system-values dump. Does not call
   # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
-  # Exact 1 is PASS (IBM recommended / L2 / live dump). Exact 0 (IBM
-  # ship default) is FAIL. CIS L1 and L2 both remediate to 1;
-  # grade the security-on value.
+  # The CIS L1 benchmark value is 0: exact 0 is PASS low (a profile with
+  # *ALLOBJ or *SERVICE may sign on at any workstation). Exact 1 is FAIL
+  # high — 1 is the L2-only posture, not the L1 value.
   # live Phase 0 dump is QLMTSECOFR||1.
   if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
     add security sv_qlmtsecofr "Limit security officer access to workstations" NOT_ASSESSED low \
         "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
         "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QLMTSECOFR cannot be graded." \
         "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
-        "cis-l1 cis-l2"
+        "cis-l1"
   else
     QLS_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QLMTSECOFR"{n++; line=$0} END{if(n==1) print line}')
     QLS_RC=$?
@@ -4319,7 +9563,7 @@ fi
           "not assessed — QLMTSECOFR row missing or not unique in SYSTEM_VALUE_INFO" \
           "The system-value dump was readable, but it did not contain exactly one QLMTSECOFR row, so the value cannot be graded." \
           "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QLMTSECOFR." \
-          "cis-l1 cis-l2"
+          "cis-l1"
     else
       QLS_VAL=$(printf '%s\n' "$QLS_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
       if [ "$QLS_VAL" = "*NOTAVL" ]; then
@@ -4327,31 +9571,31 @@ fi
             "not assessed — QLMTSECOFR=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QLMTSECOFR — the scan profile lacks authority to read this system value, so the value is not graded." \
             "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       elif [ -z "$QLS_VAL" ]; then
         add security sv_qlmtsecofr "Limit security officer access to workstations" NOT_ASSESSED low \
             "not assessed — QLMTSECOFR value unreadable" \
             "The QLMTSECOFR row was present, but the catalog value was empty, so it is not graded." \
             "inspect the QLMTSECOFR row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTSECOFR)." \
-            "cis-l1 cis-l2"
-      elif [ "$QLS_VAL" = "1" ]; then
-        add security sv_qlmtsecofr "Limit security officer access to workstations" PASS low \
-            "QLMTSECOFR=1" \
-            "QLMTSECOFR is 1, so a profile with *ALLOBJ or *SERVICE can sign on at a workstation only when that profile, or QSECOFR, has private *CHANGE authority to the device." \
-            "n/a" \
-            "cis-l1 cis-l2"
+            "cis-l1"
       elif [ "$QLS_VAL" = "0" ]; then
-        add security sv_qlmtsecofr "Limit security officer access to workstations" FAIL high \
+        add security sv_qlmtsecofr "Limit security officer access to workstations" PASS low \
             "QLMTSECOFR=0" \
-            "QLMTSECOFR is 0, so a profile with *ALLOBJ or *SERVICE can sign on at any workstation." \
-            "set QLMTSECOFR to 1 using CHGSYSVAL SYSVAL(QLMTSECOFR) VALUE('1'). This scanner never changes system values." \
-            "cis-l1 cis-l2"
+            "QLMTSECOFR is 0, the CIS L1 value; *ALLOBJ/*SERVICE profiles may sign on at any workstation. CIS L2 (5.1.2.14) sets 1 — see the L2 finding." \
+            "n/a" \
+            "cis-l1"
+      elif [ "$QLS_VAL" = "1" ]; then
+        add security sv_qlmtsecofr "Limit security officer access to workstations" FAIL high \
+            "QLMTSECOFR=1" \
+            "QLMTSECOFR is 1, so only profiles with private *CHANGE authority to the workstation device may sign on — the CIS L2 (5.1.2.14) posture, not the L1 value." \
+            "set QLMTSECOFR to 0 using CHGSYSVAL SYSVAL(QLMTSECOFR) VALUE('0') for the CIS L1 posture; keep 1 only when the L2 profile is the target. This scanner never changes system values." \
+            "cis-l1"
       else
         add security sv_qlmtsecofr "Limit security officer access to workstations" NOT_ASSESSED low \
             "not assessed — QLMTSECOFR value unreadable" \
             "The QLMTSECOFR row was present, but the catalog value was not 0, 1, or *NOTAVL, so it is not graded." \
             "inspect the QLMTSECOFR row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QLMTSECOFR)." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       fi
     fi
   fi
@@ -4480,7 +9724,8 @@ fi
   fi
 
   # sv_qpwdexpitv — IBM i QPWDEXPITV (password expiration interval).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.22 (L1=45) and 5.1.2.18 (L2=365).
+  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.22 (L1=45); 5.1.2.18 (L2=365)
+  # is ck-ibmi-sv-qpwdexpitv-l2.
   # One finding. Parses the shared cap-system-values dump. Does not call
   # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
   # Integer 1-45 inclusive is PASS (lower is stricter than L1). *NOMAX or
@@ -4492,7 +9737,7 @@ fi
         "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
         "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWDEXPITV cannot be graded." \
         "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
-        "cis-l1 cis-l2"
+        "cis-l1"
   else
     QPWD_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWDEXPITV"{n++; line=$0} END{if(n==1) print line}')
     QPWD_RC=$?
@@ -4501,7 +9746,7 @@ fi
           "not assessed — QPWDEXPITV row missing or not unique in SYSTEM_VALUE_INFO" \
           "The system-value dump was readable, but it did not contain exactly one QPWDEXPITV row, so the value cannot be graded." \
           "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWDEXPITV." \
-          "cis-l1 cis-l2"
+          "cis-l1"
     else
       QPWD_NUM=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $2}')
       QPWD_CHR=$(printf '%s\n' "$QPWD_LINE" | awk -F'|' '{print $3}')
@@ -4515,13 +9760,13 @@ fi
             "not assessed — QPWDEXPITV=*NOTAVL (scan profile cannot read this system value)" \
             "The catalog returned *NOTAVL for QPWDEXPITV — the scan profile lacks authority to read this system value, so the value is not graded." \
             "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       elif [ "$QPWD_RAW" = "*NOMAX" ]; then
         add security sv_qpwdexpitv "Password expiration interval" FAIL high \
             "QPWDEXPITV=*NOMAX" \
             "QPWDEXPITV is *NOMAX or greater than 45 days, so a password can stay valid longer than a short interval." \
             "set QPWDEXPITV to 45 or less, not *NOMAX, using CHGSYSVAL SYSVAL(QPWDEXPITV) VALUE('45'). This scanner never changes system values." \
-            "cis-l1 cis-l2"
+            "cis-l1"
       else
         QPWDN=$(printf '%s\n' "$QPWD_RAW" | awk '/^[0-9]+$/{ if ($0 ~ /^0+$/) print 0; else { sub(/^0+/,""); print } }')
         if [ -z "$QPWDN" ] || [ "$QPWDN" -lt 1 ] || [ "$QPWDN" -gt 366 ]; then
@@ -4529,19 +9774,19 @@ fi
               "not assessed — QPWDEXPITV value unreadable" \
               "The QPWDEXPITV row was present, but the catalog value was not an integer 1-366, *NOMAX, or *NOTAVL, so it is not graded." \
               "inspect the QPWDEXPITV row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QPWDEXPITV)." \
-              "cis-l1 cis-l2"
+              "cis-l1"
         elif [ "$QPWDN" -gt 45 ]; then
           add security sv_qpwdexpitv "Password expiration interval" FAIL high \
               "QPWDEXPITV=$QPWDN" \
-              "QPWDEXPITV is *NOMAX or greater than 45 days, so a password can stay valid longer than a short interval." \
+              "QPWDEXPITV is over the L1 maximum of 45, so a password can stay valid longer than the L1 interval (the CIS L2 value for 5.1.2.18 is 365)." \
               "set QPWDEXPITV to 45 or less, not *NOMAX, using CHGSYSVAL SYSVAL(QPWDEXPITV) VALUE('45'). This scanner never changes system values." \
-              "cis-l1 cis-l2"
+              "cis-l1"
         else
           add security sv_qpwdexpitv "Password expiration interval" PASS low \
               "QPWDEXPITV=$QPWDN" \
               "QPWDEXPITV expires passwords after a short interval (at most 45 days), so a password cannot stay valid indefinitely." \
               "n/a" \
-              "cis-l1 cis-l2"
+              "cis-l1"
         fi
       fi
     fi
@@ -4933,12 +10178,30 @@ fi
   fi
 
   # sv_qretsvrsec — IBM i QRETSVRSEC (retain server security data).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.27 (L1=1). No L2 rec.
-  # One finding. Parses the shared cap-system-values dump. Does not call
-  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # CIS IBM i 7.5 retired 5.1.1.27 (the value is no longer used). Grade
+  # only IBM i 7.4 and earlier; the L2 5.1.2.22 recommendation is separate.
+  # One finding. Parses the shared cap-system-values dump through the
+  # capture layer. Does not change the target. *NOTAVL is a refusal, never PASS.
   # Exact 1 is PASS. Exact 0 (IBM ship default) is FAIL.
   # live Phase 0 dump is QRETSVRSEC||1.
-  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+  GRADE_RELEASE=$(ibmi_release 2>/dev/null || :)
+  case "$GRADE_RELEASE" in
+    unknown|"")
+      add security sv_qretsvrsec "Retain server security" NOT_ASSESSED low \
+          "not assessed — release unknown; QRETSVRSEC applicability cannot be decided" \
+          "The IBM i release could not be established, so CIS 5.1.1.27 applicability cannot be decided." \
+          "re-run the scan with a readable IBM i release probe. This scanner never changes system values." \
+          "cis-l1"
+      ;;
+    *)
+      if printf '%s\n' "$GRADE_RELEASE" | awk -F. \
+        '{ exit !(($1 + 0) > 7 || (($1 + 0) == 7 && ($2 + 0) >= 5)) }'; then
+        add security sv_qretsvrsec "Retain server security" NOT_APPLICABLE low \
+            "QRETSVRSEC not graded on IBM i 7.5: CIS 7.5 5.1.1.27 has no audit (value no longer used)" \
+            "CIS IBM i 7.5 no longer uses QRETSVRSEC for this recommendation." \
+            "n/a" \
+            "cis-l1"
+      elif [ "${SYSVAL_OK:-0}" -ne 1 ]; then
     add security sv_qretsvrsec "Retain server security" NOT_ASSESSED low \
         "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
         "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QRETSVRSEC cannot be graded." \
@@ -4987,7 +10250,9 @@ fi
             "cis-l1"
       fi
     fi
-  fi
+      fi
+      ;;
+  esac
 
   # sv_qrmtipl — IBM i QRMTIPL (remote power-on and restart).
   # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.28 (L1=0). No L2 rec.
@@ -5620,91 +10885,161 @@ fi
     fi
   fi
 
-  # sv_qsyslibl — IBM i QSYSLIBL (system portion of the library list).
-  # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.38 (L1).
-  # No L2 rec. One finding. Parses the shared cap-system-values dump.
-  # Does not call ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal,
-  # never PASS. Catalog encoding is concatenated CHAR(10) names.
-  # QSYS plus only QSYS2 / QHLPSYS / QUSRSYS is PASS (live dump is
-  # the IBM default four). Any extra valid library name is FAIL.
-  # live Phase 0 dump is QSYSLIBL||QSYS      QSYS2     QHLPSYS   QUSRSYS
-  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+# sv_qsyslibl — IBM i QSYSLIBL. CIS 5.1.1.38 (L1), no L2 rec, one finding.
+# Parses the shared cap-system-values dump, then probes OBJECT_PRIVILEGES for
+# *PUBLIC authority on each listed library: *USE/*EXCLUDE PASS, *ALL/*CHANGE FAIL.
+if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+  add security sv_qsyslibl "System library list" NOT_ASSESSED low \
+      "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+      "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QSYSLIBL cannot be graded." \
+      "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+      "cis-l1"
+else
+  QSL_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSYSLIBL"{n++; line=$0} END{if(n==1) print line}')
+  QSL_RC=$?
+  if [ -z "$QSL_LINE" ]; then
     add security sv_qsyslibl "System library list" NOT_ASSESSED low \
-        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
-        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QSYSLIBL cannot be graded." \
-        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "not assessed — QSYSLIBL row missing or not unique in SYSTEM_VALUE_INFO" \
+        "The system-value dump was readable, but it did not contain exactly one QSYSLIBL row, so the value cannot be graded." \
+        "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSYSLIBL." \
         "cis-l1"
   else
-    QSL_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSYSLIBL"{n++; line=$0} END{if(n==1) print line}')
-    QSL_RC=$?
-    if [ -z "$QSL_LINE" ]; then
+    QSL_VAL=$(printf '%s\n' "$QSL_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+    QSL_TOK=$(printf '%s\n' "$QSL_VAL" | awk '
+      {
+        sub(/[ \t]+$/, "", $0)
+        while (length($0)>0 && length($0)%10!=0) $0=$0 " "
+        n=length($0)/10
+        list=""
+        for (i=0; i<n; i++) {
+          t=substr($0, i*10+1, 10)
+          sub(/[ \t]+$/, "", t)
+          sub(/^[ \t]+/, "", t)
+          if (t=="") continue
+          nt++
+          if (t=="*NOTAVL") nv=1
+          if (t=="QSYS") qs=1
+          if (t !~ /^[A-Z#@$][A-Z0-9#@$]*$/) { j=1; break }
+          list=(list=="" ? t : list "|" t)
+        }
+      }
+      END {
+        if (nv) print "NOTAVL"
+        else if (j || nt<1) print "BAD"
+        else if (!qs) print "BAD"
+        else print "OK " list
+      }')
+    if [ "$QSL_TOK" = NOTAVL ]; then
       add security sv_qsyslibl "System library list" NOT_ASSESSED low \
-          "not assessed — QSYSLIBL row missing or not unique in SYSTEM_VALUE_INFO" \
-          "The system-value dump was readable, but it did not contain exactly one QSYSLIBL row, so the value cannot be graded." \
-          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSYSLIBL." \
+          "not assessed — QSYSLIBL=*NOTAVL (scan profile cannot read this system value)" \
+          "The catalog returned *NOTAVL for QSYSLIBL — the scan profile lacks authority to read this system value, so the value is not graded." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
+          "cis-l1"
+    elif [ "$QSL_TOK" = BAD ]; then
+      add security sv_qsyslibl "System library list" NOT_ASSESSED low \
+          "not assessed — QSYSLIBL value unreadable" \
+          "The QSYSLIBL row was present, but the catalog value was not a readable list of library names with QSYS present, so it is not graded." \
+          "inspect the QSYSLIBL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSYSLIBL)." \
           "cis-l1"
     else
-      QSL_VAL=$(printf '%s\n' "$QSL_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
-      QSL_TOK=$(printf '%s\n' "$QSL_VAL" | awk '
-        {
-          sub(/[ \t]+$/, "", $0)
-          while (length($0)>0 && length($0)%10!=0) $0=$0 " "
-          n=length($0)/10
-          for (i=0; i<n; i++) {
-            t=substr($0, i*10+1, 10)
-            sub(/[ \t]+$/, "", t)
-            sub(/^[ \t]+/, "", t)
-            if (t=="") continue
-            nt++
-            if (t=="*NOTAVL") nv=1
-            if (t=="QSYS") qs=1
-            if (t=="QSYS" || t=="QSYS2" || t=="QHLPSYS" || t=="QUSRSYS") continue
-            if (t ~ /^[A-Z#@$][A-Z0-9#@$]*$/) x++
-            else j++
-          }
-        }
-        END {
-          if (nv) print "NOTAVL"
-          else if (j || nt<1) print "BAD"
-          else if (x) print "FAIL"
-          else if (qs) print "PASS"
-          else print "BAD"
-        }')
-      if [ "$QSL_TOK" = NOTAVL ]; then
+      QSL_LIBS=${QSL_TOK#OK }
+      QSL_IN=$(printf '%s' "$QSL_LIBS" | sed -e "s/|/','/g" -e "s/^/'/" -e "s/\$/'/")
+      PUB_RAW=$(ibmi_sql qsyslibl_public "SELECT 'LIB' CONCAT '|' CONCAT VARCHAR(TRIM(SYSTEM_OBJECT_NAME),10) CONCAT '|' CONCAT VARCHAR(TRIM(OBJECT_AUTHORITY),12) FROM QSYS2.OBJECT_PRIVILEGES WHERE SYSTEM_OBJECT_SCHEMA = 'QSYS' AND OBJECT_TYPE = '*LIB' AND AUTHORIZATION_NAME = '*PUBLIC' AND SYSTEM_OBJECT_NAME IN ($QSL_IN)")
+      PUB_RC=$?
+      PUB_ERR=""
+      if [ "$PUB_RC" -ge 2 ]; then
+        PUB_ERR="qsyslibl_public probe failed (rc=$PUB_RC)"
+      elif [ -z "$PUB_RAW" ]; then
+        PUB_ERR="qsyslibl_public probe empty (rc=0)"
+        [ "$PUB_RC" -eq 1 ] && PUB_ERR="no *PUBLIC rows for any listed library"
+      fi
+      if [ -n "$PUB_ERR" ]; then
         add security sv_qsyslibl "System library list" NOT_ASSESSED low \
-            "not assessed — QSYSLIBL=*NOTAVL (scan profile cannot read this system value)" \
-            "The catalog returned *NOTAVL for QSYSLIBL — the scan profile lacks authority to read this system value, so the value is not graded." \
-            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
-            "cis-l1"
-      elif [ "$QSL_TOK" = PASS ]; then
-        add security sv_qsyslibl "System library list" PASS low \
-            "QSYSLIBL=$QSL_VAL" \
-            "QSYSLIBL lists only IBM-supplied system libraries and includes QSYS, so the system portion of the library list does not search a user library before IBM libraries." \
-            "n/a" \
-            "cis-l1"
-      elif [ "$QSL_TOK" = FAIL ]; then
-        add security sv_qsyslibl "System library list" FAIL high \
-            "QSYSLIBL=$QSL_VAL" \
-            "QSYSLIBL includes a library other than QSYS, QSYS2, QHLPSYS, or QUSRSYS, so a non-system library is searched in the system portion of the library list and can hide IBM objects." \
-            "set QSYSLIBL to QSYS QSYS2 QHLPSYS QUSRSYS using CHGSYSVAL SYSVAL(QSYSLIBL) VALUE('QSYS QSYS2 QHLPSYS QUSRSYS'). This scanner never changes system values." \
+            "not assessed — $PUB_ERR" \
+            "The OBJECT_PRIVILEGES probe did not yield a readable *PUBLIC listing for the QSYSLIBL libraries, so *PUBLIC authority cannot be graded." \
+            "re-run the scan as the scan profile and confirm QSYS2.OBJECT_PRIVILEGES returns *PUBLIC rows for *LIB objects in QSYSLIBL. This scanner never changes object authority." \
             "cis-l1"
       else
-        add security sv_qsyslibl "System library list" NOT_ASSESSED low \
-            "not assessed — QSYSLIBL value unreadable" \
-            "The QSYSLIBL row was present, but the catalog value was not QSYS plus only QSYS2, QHLPSYS, and/or QUSRSYS, an extra library, or *NOTAVL, so it is not graded." \
-            "inspect the QSYSLIBL row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSYSLIBL)." \
-            "cis-l1"
+        PUB_PARSE=$(printf '%s\n' "$PUB_RAW" | awk -v libs="$QSL_LIBS" -F'|' '
+          $1=="LIB" {
+            name=$2; sub(/[ \t]+$/, "", name)
+            auth=$3; sub(/[ \t]+$/, "", auth)
+            if (name !~ /^[A-Z#@$][A-Z0-9#@$]*$/ || (auth != "*USE" && auth != "*EXCLUDE" && auth != "*ALL" && auth != "*CHANGE" && auth != "USER DEFINED") || (seen[name] && usage[name] != auth)) { junk=1; next }
+            seen[name]=1
+            usage[name]=auth
+            next
+          }
+          END {
+            if (junk) { print "JUNK||"; exit }
+            n=split(libs, libarr, "|")
+            if (n<1) { print "NOLIBS||"; exit }
+            missing=""; badname=""; udname=""; obs=""
+            for (i=1; i<=n; i++) {
+              nm=libarr[i]
+              if (!(nm in seen)) { missing=(missing=="" ? nm : missing "," nm); continue }
+              a=usage[nm]
+              if (obs=="") obs=nm "=" a; else obs=obs " " nm "=" a
+              if (a=="*ALL" || a=="*CHANGE") badname=(badname=="" ? nm : badname "," nm)
+              else if (a=="USER DEFINED") udname=(udname=="" ? nm : udname "," nm)
+            }
+            if (missing != "") { print "MISSING|" missing "|" obs; exit }
+            if (badname != "") { print "BAD|" badname "|" obs; exit }
+            if (udname != "") { print "UD|" udname "|" obs; exit }
+            print "OK||" obs
+          }')
+        PUB_ISSUE=$(printf '%s\n' "$PUB_PARSE" | awk -F'|' '{ print $2 }')
+        PUB_OBS=$(printf '%s\n' "$PUB_PARSE" | awk -F'|' '{ print $3 }')
+        PUB_NAMES=$(printf '%s' "$PUB_ISSUE" | awk '{ n=split($0,a,","); s=""; for (i=1;i<=n;i++){ if (i>1) s=s ", "; s=s a[i] } print s }')
+        case "$PUB_PARSE" in
+          OK*)
+            add security sv_qsyslibl "System library list" PASS low \
+                "QSYSLIBL=$QSL_VAL; *PUBLIC: $PUB_OBS" \
+                "Every library in the system portion of the library list grants *PUBLIC authority of *USE or *EXCLUDE, so no listed library grants public authority above *USE." \
+                "n/a" \
+                "cis-l1"
+            ;;
+          BAD*)
+            PUB_FIX=$(printf '%s' "$PUB_ISSUE" | awk '{ n=split($0,a,","); s=""; for (i=1;i<=n;i++){ if (i>1) s=s "; "; s=s "GRTOBJAUT OBJ(" a[i] ") OBJTYPE(*LIB) USER(*PUBLIC) AUT(*USE) REPLACE(*YES)" } print "set *PUBLIC authority to *USE using " s ". This scanner never changes object authority." }')
+            add security sv_qsyslibl "System library list" FAIL high \
+                "QSYSLIBL=$QSL_VAL; *PUBLIC: $PUB_OBS" \
+                "One or more libraries in the system portion of the library list grant *PUBLIC authority above *USE, so an unprivileged user can alter or replace IBM objects." \
+                "$PUB_FIX" \
+                "cis-l1"
+            ;;
+          UD*)
+            add security sv_qsyslibl "System library list" NOT_ASSESSED low \
+                "not assessed — user-defined *PUBLIC on $PUB_NAMES; DSPOBJAUT" \
+                "A library in QSYSLIBL carries user-defined *PUBLIC authority, which is a manual decision: business sign-off is required before grading." \
+                "run DSPOBJAUT OBJ($PUB_NAMES) OBJTYPE(*LIB) to review the private authorities above *USE and confirm the business owner authorized them. This scanner never changes object authority." \
+                "cis-l1"
+            ;;
+          MISSING*)
+            add security sv_qsyslibl "System library list" NOT_ASSESSED low \
+                "not assessed — no *PUBLIC row for $PUB_NAMES" \
+                "A library in QSYSLIBL has no *PUBLIC row in OBJECT_PRIVILEGES, so its authority cannot be graded." \
+                "confirm QSYS2.OBJECT_PRIVILEGES returns a *PUBLIC row for every QSYSLIBL library and re-run. This scanner never changes object authority." \
+                "cis-l1"
+            ;;
+          *)
+            add security sv_qsyslibl "System library list" NOT_ASSESSED low \
+                "not assessed — qsyslibl_public value unreadable" \
+                "The OBJECT_PRIVILEGES dump was readable, but a row carried a token that could not be graded." \
+                "inspect the OBJECT_PRIVILEGES SYSTEM_OBJECT_NAME and OBJECT_AUTHORITY for *PUBLIC *LIB rows of the QSYSLIBL libraries." \
+                "cis-l1"
+            ;;
+        esac
       fi
     fi
   fi
+fi
 
   # sv_quseadpaut — IBM i QUSEADPAUT (use adopted authority).
   # Authority: CIS IBM i V7R5M0/V7R4M0 5.1.1.39 (L1=authorization-list
-  # name, not *NONE). No L2 rec.
-  # One finding. Parses the shared cap-system-values dump. Does not call
-  # ibmi_sql. Does not CHGSYSVAL. Does not CRTAUTL. *NOTAVL is a
-  # refusal, never PASS. A simple IBM i list name is PASS (live dump
-  # QUSEADPAUT, or any other legal name). Exact *NONE is FAIL.
+  # name whose *PUBLIC is *EXCLUDE, not *NONE). No L2 rec.
+  # One finding. Parses the shared cap-system-values dump, then probes
+  # QSYS2.AUTHORIZATION_LIST_USER_INFO for the named list's *PUBLIC.
+  # Does not CHGSYSVAL. Does not CRTAUTL. *NOTAVL is a refusal, never
+  # PASS. A named list is PASS only when *PUBLIC=*EXCLUDE.
   # live Phase 0 dump is QUSEADPAUT||QUSEADPAUT.
   if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
     add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
@@ -5735,24 +11070,70 @@ fi
             "The catalog returned *NOTAVL for QUSEADPAUT — the scan profile lacks authority to read this system value, so the value is not graded." \
             "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
             "cis-l1"
-      elif [ "$QADP_TOK" = PASS ]; then
-        add security sv_quseadpaut "Use adopted authority" PASS low \
-            "QUSEADPAUT=$QADP_VAL" \
-            "QUSEADPAUT names an authorization list, so only users with *USE to that list can create or change programs that use adopted authority from a calling program." \
-            "n/a" \
-            "cis-l1"
       elif [ "$QADP_TOK" = FAIL ]; then
         add security sv_quseadpaut "Use adopted authority" FAIL high \
             "QUSEADPAUT=*NONE" \
             "QUSEADPAUT is *NONE, so any user with authority to a program can create or change that program to use adopted authority from a calling program." \
             "set QUSEADPAUT to an authorization list name using CHGSYSVAL SYSVAL(QUSEADPAUT) VALUE('QUSEADPAUT'). Create the list first if it does not exist. This scanner never changes system values." \
             "cis-l1"
-      else
+      elif [ "$QADP_TOK" = BAD ]; then
         add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
             "not assessed — QUSEADPAUT value unreadable" \
             "The QUSEADPAUT row was present, but the catalog value was not *NONE, an authorization-list name, or *NOTAVL, so it is not graded." \
             "inspect the QUSEADPAUT row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QUSEADPAUT)." \
             "cis-l1"
+      else
+        QADP_AUTL_RAW=$(ibmi_sql quseadpaut_autl "SELECT 'AUTL' CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(OBJECT_AUTHORITY),''),12) FROM QSYS2.AUTHORIZATION_LIST_USER_INFO WHERE AUTHORIZATION_LIST = '$QADP_VAL' AND AUTHORIZATION_NAME = '*PUBLIC'")
+        QADP_AUTL_RC=$?
+        if [ "$QADP_AUTL_RC" -ge 2 ]; then
+          add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
+              "not assessed — QUSEADPAUT=$QADP_VAL *PUBLIC probe failed (rc=$QADP_AUTL_RC)" \
+              "The AUTHORIZATION_LIST_USER_INFO probe did not yield the named list's *PUBLIC row, so the list posture cannot be graded." \
+              "re-run the scan as the scan profile and confirm QSYS2.AUTHORIZATION_LIST_USER_INFO returns the named list's *PUBLIC row. This scanner never changes authorization lists." \
+              "cis-l1"
+        elif [ "$QADP_AUTL_RC" -eq 0 ] && [ -z "$QADP_AUTL_RAW" ]; then
+          add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
+              "not assessed — QUSEADPAUT=$QADP_VAL *PUBLIC unreadable (rc=0, empty)" \
+              "The AUTHORIZATION_LIST_USER_INFO probe returned no pipe row at rc 0, the swallowed mid-fetch-error signature, so the list posture cannot be graded." \
+              "re-run the scan as the scan profile and confirm QSYS2.AUTHORIZATION_LIST_USER_INFO returns the named list's *PUBLIC row. This scanner never changes authorization lists." \
+              "cis-l1"
+        elif [ "$QADP_AUTL_RC" -eq 1 ] && [ -z "$QADP_AUTL_RAW" ]; then
+          add security sv_quseadpaut "Use adopted authority" FAIL high \
+              "QUSEADPAUT=$QADP_VAL authorization list not found" \
+              "QUSEADPAUT names an authorization list that does not exist in QSYS2.AUTHORIZATION_LIST_USER_INFO, so no *PUBLIC restriction is in force." \
+              "create the authorization list named $QADP_VAL with *PUBLIC *EXCLUDE (CRTAUTL AUTL($QADP_VAL) AUT(*EXCLUDE), then CHGOBJOWN or GRTOBJAUT as needed), then CHGSYSVAL SYSVAL(QUSEADPAUT) VALUE('$QADP_VAL'). This scanner never changes authorization lists or system values." \
+              "cis-l1"
+        else
+          QADP_AUTL_LINE=$(printf '%s\n' "$QADP_AUTL_RAW" | awk -F'|' '$1=="AUTL"{n++; line=$0} END{if(n==1) print line}')
+          if [ -z "$QADP_AUTL_LINE" ]; then
+            add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
+                "not assessed — QUSEADPAUT=$QADP_VAL *PUBLIC row missing or not unique in AUTHORIZATION_LIST_USER_INFO" \
+                "The authorization-list dump was readable, but it did not contain exactly one AUTL|*PUBLIC pipe row, so the *PUBLIC authority cannot be graded." \
+                "inspect QSYS2.AUTHORIZATION_LIST_USER_INFO for the named list and *PUBLIC. The scan profile may only see its own AUTL rows." \
+                "cis-l1"
+          else
+            QADP_AUTL=$(printf '%s\n' "$QADP_AUTL_LINE" | awk -F'|' '{ v=$2; sub(/[ \t]+$/, "", v); print v }')
+            if [ -z "$QADP_AUTL" ]; then
+              add security sv_quseadpaut "Use adopted authority" NOT_ASSESSED low \
+                  "not assessed — QUSEADPAUT=$QADP_VAL *PUBLIC value empty" \
+                  "The *PUBLIC row for the named list was present, but its authority value was empty, so the list posture cannot be graded." \
+                  "inspect OBJECT_AUTHORITY for the named list and *PUBLIC on QSYS2.AUTHORIZATION_LIST_USER_INFO." \
+                  "cis-l1"
+            elif [ "$QADP_AUTL" = "*EXCLUDE" ]; then
+              add security sv_quseadpaut "Use adopted authority" PASS low \
+                  "QUSEADPAUT=$QADP_VAL *PUBLIC=*EXCLUDE" \
+                  "QUSEADPAUT names an existing authorization list whose *PUBLIC authority is *EXCLUDE, so only users with *USE to that list can create or change programs that use adopted authority from a calling program." \
+                  "n/a" \
+                  "cis-l1"
+            else
+              add security sv_quseadpaut "Use adopted authority" FAIL high \
+                  "QUSEADPAUT=$QADP_VAL *PUBLIC=$QADP_AUTL" \
+                  "QUSEADPAUT names an existing authorization list whose *PUBLIC authority is not *EXCLUDE, so any user with authority to a program can create or change that program to use adopted authority from a calling program." \
+                  "set *PUBLIC authority on authorization list $QADP_VAL to *EXCLUDE (CRTAUTL AUTL($QADP_VAL) AUT(*EXCLUDE) if the list is new, or GRTOBJAUT), then CHGSYSVAL SYSVAL(QUSEADPAUT) VALUE('$QADP_VAL'). This scanner never changes authorization lists or system values." \
+                  "cis-l1"
+            fi
+          fi
+        fi
       fi
     fi
   fi
@@ -7472,7 +12853,7 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.4|4.9|L1|automated|implemented|usr_command_line_access
 7.4|4.10|L1|automated|implemented|usr_ibm_supplied_profiles
 7.4|4.11|L1|automated|implemented|usr_group_passwords
-7.4|4.12|L1|manual|manual|
+7.4|4.12|L1|manual|refusal_only|usr_mfa
 7.4|5.1.1.1|L1|automated|implemented|sv_qalwobjrst
 7.4|5.1.1.2|L1|automated|implemented|sv_qatnpgm
 7.4|5.1.1.3|L1|automated|implemented|sv_qaudctl
@@ -7493,7 +12874,7 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.4|5.1.1.18|L1|automated|implemented|sv_qlmtsecofr
 7.4|5.1.1.19|L1|automated|implemented|sv_qmaxsgnacn
 7.4|5.1.1.20|L1|automated|implemented|sv_qmaxsign
-7.4|5.1.1.21|L1|automated|unimplemented|
+7.4|5.1.1.21|L1|automated|implemented|sv_qpwdchgblk_l1
 7.4|5.1.1.22|L1|automated|implemented|sv_qpwdexpitv
 7.4|5.1.1.23|L1|automated|implemented|sv_qpwdexpwrn
 7.4|5.1.1.24|L1|automated|implemented|sv_qpwdlvl
@@ -7513,52 +12894,52 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.4|5.1.1.38|L1|automated|implemented|sv_qsyslibl
 7.4|5.1.1.39|L1|automated|implemented|sv_quseadpaut
 7.4|5.1.1.40|L1|automated|implemented|sv_qvfyobjrst
-7.4|5.1.2.1|L2|automated|unimplemented|
+7.4|5.1.2.1|L2|automated|implemented|sv_qalwobjrst_l2
 7.4|5.1.2.2|L2|automated|implemented|sv_qalwusrdmn
-7.4|5.1.2.3|L2|automated|implemented|sv_qaudctl
-7.4|5.1.2.4|L2|automated|unimplemented|
-7.4|5.1.2.5|L2|automated|implemented|sv_qaudfrclvl
-7.4|5.1.2.6|L2|automated|unimplemented|
-7.4|5.1.2.7|L2|automated|unimplemented|
+7.4|5.1.2.3|L2|automated|implemented|sv_qaudctl_l2
+7.4|5.1.2.4|L2|automated|implemented|sv_qaudendacn_l2
+7.4|5.1.2.5|L2|automated|implemented|sv_qaudfrclvl_l2
+7.4|5.1.2.6|L2|automated|implemented|sv_qautovrt_l2
+7.4|5.1.2.7|L2|automated|implemented|sv_qcrtaut_l2
 7.4|5.1.2.8|L2|automated|implemented|sv_qcrtobjaud
-7.4|5.1.2.9|L2|automated|unimplemented|
-7.4|5.1.2.10|L2|automated|unimplemented|
-7.4|5.1.2.11|L2|automated|unimplemented|
-7.4|5.1.2.12|L2|automated|unimplemented|
-7.4|5.1.2.13|L2|automated|unimplemented|
-7.4|5.1.2.14|L2|automated|implemented|sv_qlmtsecofr
-7.4|5.1.2.15|L2|automated|unimplemented|
-7.4|5.1.2.16|L2|automated|unimplemented|
-7.4|5.1.2.17|L2|automated|unimplemented|
-7.4|5.1.2.18|L2|automated|unimplemented|
-7.4|5.1.2.19|L2|automated|unimplemented|
-7.4|5.1.2.20|L2|automated|unimplemented|
+7.4|5.1.2.9|L2|automated|implemented|sv_qdscjobitv_l2
+7.4|5.1.2.10|L2|automated|implemented|sv_qfrccvnrst_l2
+7.4|5.1.2.11|L2|automated|implemented|sv_qinactitv_l2
+7.4|5.1.2.12|L2|automated|implemented|sv_qinactmsgq_l2
+7.4|5.1.2.13|L2|automated|implemented|sv_qlmtdevssn_l2
+7.4|5.1.2.14|L2|automated|implemented|sv_qlmtsecofr_l2
+7.4|5.1.2.15|L2|automated|implemented|sv_qmaxsgnacn_l2
+7.4|5.1.2.16|L2|automated|implemented|sv_qmaxsign_l2
+7.4|5.1.2.17|L2|automated|implemented|sv_qpwdchgblk_l2
+7.4|5.1.2.18|L2|automated|implemented|sv_qpwdexpitv_l2
+7.4|5.1.2.19|L2|automated|implemented|sv_qpwdrqddif_l2
+7.4|5.1.2.20|L2|automated|implemented|sv_qpwdrules_l2
 7.4|5.1.2.21|L2|automated|implemented|sv_qpwdvldpgm
 7.4|5.1.2.22|L2|automated|unimplemented|
-7.4|5.1.2.23|L2|automated|unimplemented|
-7.4|5.1.2.24|L2|automated|unimplemented|
-7.4|5.1.2.25|L2|automated|unimplemented|
-7.4|5.1.2.26|L2|automated|unimplemented|
+7.4|5.1.2.23|L2|automated|implemented|sv_qrmtsign_l2
+7.4|5.1.2.24|L2|automated|implemented|sv_qsecurity_l2
+7.4|5.1.2.25|L2|automated|implemented|sv_qshrmemctl_l2
+7.4|5.1.2.26|L2|automated|implemented|sv_qvfyobjrst_l2
 7.4|5.2.1|L1|automated|implemented|net_jobacn
 7.4|5.2.2|L1|automated|implemented|net_ddm_sna
 7.4|5.2.3|L1|automated|implemented|net_ddm_tcp
-7.4|5.2.4|L2|automated|unimplemented|
+7.4|5.2.4|L2|automated|implemented|net_ddm_tcp_l2
 7.4|5.2.5|L1|automated|implemented|net_nfs_shares
-7.4|5.2.6|L2|automated|unimplemented|
+7.4|5.2.6|L2|automated|implemented|net_nfs_shares_l2
 7.4|5.2.7|L1|automated|implemented|net_exit_points
 7.4|5.2.8|L1|automated|implemented|net_function_usage
-7.4|5.2.9|L1|manual|manual|
+7.4|5.2.9|L1|manual|refusal_only|net_ids_policy
 7.4|5.2.10|L1|automated|implemented|net_telnet
-7.4|5.2.11|L1|automated|unimplemented|
-7.4|5.2.12|L1|manual|manual|
-7.4|5.2.13|L1|manual|manual|
-7.4|5.3.1|L1|automated|unimplemented|
-7.4|5.3.2|L1|automated|unimplemented|
-7.4|5.3.3|L1|automated|unimplemented|
-7.4|5.3.4|L1|automated|unimplemented|
+7.4|5.2.11|L1|automated|refusal_only|net_ftp_tls
+7.4|5.2.12|L1|manual|refusal_only|net_smtp_relay
+7.4|5.2.13|L1|manual|refusal_only|net_snmp_v3only
+7.4|5.3.1|L1|automated|refusal_only|net_netserver_guest
+7.4|5.3.2|L1|automated|refusal_only|net_netserver_lanman
+7.4|5.3.3|L1|automated|refusal_only|net_netserver_signing
+7.4|5.3.4|L1|automated|refusal_only|net_netserver_smb_versions
 7.4|5.3.5|L1|automated|implemented|net_netserver_shares
-7.4|5.3.6|L2|automated|unimplemented|
-7.4|5.3.7|L1|manual|manual|
+7.4|5.3.6|L2|automated|refusal_only|net_netserver_browse_interval
+7.4|5.3.7|L1|manual|refusal_only|svc_malware_defenses
 7.4|5.4.1|L1|automated|implemented|ssh_protocol
 7.4|5.4.2|L1|automated|implemented|ibmi_ssh_banner
 7.4|5.4.3|L1|automated|implemented|ssh_hostbased_auth
@@ -7567,13 +12948,13 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.4|5.4.6|L1|automated|implemented|ssh_idle_timeout
 7.4|5.4.7|L1|automated|implemented|ibmi_ssh_ciphers
 7.4|5.4.8|L1|automated|implemented|ssh_limit_access
-7.4|5.5.1|L1|automated|implemented|cur_ptf_groups
-7.4|5.6.1|L1|manual|manual|
-7.4|5.6.2|L1|manual|manual|
-7.4|5.6.3|L1|manual|manual|
+7.4|5.5.1|L1|automated|refusal_only|cur_ptf_groups
+7.4|5.6.1|L1|manual|implemented|sst_pwdexpitv
+7.4|5.6.2|L1|manual|implemented|sst_maxsign
+7.4|5.6.3|L1|manual|implemented|sst_dup_password
 7.4|5.6.4|L1|automated|implemented|sst_pwdlvl
 7.4|5.6.5|L1|automated|implemented|sst_new_certs
-7.4|5.6.6|L1|automated|unimplemented|
+7.4|5.6.6|L1|automated|refusal_only|sst_user_ids
 7.4|5.6.7|L1|automated|implemented|sst_lock_sysval
 7.4|5.6.8|L1|automated|implemented|sst_pwdrules
 7.4|6.1|L1|automated|implemented|usr_qsecofr_disabled
@@ -7589,7 +12970,7 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.5|4.9|L1|automated|implemented|usr_command_line_access
 7.5|4.10|L1|automated|implemented|usr_ibm_supplied_profiles
 7.5|4.11|L1|automated|implemented|usr_group_passwords
-7.5|4.12|L1|manual|manual|
+7.5|4.12|L1|manual|refusal_only|usr_mfa
 7.5|5.1.1.1|L1|automated|implemented|sv_qalwobjrst
 7.5|5.1.1.2|L1|automated|implemented|sv_qatnpgm
 7.5|5.1.1.3|L1|automated|implemented|sv_qaudctl
@@ -7610,7 +12991,7 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.5|5.1.1.18|L1|automated|implemented|sv_qlmtsecofr
 7.5|5.1.1.19|L1|automated|implemented|sv_qmaxsgnacn
 7.5|5.1.1.20|L1|automated|implemented|sv_qmaxsign
-7.5|5.1.1.21|L1|automated|unimplemented|
+7.5|5.1.1.21|L1|automated|implemented|sv_qpwdchgblk_l1
 7.5|5.1.1.22|L1|automated|implemented|sv_qpwdexpitv
 7.5|5.1.1.23|L1|automated|implemented|sv_qpwdexpwrn
 7.5|5.1.1.24|L1|automated|implemented|sv_qpwdlvl
@@ -7630,51 +13011,51 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.5|5.1.1.38|L1|automated|implemented|sv_qsyslibl
 7.5|5.1.1.39|L1|automated|implemented|sv_quseadpaut
 7.5|5.1.1.40|L1|automated|implemented|sv_qvfyobjrst
-7.5|5.1.2.1|L2|automated|unimplemented|
+7.5|5.1.2.1|L2|automated|implemented|sv_qalwobjrst_l2
 7.5|5.1.2.2|L2|automated|implemented|sv_qalwusrdmn
-7.5|5.1.2.3|L2|automated|implemented|sv_qaudctl
-7.5|5.1.2.4|L2|automated|unimplemented|
-7.5|5.1.2.5|L2|automated|implemented|sv_qaudfrclvl
-7.5|5.1.2.6|L2|automated|unimplemented|
-7.5|5.1.2.7|L2|automated|unimplemented|
+7.5|5.1.2.3|L2|automated|implemented|sv_qaudctl_l2
+7.5|5.1.2.4|L2|automated|implemented|sv_qaudendacn_l2
+7.5|5.1.2.5|L2|automated|implemented|sv_qaudfrclvl_l2
+7.5|5.1.2.6|L2|automated|implemented|sv_qautovrt_l2
+7.5|5.1.2.7|L2|automated|implemented|sv_qcrtaut_l2
 7.5|5.1.2.8|L2|automated|implemented|sv_qcrtobjaud
-7.5|5.1.2.9|L2|automated|unimplemented|
-7.5|5.1.2.10|L2|automated|unimplemented|
-7.5|5.1.2.11|L2|automated|unimplemented|
-7.5|5.1.2.12|L2|automated|unimplemented|
-7.5|5.1.2.13|L2|automated|unimplemented|
-7.5|5.1.2.14|L2|automated|implemented|sv_qlmtsecofr
-7.5|5.1.2.15|L2|automated|unimplemented|
-7.5|5.1.2.16|L2|automated|unimplemented|
-7.5|5.1.2.17|L2|automated|unimplemented|
-7.5|5.1.2.18|L2|automated|unimplemented|
-7.5|5.1.2.19|L2|automated|unimplemented|
-7.5|5.1.2.20|L2|automated|unimplemented|
+7.5|5.1.2.9|L2|automated|implemented|sv_qdscjobitv_l2
+7.5|5.1.2.10|L2|automated|implemented|sv_qfrccvnrst_l2
+7.5|5.1.2.11|L2|automated|implemented|sv_qinactitv_l2
+7.5|5.1.2.12|L2|automated|implemented|sv_qinactmsgq_l2
+7.5|5.1.2.13|L2|automated|implemented|sv_qlmtdevssn_l2
+7.5|5.1.2.14|L2|automated|implemented|sv_qlmtsecofr_l2
+7.5|5.1.2.15|L2|automated|implemented|sv_qmaxsgnacn_l2
+7.5|5.1.2.16|L2|automated|implemented|sv_qmaxsign_l2
+7.5|5.1.2.17|L2|automated|implemented|sv_qpwdchgblk_l2
+7.5|5.1.2.18|L2|automated|implemented|sv_qpwdexpitv_l2
+7.5|5.1.2.19|L2|automated|implemented|sv_qpwdrqddif_l2
+7.5|5.1.2.20|L2|automated|implemented|sv_qpwdrules_l2
 7.5|5.1.2.21|L2|automated|implemented|sv_qpwdvldpgm
-7.5|5.1.2.22|L2|automated|unimplemented|
-7.5|5.1.2.23|L2|automated|unimplemented|
-7.5|5.1.2.24|L2|automated|unimplemented|
-7.5|5.1.2.25|L2|automated|unimplemented|
+7.5|5.1.2.22|L2|automated|implemented|sv_qrmtsign_l2
+7.5|5.1.2.23|L2|automated|implemented|sv_qsecurity_l2
+7.5|5.1.2.24|L2|automated|implemented|sv_qshrmemctl_l2
+7.5|5.1.2.25|L2|automated|implemented|sv_qvfyobjrst_l2
 7.5|5.2.1|L1|automated|implemented|net_jobacn
 7.5|5.2.2|L1|automated|implemented|net_ddm_sna
 7.5|5.2.3|L1|automated|implemented|net_ddm_tcp
-7.5|5.2.4|L2|automated|unimplemented|
+7.5|5.2.4|L2|automated|implemented|net_ddm_tcp_l2
 7.5|5.2.5|L1|automated|implemented|net_nfs_shares
-7.5|5.2.6|L2|automated|unimplemented|
+7.5|5.2.6|L2|automated|implemented|net_nfs_shares_l2
 7.5|5.2.7|L1|automated|implemented|net_exit_points
 7.5|5.2.8|L1|automated|implemented|net_function_usage
-7.5|5.2.9|L1|manual|manual|
+7.5|5.2.9|L1|manual|refusal_only|net_ids_policy
 7.5|5.2.10|L1|automated|implemented|net_telnet
-7.5|5.2.11|L1|automated|unimplemented|
-7.5|5.2.12|L1|manual|manual|
-7.5|5.2.13|L1|manual|manual|
-7.5|5.3.1|L1|automated|unimplemented|
-7.5|5.3.2|L1|automated|unimplemented|
-7.5|5.3.3|L1|automated|unimplemented|
-7.5|5.3.4|L1|automated|unimplemented|
+7.5|5.2.11|L1|automated|refusal_only|net_ftp_tls
+7.5|5.2.12|L1|manual|refusal_only|net_smtp_relay
+7.5|5.2.13|L1|manual|refusal_only|net_snmp_v3only
+7.5|5.3.1|L1|automated|refusal_only|net_netserver_guest
+7.5|5.3.2|L1|automated|refusal_only|net_netserver_lanman
+7.5|5.3.3|L1|automated|refusal_only|net_netserver_signing
+7.5|5.3.4|L1|automated|refusal_only|net_netserver_smb_versions
 7.5|5.3.5|L1|automated|implemented|net_netserver_shares
-7.5|5.3.6|L2|automated|unimplemented|
-7.5|5.3.7|L1|manual|manual|
+7.5|5.3.6|L2|automated|refusal_only|net_netserver_browse_interval
+7.5|5.3.7|L1|manual|refusal_only|svc_malware_defenses
 7.5|5.4.1|L1|automated|implemented|ssh_protocol
 7.5|5.4.2|L1|automated|implemented|ibmi_ssh_banner
 7.5|5.4.3|L1|automated|implemented|ssh_hostbased_auth
@@ -7683,16 +13064,16 @@ CONTROL_ROWS=$(cat <<'PTXRAY_CONTROL_EOF'
 7.5|5.4.6|L1|automated|implemented|ssh_idle_timeout
 7.5|5.4.7|L1|automated|implemented|ibmi_ssh_ciphers
 7.5|5.4.8|L1|automated|implemented|ssh_limit_access
-7.5|5.5.1|L1|automated|implemented|cur_ptf_groups
+7.5|5.5.1|L1|automated|refusal_only|cur_ptf_groups
 7.5|5.6.1|L1|automated|implemented|sst_pwdexpitv
 7.5|5.6.2|L1|automated|implemented|sst_maxsign
 7.5|5.6.3|L1|automated|implemented|sst_dup_password
 7.5|5.6.4|L1|automated|implemented|sst_pwdlvl
 7.5|5.6.5|L1|automated|implemented|sst_new_certs
-7.5|5.6.6|L1|automated|unimplemented|
+7.5|5.6.6|L1|automated|refusal_only|sst_user_ids
 7.5|5.6.7|L1|automated|implemented|sst_lock_sysval
 7.5|5.6.8|L1|automated|implemented|sst_pwdrules
-7.5|5.6.9|L1|automated|unimplemented|
+7.5|5.6.9|L1|automated|implemented|sst_pwd_exit_programs
 7.5|6.1|L1|automated|implemented|usr_qsecofr_disabled
 7.5|6.2|L1|automated|implemented|usr_qsecofr_not_group
 PTXRAY_CONTROL_EOF
@@ -7733,20 +13114,41 @@ case "$RELEASE" in
     ;;
 esac
 
+# Both scoring paths use the same order: a control is counted in SEC_TOTAL
+# before the disposition branch, so a control this edition cannot implement
+# stays in the denominator and renders a typed NOT_ASSESSED row instead of
+# vanishing. That is the increment-first order; skip-first would make the
+# proof's SEC_TOTAL-counted-not-implemented case vacuous.
 SEC_TOTAL=0; SEC_ASSESSED=0; SEC_PASS=0
 if [ "$CROSSWALK_STATUS" = exact ]; then
   while IFS='|' read control_release control_ref control_level control_automation control_disposition control_finding; do
     [ "$control_release" = "$MODEL_RELEASE" ] || continue
     [ "$control_automation" = automated ] || continue
-    if [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ]; then continue; fi
+    [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ] && continue
+    [ "$COMPLIANCE" = cis-l2 ] && [ "$control_level" != L2 ] && continue
     SEC_TOTAL=$((SEC_TOTAL+1))
-    [ "$control_disposition" = implemented ] || continue
+    if [ "$control_disposition" = unimplemented ]; then
+      add security "$control_ref" "CIS $control_ref (L$control_level)" NOT_ASSESSED low \
+          "not assessed - control not implemented in this edition" \
+          "The CIS benchmark control is not implemented in this scanner edition, so no verdict can be produced." \
+          "n/a" \
+          "cis:$control_ref"
+      continue
+    fi
     control_status=""
     i=0
     while [ "$i" -lt "$NFIND" ]; do
       if [ "${F_ID[$i]}" = "$control_finding" ]; then control_status=${F_ST[$i]}; break; fi
       i=$((i+1))
     done
+    if [ -z "$control_status" ]; then
+      add security "$control_ref" "CIS $control_ref (L$control_level)" NOT_ASSESSED low \
+          "not assessed - no finding produced for this control" \
+          "The control is implemented but no scanner finding carried its finding id, so no verdict can be produced." \
+          "n/a" \
+          "cis:$control_ref"
+      continue
+    fi
     case "$control_status" in
       PASS) SEC_ASSESSED=$((SEC_ASSESSED+1)); SEC_PASS=$((SEC_PASS+1));;
       WARN|FAIL) SEC_ASSESSED=$((SEC_ASSESSED+1));;
@@ -7756,23 +13158,48 @@ $CONTROL_ROWS
 PTXRAY_CONTROL_INPUT
 else
   # Outside the two verified benchmark releases, score the release-independent
-  # semantic predicates once per finding. Do not borrow a release-specific
-  # recommendation number or completeness denominator.
+  # semantic predicates once per semantic control. The dedup key is the scanner
+  # finding when the control carries one (multi-release rows for the same
+  # implemented control share it) and the cis reference otherwise, so an
+  # unimplemented control present in several releases contributes exactly one
+  # denominator entry and one typed NOT_ASSESSED row. Deduplication runs before
+  # disposition handling so an unimplemented row can never duplicate a finding
+  # already accepted for an implemented control.
   semantic_seen='|'
   while IFS='|' read control_release control_ref control_level control_automation control_disposition control_finding; do
     [ "$control_automation" = automated ] || continue
-    [ "$control_disposition" = implemented ] || continue
-    if [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ]; then continue; fi
-    [ -n "$control_finding" ] || continue
-    case "$semantic_seen" in *"|$control_finding|"*) continue;; esac
-    semantic_seen="$semantic_seen$control_finding|"
+    [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ] && continue
+    [ "$COMPLIANCE" = cis-l2 ] && [ "$control_level" != L2 ] && continue
+    if [ -n "$control_finding" ]; then
+      semantic_key=$control_finding
+    else
+      semantic_key=$control_ref
+    fi
+    case "$semantic_seen" in *"|$semantic_key|"*) continue;; esac
+    semantic_seen="$semantic_seen$semantic_key|"
     SEC_TOTAL=$((SEC_TOTAL+1))
+    if [ "$control_disposition" = unimplemented ]; then
+      add security "$control_ref" "CIS $control_ref (L$control_level)" NOT_ASSESSED low \
+          "not assessed - control not implemented in this edition" \
+          "The CIS benchmark control is not implemented in this scanner edition, so no verdict can be produced." \
+          "n/a" \
+          "cis:$control_ref"
+      continue
+    fi
     control_status=""
     i=0
     while [ "$i" -lt "$NFIND" ]; do
       if [ "${F_ID[$i]}" = "$control_finding" ]; then control_status=${F_ST[$i]}; break; fi
       i=$((i+1))
     done
+    if [ -z "$control_status" ]; then
+      add security "$control_ref" "CIS $control_ref (L$control_level)" NOT_ASSESSED low \
+          "not assessed - no finding produced for this control" \
+          "The control is implemented but no scanner finding carried its finding id, so no verdict can be produced." \
+          "n/a" \
+          "cis:$control_ref"
+      continue
+    fi
     case "$control_status" in
       PASS) SEC_ASSESSED=$((SEC_ASSESSED+1)); SEC_PASS=$((SEC_PASS+1));;
       WARN|FAIL) SEC_ASSESSED=$((SEC_ASSESSED+1));;
@@ -7828,9 +13255,10 @@ if [ "$FORMAT" = json ]; then
       while IFS='|' read control_release control_ref control_level control_automation control_disposition control_finding; do
         [ "$control_release" = "$MODEL_RELEASE" ] || continue
         [ "$control_automation" = automated ] || continue
-        [ "$control_disposition" = implemented ] || continue
-        [ "$control_finding" = "${F_ID[$i]}" ] || continue
-        if [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ]; then continue; fi
+        [ "$control_finding" = "${F_ID[$i]}" ] || [ "$control_ref" = "${F_ID[$i]}" ] || continue
+        [ "$control_disposition" = implemented ] || [ "$control_ref" = "${F_ID[$i]}" ] || continue
+        [ "$COMPLIANCE" = cis-l1 ] && [ "$control_level" != L1 ] && continue
+        [ "$COMPLIANCE" = cis-l2 ] && [ "$control_level" != L2 ] && continue
         [ -z "$control_tags" ] || control_tags="$control_tags "
         control_tags="${control_tags}cis:$control_ref"
       done <<PTXRAY_FINDING_CONTROL_INPUT

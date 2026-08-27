@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-root-browser-dirs",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_root_browser_dirs"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "find /root -name .netscape",
+    "find /root -name .mozilla"
+  ],
+  "tags": [
+    "stig:V-215191"
+  ],
+  "severity": "medium",
+  "blurb": "Administrative accounts must not run a web browser except as needed for local service administration. This partial-automation check identifies root browser profile directories and leaves authorization intent to the root users and ISSO.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-root-browser-dirs/ck-stig-root-browser-dirs.ksh"
+}

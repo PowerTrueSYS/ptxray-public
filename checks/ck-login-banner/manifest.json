@@ -14,7 +14,7 @@
   "tags": [
     "stig:V-215200"
   ],
-  "blurb": "The login banner is the notice the system shows before anyone signs in, stating that access is monitored and restricted. It supports the legal standing of auditing and deters casual or unauthorized access. When no banner is set, an auditor may flag the system as non-compliant and a casual intruder gets no warning that access is unauthorized.",
+  "blurb": "The login banner is the notice the system shows before anyone signs in, stating that access is monitored and restricted. It supports the legal standing of auditing and deters casual or unauthorized access. STIG V-215200 requires the banner to carry the Standard Mandatory DoD Notice and Consent Banner; a missing or non-conforming banner is non-compliant.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-login-banner/ck-login-banner.ksh"
 }

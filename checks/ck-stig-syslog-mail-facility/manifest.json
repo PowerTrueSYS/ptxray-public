@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-syslog-mail-facility",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_syslog_mail_facility"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "more /etc/syslog.conf"
+  ],
+  "tags": [
+    "stig:V-215314"
+  ],
+  "severity": "medium",
+  "blurb": "AIX must log TCPD events via syslogd with an uncommented mail. selector in /etc/syslog.conf. When that selector is missing, or the file itself is absent, TCPD is not logging.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-syslog-mail-facility/ck-stig-syslog-mail-facility.ksh"
+}

@@ -1,0 +1,21 @@
+{
+  "id": "ck-stig-lsitab-piobe",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_lsitab_piobe"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsitab piobe"
+  ],
+  "tags": [
+    "stig:V-215350"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that the piobe print job backend has no /etc/inittab entry. When the system does not support local or remote printing, STIG V-215350 requires the piobe service to be disabled; an inittab entry that init can start leaves an unnecessary print service available. Any output from \"lsitab piobe\" is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-lsitab-piobe/ck-stig-lsitab-piobe.ksh"
+}

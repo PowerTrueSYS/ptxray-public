@@ -1,0 +1,22 @@
+{
+  "id": "ck-stig-audit-records-produce-audit",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "stig_audit_records_produce_audit"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "grep trail /etc/security/audit/config",
+    "/usr/sbin/auditpr -i \"$AUD_PR_FILE\" -v"
+  ],
+  "tags": [
+    "stig:V-215237"
+  ],
+  "severity": "medium",
+  "blurb": "This check verifies that AIX audit records contain information establishing where events occurred. It reads the audit trail file named in /etc/security/audit/config and runs auditpr in verbose mode against that log; when event detailed information is displayed, the audit records establish where events occurred. A configured audit trail that auditpr cannot render as detail, or a missing audit trail configuration, is a finding.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-stig-audit-records-produce-audit/ck-stig-audit-records-produce-audit.ksh"
+}
