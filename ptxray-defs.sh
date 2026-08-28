@@ -142,7 +142,7 @@ ptxray_defs_select_openssl() {
       /opt/freeware/bin/openssl \
       /QOpenSys/pkgs/bin/openssl
   do
-    ptxray_defs_trusted_tool "$PTXRAY_DEFS_OPENSSL" \
+    PTXRAY_DEFS_OPENSSL=$(ptxray_defs_trusted_tool "$PTXRAY_DEFS_OPENSSL") \
       && { printf '%s\n' "$PTXRAY_DEFS_OPENSSL"; return 0; }
   done
   return 1
@@ -152,9 +152,10 @@ ptxray_defs_select_curl() {
   for PTXRAY_DEFS_CURL in \
       /usr/bin/curl \
       /opt/freeware/bin/curl \
+      /opt/freeware/bin/curl_64 \
       /QOpenSys/pkgs/bin/curl
   do
-    ptxray_defs_trusted_tool "$PTXRAY_DEFS_CURL" \
+    PTXRAY_DEFS_CURL=$(ptxray_defs_trusted_tool "$PTXRAY_DEFS_CURL") \
       && { printf '%s\n' "$PTXRAY_DEFS_CURL"; return 0; }
   done
   return 1
@@ -230,16 +231,38 @@ ptxray_defs_safe_dir() {
   PTXRAY_DEFS_LS=$(LC_ALL=C ls -ld "$PTXRAY_DEFS_DIR" 2>/dev/null) || return 1
   PTXRAY_DEFS_MODE=$(printf '%s\n' "$PTXRAY_DEFS_LS" | awk '{print $1}')
   PTXRAY_DEFS_OWNER=$(printf '%s\n' "$PTXRAY_DEFS_LS" | awk '{print $3}')
+  PTXRAY_DEFS_GROUP=$(printf '%s\n' "$PTXRAY_DEFS_LS" | awk '{print $4}')
   PTXRAY_DEFS_ME=$(id -un 2>/dev/null) || return 1
   [ "$PTXRAY_DEFS_OWNER" = root ] || [ "$PTXRAY_DEFS_OWNER" = bin ] \
     || [ "$PTXRAY_DEFS_OWNER" = QSYS ] || [ "$PTXRAY_DEFS_OWNER" = QSECOFR ] \
     || [ "$PTXRAY_DEFS_OWNER" = "$PTXRAY_DEFS_ME" ] || return 1
-  [ "$(printf '%s' "$PTXRAY_DEFS_MODE" | cut -c6)" != w ] \
-    && [ "$(printf '%s' "$PTXRAY_DEFS_MODE" | cut -c9)" != w ]
+  # World-writable directories are never trusted. Group-writable is allowed
+  # only when the owner is root and the group is AIX system (gid 0) or IBM i
+  # 0, matching IBM's shipped /opt/freeware 775 layout.
+  [ "$(printf '%s' "$PTXRAY_DEFS_MODE" | cut -c9)" != w ] || return 1
+  if [ "$(printf '%s' "$PTXRAY_DEFS_MODE" | cut -c6)" = w ]; then
+    [ "$PTXRAY_DEFS_OWNER" = root ] || return 1
+    [ "$PTXRAY_DEFS_GROUP" = system ] || [ "$PTXRAY_DEFS_GROUP" = 0 ] || return 1
+  fi
+  return 0
 }
 
 ptxray_defs_trusted_tool() {
   PTXRAY_DEFS_TOOL=$1
+  if [ -L "$PTXRAY_DEFS_TOOL" ]; then
+    PTXRAY_DEFS_LS=$(LC_ALL=C ls -l "$PTXRAY_DEFS_TOOL" 2>/dev/null) || return 1
+    PTXRAY_DEFS_OWNER=$(printf '%s\n' "$PTXRAY_DEFS_LS" | awk '{print $3}')
+    [ "$PTXRAY_DEFS_OWNER" = root ] || [ "$PTXRAY_DEFS_OWNER" = bin ] \
+      || [ "$PTXRAY_DEFS_OWNER" = QSYS ] || [ "$PTXRAY_DEFS_OWNER" = QSECOFR ] \
+      || return 1
+    PTXRAY_DEFS_LINK_TARGET=$(printf '%s\n' "$PTXRAY_DEFS_LS" | awk '{
+      for (i = 1; i <= NF; i++) if ($i == "->") { print $(i+1); exit }
+    }')
+    case "$PTXRAY_DEFS_LINK_TARGET" in
+      ''|.|..|/*|*/*) return 1;;
+    esac
+    PTXRAY_DEFS_TOOL=$(dirname "$PTXRAY_DEFS_TOOL")/$PTXRAY_DEFS_LINK_TARGET
+  fi
   [ -x "$PTXRAY_DEFS_TOOL" ] && [ -f "$PTXRAY_DEFS_TOOL" ] \
     && [ ! -L "$PTXRAY_DEFS_TOOL" ] || return 1
   PTXRAY_DEFS_LS=$(LC_ALL=C ls -ld "$PTXRAY_DEFS_TOOL" 2>/dev/null) || return 1
@@ -258,7 +281,10 @@ ptxray_defs_trusted_tool() {
     2>/dev/null && (pwd -P 2>/dev/null || pwd)) || return 1
   while :; do
     ptxray_defs_safe_dir "$PTXRAY_DEFS_TOOL_DIR" || return 1
-    [ "$PTXRAY_DEFS_TOOL_DIR" = / ] && return 0
+    if [ "$PTXRAY_DEFS_TOOL_DIR" = / ]; then
+      printf '%s\n' "$PTXRAY_DEFS_TOOL"
+      return 0
+    fi
     PTXRAY_DEFS_TOOL_PARENT=${PTXRAY_DEFS_TOOL_DIR%/*}
     [ -n "$PTXRAY_DEFS_TOOL_PARENT" ] || PTXRAY_DEFS_TOOL_PARENT=/
     [ "$PTXRAY_DEFS_TOOL_PARENT" != "$PTXRAY_DEFS_TOOL_DIR" ] || return 1
@@ -622,10 +648,17 @@ ptxray_defs_parse_authenticated() {
     tr -d '\n' <"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.b64" \
       | "$PTXRAY_DEFS_OPENSSL" base64 -d -A \
           -out "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N" 2>/dev/null || return 1
-    PTXRAY_DEFS_REENCODED=$("$PTXRAY_DEFS_OPENSSL" base64 -A \
-      -in "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N" 2>/dev/null) || return 1
-    PTXRAY_DEFS_ORIGINAL=$(tr -d '\n' <"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.b64")
-    [ "$PTXRAY_DEFS_REENCODED" = "$PTXRAY_DEFS_ORIGINAL" ] || return 1
+    "$PTXRAY_DEFS_OPENSSL" base64 -A \
+      -in "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N" \
+      -out "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded" 2>/dev/null || return 1
+    tr -d '\n' <"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded" \
+      >"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded.tmp" || return 1
+    mv "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded.tmp" \
+      "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded" || return 1
+    tr -d '\n' <"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.b64" \
+      >"$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.canon" || return 1
+    cmp -s "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.reencoded" \
+      "$PTXRAY_DEFS_WORK/payload-$PTXRAY_DEFS_N.canon" || return 1
   done
   [ "$(wc -c <"$PTXRAY_DEFS_WORK/payload-1" | tr -d ' ')" = "$PTXRAY_DEFS_KEV_BYTES" ] \
     && [ "$(ptxray_defs_sha256 "$PTXRAY_DEFS_WORK/payload-1")" = "$PTXRAY_DEFS_KEV_SHA" ] || return 1
@@ -639,14 +672,18 @@ ptxray_defs_parse_authenticated() {
     PTXRAY_DEFS_NUL=$(od -An -tx1 "$PTXRAY_DEFS_DATA" 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="00"){print 1;exit}}')
     [ -z "$PTXRAY_DEFS_NUL" ] || return 1
   done
-  PTXRAY_DEFS_KEV_META=$(ptxray_defs_validate_kev \
+  ptxray_defs_validate_kev \
     "$PTXRAY_DEFS_WORK/payload-1" \
-    "$PTXRAY_DEFS_WORK/cisa-kev-cves.unsorted") || return 1
+    "$PTXRAY_DEFS_WORK/cisa-kev-cves.unsorted" \
+    >"$PTXRAY_DEFS_WORK/kev-meta" || return 1
+  IFS= read -r PTXRAY_DEFS_KEV_META <"$PTXRAY_DEFS_WORK/kev-meta" || return 1
   LC_ALL=C sort -u "$PTXRAY_DEFS_WORK/cisa-kev-cves.unsorted" \
     >"$PTXRAY_DEFS_WORK/cisa-kev-cves.txt" || return 1
   rm -f "$PTXRAY_DEFS_WORK/cisa-kev-cves.unsorted" || return 1
   [ -s "$PTXRAY_DEFS_WORK/cisa-kev-cves.txt" ] || return 1
-  PTXRAY_DEFS_APAR_META=$(ptxray_defs_validate_apar "$PTXRAY_DEFS_WORK/payload-2") || return 1
+  ptxray_defs_validate_apar "$PTXRAY_DEFS_WORK/payload-2" \
+    >"$PTXRAY_DEFS_WORK/apar-meta" || return 1
+  IFS= read -r PTXRAY_DEFS_APAR_META <"$PTXRAY_DEFS_WORK/apar-meta" || return 1
   [ "$PTXRAY_DEFS_KEV_META" = "$PTXRAY_DEFS_KEV_VERSION|$PTXRAY_DEFS_KEV_ASOF" ] || return 1
   [ "$PTXRAY_DEFS_APAR_META" = "$PTXRAY_DEFS_APAR_VERSION|$PTXRAY_DEFS_APAR_ASOF" ] || return 1
   ptxray_defs_valid_ymd "$PTXRAY_DEFS_KEV_ASOF" && ptxray_defs_valid_ymd "$PTXRAY_DEFS_APAR_ASOF"
@@ -680,7 +717,7 @@ ptxray_defs_verify_work() {
     case "$PTXRAY_DEFS_MIN_SEQUENCE" in ''|*[!0-9]*) return 1;; esac
     if [ "${#PTXRAY_DEFS_SEQUENCE}" -lt "${#PTXRAY_DEFS_MIN_SEQUENCE}" ] \
         || { [ "${#PTXRAY_DEFS_SEQUENCE}" -eq "${#PTXRAY_DEFS_MIN_SEQUENCE}" ] \
-             && [ "$PTXRAY_DEFS_SEQUENCE" \< "$PTXRAY_DEFS_MIN_SEQUENCE" ]; }; then
+             && ptxray_defs_str_lt "$PTXRAY_DEFS_SEQUENCE" "$PTXRAY_DEFS_MIN_SEQUENCE"; }; then
       ptxray_defs_fail rollback
       return $?
     fi
@@ -883,9 +920,15 @@ ptxray_defs_valid_generation_name() {
     END{exit ok?0:1}'
 }
 
+# ksh88 /bin/sh has no string-less test operator. Equal-length lexical less-than.
+ptxray_defs_str_lt() {
+  [ "$1" != "$2" ] \
+    && [ "$(printf '%s\n%s\n' "$1" "$2" | LC_ALL=C sort | head -n 1)" = "$1" ]
+}
+
 ptxray_defs_sequence_less() {
   [ "${#1}" -lt "${#2}" ] \
-    || { [ "${#1}" -eq "${#2}" ] && [ "$1" \< "$2" ]; }
+    || { [ "${#1}" -eq "${#2}" ] && ptxray_defs_str_lt "$1" "$2"; }
 }
 
 ptxray_defs_acquire_publish_lock() {
@@ -1142,12 +1185,14 @@ ptxray_defs_snapshot_copy() {
   PTXRAY_DEFS_SNAPSHOT_SOURCE=$1
   PTXRAY_DEFS_SNAPSHOT_NAME=$2
   PTXRAY_DEFS_SNAPSHOT_EXPECTED=$3
+  PTXRAY_DEFS_SNAPSHOT_LIMIT=$PTXRAY_DEFS_MAX_PAYLOAD
+  [ "$#" -ge 4 ] && PTXRAY_DEFS_SNAPSHOT_LIMIT=$4
   PTXRAY_DEFS_SNAPSHOT_PATH=$PTXRAY_DEFS_SNAPSHOT_DIR/$PTXRAY_DEFS_SNAPSHOT_NAME
   [ ! -e "$PTXRAY_DEFS_SNAPSHOT_PATH" ] \
     && [ ! -L "$PTXRAY_DEFS_SNAPSHOT_PATH" ] || return 1
   (set -C; umask 077; : >"$PTXRAY_DEFS_SNAPSHOT_PATH") 2>/dev/null || return 1
   ptxray_defs_copy_bounded "$PTXRAY_DEFS_SNAPSHOT_SOURCE" \
-    "$PTXRAY_DEFS_SNAPSHOT_PATH" "$PTXRAY_DEFS_MAX_PAYLOAD" || return 1
+    "$PTXRAY_DEFS_SNAPSHOT_PATH" "$PTXRAY_DEFS_SNAPSHOT_LIMIT" || return 1
   chmod 600 "$PTXRAY_DEFS_SNAPSHOT_PATH" 2>/dev/null || return 1
   PTXRAY_DEFS_SNAPSHOT_FILE_ID=$(ptxray_defs_cache_file_identity \
     "$PTXRAY_DEFS_SNAPSHOT_PATH") || return 1
@@ -1186,12 +1231,15 @@ ptxray_defs_snapshot_current() {
       cisa-kev-cves.txt "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA" \
     && ptxray_defs_snapshot_copy "$PTXRAY_DEFS_WORK/payload-2" \
       ibm-apar.csv "$PTXRAY_DEFS_APAR_SHA" \
+    && ptxray_defs_snapshot_copy "$PTXRAY_DEFS_WORK/bundle" \
+      bundle.ptxray-defs "$PTXRAY_DEFS_BUNDLE_SHA" "$PTXRAY_DEFS_MAX_BUNDLE" \
     && [ "$PTXRAY_DEFS_SNAPSHOT_DIR_ID" = "$(ptxray_defs_cache_dir_identity \
       "$PTXRAY_DEFS_SNAPSHOT_DIR")" ] \
     || { ptxray_defs_fail unsafe-cache; return $?; }
-  printf 'PTXRAY-DEFS|1|snapshot|generation=%s|kev_sha256=%s|cves_sha256=%s|apar_sha256=%s\n' \
+  printf 'PTXRAY-DEFS|1|snapshot|generation=%s|kev_sha256=%s|cves_sha256=%s|apar_sha256=%s|bundle_sha256=%s\n' \
     "$PTXRAY_DEFS_GENERATION" "$PTXRAY_DEFS_KEV_SHA" \
-    "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA" "$PTXRAY_DEFS_APAR_SHA"
+    "$PTXRAY_DEFS_SNAPSHOT_CVES_SHA" "$PTXRAY_DEFS_APAR_SHA" \
+    "$PTXRAY_DEFS_BUNDLE_SHA"
   PTXRAY_DEFS_SNAPSHOT_ACTIVE=0
   PTXRAY_DEFS_SNAPSHOT_DIR=
   PTXRAY_DEFS_SNAPSHOT_DIR_ID=

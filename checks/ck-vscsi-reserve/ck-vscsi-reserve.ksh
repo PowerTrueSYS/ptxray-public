@@ -772,32 +772,13 @@ AIXRAY_TOOL=ck-vscsi-reserve
 
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
-  # vscsi_maps — virtual SCSI mappings with a missing backing device.
+  # vscsi_reserve — the silent killer of dual-VIOS vSCSI (NEW).
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
-  # 'lsmap -all': a vhost's VTD names its "Backing device"; VIOS prints "NO VIRTUAL TARGET
-  # DEVICE FOUND" for an empty vhost, and a VTD "Status Defined" (not Available) is a
-  # broken/offline mapping — either way the client LPAR's vSCSI disk is not being served.
+  # 'lsmap -all': a vhost's VTD names its "Backing device". Mapping posture is
+  # ck-vscsi-maps; this door only grades reserve_policy on those backing LUNs.
   VSRAW=$(aix lsmap_vscsi ioscli lsmap -all)
   VSRAW_RC=$?
   if [ "$VSRAW_RC" -eq 0 ] && [ -n "$VSRAW" ] && printf '%s\n' "$VSRAW" | awk '$1 ~ /^vhost[0-9]/{f=1} END{exit f?0:1}'; then
-    # Separate awk passes for the same ksh ${%%|*} reason noted in npiv_maps above.
-    VSTOT=$(printf '%s\n' "$VSRAW" | awk '$1 ~ /^vhost[0-9]/{n++} END{print n+0}')
-    VSBAD=$(printf '%s\n' "$VSRAW" | awk '/NO VIRTUAL TARGET DEVICE FOUND/{n++} $1=="Status" && $2=="Defined"{n++} END{print n+0}')
-    VSLIST=$(printf '%s\n' "$VSRAW" | awk '
-      $1 ~ /^vhost[0-9]/ { vh=$1 }
-      /NO VIRTUAL TARGET DEVICE FOUND/ { printf "%s%s (no VTD)", (n++?", ":""), vh }
-      $1=="Status" && $2=="Defined" { printf "%s%s (Defined)", (n++?", ":""), vh }')
-    if [ "${VSBAD:-0}" -gt 0 ]; then
-      add storage vscsi_maps "Virtual SCSI mappings" WARN high "$VSBAD issue(s) across $VSTOT vhost: $VSLIST" \
-          "A virtual-SCSI host adapter has no backing device, or a target device is Defined (offline) — the client LPAR mapped to it is not being served that vSCSI disk (a rebuild or a failed backing hdisk usually left it behind)." \
-          "map the missing backing device ('mkvdev -vdev <hdisk> -vadapter <vhost>') or clear the stale one; on a dual-VIOS pair confirm the client still reaches the disk via the other VIOS."
-    else
-      add storage vscsi_maps "Virtual SCSI mappings" PASS low "$VSTOT vhost mapping(s), all backed" \
-          "Every virtual-SCSI host adapter on this VIOS has a live backing device — the client LPARs' vSCSI disks served by this VIOS are mapped." "n/a"
-    fi
-
-    # vscsi_reserve — the silent killer of dual-VIOS vSCSI (NEW).
-    # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
     # For a LUN to be served by BOTH VIOS (vSCSI failover), the backing hdisk must NOT hold a
     # SCSI reservation: reserve_policy=no_reserve (older attr reserve_lock=no). If a backing
     # LUN is single_path / PR_exclusive / reserve_lock=yes, the OTHER VIOS physically cannot
@@ -866,13 +847,9 @@ _AIXRAY_SESSION_KEYS=""
     # when the probe genuinely returned no vhost mapping — live mode, or a present
     # capture with no vhost. A missing capture refuses (NOT_ASSESSED) instead.
     if aix_capture_missing lsmap_vscsi; then
-      add storage vscsi_maps "Virtual SCSI mappings" NOT_ASSESSED low "vSCSI map probe has no capture — applicability not determinable" \
-          "The vSCSI map probe (ioscli lsmap -all) has no capture, so the absence of a vhost mapping cannot prove this box has no vSCSI stack — a failed capture refuses rather than confirms absence." "n/a"
       add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_ASSESSED low "vSCSI map probe has no capture — applicability not determinable" \
           "The vSCSI map probe (ioscli lsmap -all) has no capture, so the absence of a vhost mapping cannot prove this box has no vSCSI stack — a failed capture refuses rather than confirms absence." "n/a"
     else
-      add storage vscsi_maps "Virtual SCSI mappings" NOT_APPLICABLE low "no vhost mappings" \
-          "No virtual-SCSI host adapter (vhost) is present, so there are no vSCSI mappings to check — this control does not apply on a box with no vhost." "n/a"
       add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_APPLICABLE low "no vSCSI host adapter (vhost) on this box" \
           "No virtual-SCSI host adapter (vhost) is present, so there is no vSCSI backing LUN whose reservation policy could be checked — dual-VIOS vSCSI failover does not apply here." "n/a"
     fi

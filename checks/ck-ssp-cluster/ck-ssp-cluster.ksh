@@ -804,7 +804,7 @@ _AIXRAY_SESSION_KEYS=""
     fi
   fi
   if [ "$CLPRESENT" -ne 1 ]; then
-    add resilience ssp_cluster "Shared Storage Pool cluster" NOT_APPLICABLE info \
+    add resilience ssp_cluster "Shared Storage Pool cluster" NOT_APPLICABLE none \
         "no CAA/SSP cluster present" \
         "No Shared Storage Pool / CAA cluster is defined on this system — the SSP cluster control does not apply." \
         "n/a"

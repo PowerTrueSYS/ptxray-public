@@ -2877,13 +2877,13 @@ function load_finding_label_contract() {
   FINDING_LABEL["fileset_state"] = "Fileset consistency"
   FINDING_LABEL["firmware"] = "System firmware currency"
   FINDING_LABEL["firmware_uak_expiry"] = "Firmware Update Access Key"
-  FINDING_LABEL["fs_/"] = "Filesystem /"
-  FINDING_LABEL["fs_/tmp"] = "Filesystem /tmp"
-  FINDING_LABEL["fs_/var"] = "Filesystem /var"
   FINDING_LABEL["fs_inodes"] = "Inode usage (JFS2)"
   FINDING_LABEL["fs_jfs_nodev"] = "JFS nodev mount option"
   FINDING_LABEL["fs_lv_slack"] = "Filesystem vs LV sizing"
   FINDING_LABEL["fs_other"] = "Other filesystems"
+  FINDING_LABEL["fs_root"] = "Filesystem /"
+  FINDING_LABEL["fs_tmp"] = "Filesystem /tmp"
+  FINDING_LABEL["fs_var"] = "Filesystem /var"
   FINDING_LABEL["fsbuf_blocking"] = "JFS2 filesystem-buffer blocking"
   FINDING_LABEL["ftpd_login_banner"] = "ftpd login banner"
   FINDING_LABEL["ftpd_root_denied"] = "FTP root deny"
@@ -3188,8 +3188,8 @@ function load_renderer_finding_contract() {
     "fileperm_sshdconfig_group fileperm_sshdconfig_mode " \
     "fileperm_sshdconfig_owner fileperm_submitcf_mode fileperm_syslog_group " \
     "fileperm_syslog_mode fileperm_syslog_owner fileset_state firmware " \
-    "firmware_uak_expiry fs_/ fs_/tmp fs_/var fs_inodes fs_jfs_nodev " \
-    "fs_lv_slack fs_other fsbuf_blocking ftpd_login_banner ftpd_root_denied " \
+    "firmware_uak_expiry fs_inodes fs_jfs_nodev fs_lv_slack fs_other fs_root " \
+    "fs_tmp fs_var fsbuf_blocking ftpd_login_banner ftpd_root_denied " \
     "group_gid_duplicate groupwrite_staff_files hd5_sizing " \
     "home_config_file_perms host_resolves hosts_equiv_absent " \
     "hosts_equiv_entries hw_gen ifixes inetd_bootps inetd_chargen " \

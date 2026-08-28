@@ -3,7 +3,6 @@
   "pillar": "backup",
   "category": "resilience",
   "finding_ids": [
-    "sea_failover",
     "vios_topology"
   ],
   "captures": [],

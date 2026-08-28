@@ -806,47 +806,6 @@ _AIXRAY_SESSION_KEYS=""
       if [ "$RC_ESTAT" -ne 0 ]; then SST="?"; fi
       SEADET="$SEADET${SEADET:+; }$SEA ha_mode=$HAM ctl_chan=${CTL:-none} priority=${PRIO:-unset} state=$SST"
     done
-    if [ "$NOLSA" -gt 0 ]; then
-      add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
-          "not assessed — the SEA attribute probe failed for $NOLSA SEA(s) (rc=$LSAFAIL_RC)" \
-          "The SEA list was read, but 'lsattr -El <sea>' failed for one or more SEAs — an empty ha_mode from a failed probe must not be read as 'not configured for failover'." \
-          "re-run 'lsattr -El <sea>' on the box and inspect its error before grading SEA failover posture."
-    elif [ "$BADHA" -gt 0 ]; then
-      add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
-          "A Shared Ethernet Adapter on this VIOS is not configured for failover (ha_mode not auto/standby) — a second VIOS cannot take over the bridge, so every client LPAR bridged through this SEA loses its network the moment this VIOS goes down. This is not a redundant network." \
-          "set the SEA for failover ('chdev -dev <sea> -attr ha_mode=auto ctl_chan=<ent> priority=<n>'), give the pair distinct priorities, and confirm the partner VIOS's SEA ('entstat -d <sea>' on both)."
-    elif [ "$NOCTL" -gt 0 ] && [ "$CLPRESENT" -eq 0 ]; then
-      add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
-          "A Shared Ethernet Adapter is set to fail over but has no control channel (ctl_chan) and no CAA cluster to replace it — the two VIOS cannot arbitrate primary/backup, so a failover can leave both bridging at once (split-brain: duplicated frames, a broadcast storm) or neither." \
-          "add a control-channel adapter/VLAN ('mkvdev -sea ...'/'chdev -dev <sea> -attr ctl_chan=<ent>'), or adopt the CAA control-channel-less method on a supported VIOS level; verify on both VIOS."
-    elif [ "$NOCTL" -gt 0 ]; then
-      add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
-          "A Shared Ethernet Adapter has no ctl_chan, but a CAA cluster is present — the newer control-channel-less SEA failover uses the cluster instead. Likely intentional; confirm it is actually the CAA method and not a half-removed control channel." \
-          "confirm the SEA uses CAA-based failover (supported VIOS level + cluster) rather than a lost control channel; check the partner VIOS's SEA config too."
-    elif [ "$NOPRIO" -gt 0 ]; then
-      add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
-          "The SEA is set for failover with a control channel, but a priority is unset/unreadable — without distinct priorities across the pair the primary/backup roles are undefined and can flap." \
-          "set a priority on each side ('chdev -dev <sea> -attr priority=<n>'), distinct between the two VIOS (e.g. 1 and 2)."
-    else
-      add resilience sea_failover "SEA failover posture" PASS low "$SEADET" \
-          "This VIOS's Shared Ethernet Adapter(s) are configured for failover (ha_mode auto/standby, a control channel set, a priority set) — the network bridge is set up to survive this VIOS. Single-box scan: confirm the partner VIOS's SEA (priority + state on the other LPAR) to prove the pair actually fails over." \
-          "n/a"
-    fi
-  else
-    # Envelope: sea_failover must emit even when there is no SEA to grade.
-    # rc>=2 is a probe failure and cannot establish absence; rc 0 with an
-    # empty list, and the defined absence rc (1), are determinate.
-    if [ "$RC_SEA" -ge 2 ]; then
-      add resilience sea_failover "SEA failover posture" NOT_ASSESSED med \
-          "not assessed — the SEA probe failed (rc=$RC_SEA)" \
-          "The SEA list could not be read, so SEA failover posture cannot be graded — a failed probe must not be read as 'no SEA configured'." \
-          "re-run 'lsdev -t sea' on the box and inspect its error before grading SEA failover posture."
-    else
-      add resilience sea_failover "SEA failover posture" NOT_APPLICABLE low \
-          "no SEA configured" \
-          "No Shared Ethernet Adapter is visible on this box, so there is no SEA failover posture to assess — a plain AIX LPAR (not a VIOS), or a VIOS with no SEA, is outside this finding's scope." \
-          "n/a"
-    fi
   fi
 
   # vios_topology — single-vs-dual VIOS & the box-level SPOF verdict (NEW).

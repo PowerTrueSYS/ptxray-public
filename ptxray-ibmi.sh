@@ -25,7 +25,7 @@ LC_ALL=C
 export LC_ALL
 PTXRAY_SELF=$0
 PTXRAY_DEFS_INTEGRATION=1
-PTXRAY_DEFS_DOWNLOADER_SHA256='bfaad949ab4cf11076a3da7af5a31c68060b771edaf8c9ec467e6d8eee06fdc5'
+PTXRAY_DEFS_DOWNLOADER_SHA256='70230ba03d69710bb9f165e65bc492e61a8a9a07d6f82727718bb1fe01a62612'
 # Shared post-identity-gate selector for the adjacent signed-data downloader.
 # This module contains no transport implementation and no endpoint. Assemblers
 # bind the exact same-release downloader digest above it.
@@ -2246,7 +2246,7 @@ else
           [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
             # Shape alone is not enough: valid_ymd rejects impossible calendar
             # dates (2026-99-99, 2026-02-30) before the Julian conversion.
-            if valid_ymd "$LIFE_AS_OF"; then
+            if [ "$(valid_ymd "$LIFE_AS_OF")" = 1 ]; then
               AS_OF_J=$(d2j "$LIFE_AS_OF")
             fi
             ;;
@@ -2295,7 +2295,7 @@ else
                 [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9])
                   # Same real-calendar gate as as_of: an impossible EOS date
                   # (2026-99-99) must refuse, not compute a nonsense support day.
-                  if valid_ymd "$EOS"; then
+                  if [ "$(valid_ymd "$EOS")" = 1 ]; then
                     EOSJ=$(d2j "$EOS")
                   fi
                   ;;

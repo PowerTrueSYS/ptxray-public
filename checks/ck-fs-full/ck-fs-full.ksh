@@ -769,9 +769,10 @@ set -A CR_PROVENANCE 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknow
 
 AIXRAY_TOOL=ck-fs-full
 
+
+function standalone_check {
 _AIXRAY_SESSION_KEYS=""
-function checks_storage {
-  typeset DFRAW DFG DFRC DFROWS DFPARSE_OK DFNOTE M U OTH LSPS LSPSRC LSPS_OK LSPSWHY NPS MAXU MAXU_FACT VGL VGLRC VGL_OK VGLWHY VG LVOUT LVRC PVOUT PVRC S MP STALE MISSPV VG_STALE_GAP VG_PVS_GAP ROOTVG_LVL_OK VG_PVLIST VG_PVLIST_RC VG_PVLIST_OK VG_PVLIST_WHY LSP RC BAD DIS SINGLE NP ND
+  typeset DFRAW DFG DFRC DFROWS DFPARSE_OK DFNOTE M FSID U OTH LSPS LSPSRC LSPS_OK LSPSWHY NPS MAXU MAXU_FACT VGL VGLRC VGL_OK VGLWHY VG LVOUT LVRC PVOUT PVRC S MP STALE MISSPV VG_STALE_GAP VG_PVS_GAP ROOTVG_LVL_OK VG_PVLIST VG_PVLIST_RC VG_PVLIST_OK VG_PVLIST_WHY LSP RC BAD DIS SINGLE NP ND
   typeset INHI NVG ALLROOT DUPPV PGNOTE VGO TOT FRE P WORSTP LOWVG ANYLOW LSADP FCS A FST LF LS CRC FCBAD FCTXT
   typeset FCNR FCN FCUR FRC VSCSI VSNOTE FSO NFAIL NWARN NBAD FAILLIST WARNLIST REPOLIST BADLIST OBS PHYS
   typeset INODESTATE INBAD INSEV
@@ -880,7 +881,8 @@ function checks_storage {
       DFNOTE="df -g completed without any parseable data rows; zero filesystem rows were available as evidence"
     fi
     for M in / /var /tmp; do
-      add storage "fs_$M" "Filesystem $M" NOT_ASSESSED high \
+      FSID=$(printf '%s\n' "$M" | sed 's#^/$#root#; s#^/##; s#/#_#g')
+      add storage "fs_$FSID" "Filesystem $M" NOT_ASSESSED high \
           "$OBS" \
           "Filesystem use could not be assessed because $DFNOTE." \
           "rerun 'df -g' successfully, then rerun PTxray before treating filesystem capacity as healthy."
@@ -895,6 +897,7 @@ function checks_storage {
         "rerun 'df -g' successfully, then rerun PTxray before relying on inode headroom."
   else
   for M in / /var /tmp; do
+    FSID=$(printf '%s\n' "$M" | sed 's#^/$#root#; s#^/##; s#/#_#g')
     U=$(printf '%s\n' "$DFG" | awk -v m="$M" '
       $NF==m {
         raw=$4
@@ -903,7 +906,7 @@ function checks_storage {
         exit
       }')
     if [ -z "$U" ]; then
-      add storage "fs_$M" "Filesystem $M" NOT_ASSESSED high \
+      add storage "fs_$FSID" "Filesystem $M" NOT_ASSESSED high \
           "not assessed — no complete df -g row for $M" \
           "Filesystem use could not be assessed because df -g did not contain a complete row for $M; the capture may be incomplete or the mount may be absent." \
           "verify 'df -g $M' returns a complete row, then rerun PTxray before relying on this filesystem assessment."
@@ -919,18 +922,18 @@ function checks_storage {
       }
       END{if(!seen) print "unreadable"}')
     if [ "$UCLASS" = unreadable ]; then
-      add storage "fs_$M" "Filesystem $M" NOT_ASSESSED low "not assessed — unreadable %Used" \
+      add storage "fs_$FSID" "Filesystem $M" NOT_ASSESSED low "not assessed — unreadable %Used" \
           "Filesystem use not assessed — df returned an unreadable or implausible %Used token." \
           "check 'df -g $M' manually and correct the reporting source before relying on this result."
     elif [ "$UCLASS" = fail ]; then
-      add storage "fs_$M" "Filesystem $M" FAIL high "${U}% used" \
+      add storage "fs_$FSID" "Filesystem $M" FAIL high "${U}% used" \
           "Critically low free space — a full $M stops logging, spooling, even login." \
           "free space now or extend the filesystem (chfs -a size=+1G $M); add an 80% alert."
     elif [ "$UCLASS" = warn ]; then
-      add storage "fs_$M" "Filesystem $M" WARN med "${U}% used" \
+      add storage "fs_$FSID" "Filesystem $M" WARN med "${U}% used" \
           "Getting tight — risk of a fill-up outage." "clean up or extend; set an 80% alert."
     else
-      add storage "fs_$M" "Filesystem $M" PASS low "${U}% used" "Healthy free space." "n/a"
+      add storage "fs_$FSID" "Filesystem $M" PASS low "${U}% used" "Healthy free space." "n/a"
     fi
   done
   # Other filesystems >=90%. inst.images mounts are deliberately-full install
@@ -1018,11 +1021,10 @@ function checks_storage {
         "JFS2 inode usage has headroom on every filesystem." "n/a"
   fi
   fi
-
 }
 
 function standalone_run {
-  checks_storage
+  standalone_check
 }
 
 standalone_main "$@"

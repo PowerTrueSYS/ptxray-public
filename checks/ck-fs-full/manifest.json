@@ -3,9 +3,9 @@
   "pillar": "stability",
   "category": "storage",
   "finding_ids": [
-    "fs_/",
-    "fs_/var",
-    "fs_/tmp",
+    "fs_root",
+    "fs_var",
+    "fs_tmp",
     "fs_other",
     "fs_inodes"
   ],

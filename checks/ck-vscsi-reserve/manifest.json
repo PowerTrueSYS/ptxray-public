@@ -3,7 +3,6 @@
   "pillar": "resiliency",
   "category": "storage",
   "finding_ids": [
-    "vscsi_maps",
     "vscsi_reserve"
   ],
   "captures": [],

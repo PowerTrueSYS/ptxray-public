@@ -2984,9 +2984,9 @@
       "pillar": "stability",
       "category": "storage",
       "finding_ids": [
-        "fs_/",
-        "fs_/var",
-        "fs_/tmp",
+        "fs_root",
+        "fs_var",
+        "fs_tmp",
         "fs_other",
         "fs_inodes"
       ],
@@ -3000,7 +3000,7 @@
       "blurb": "This check measures how full every filesystem is, including the root, /var, and /tmp mounts and all other storage volumes, and how much capacity is left for new files. A filesystem that fills up can no longer write logs, spool jobs, or complete user logins, and any service that needs to write to it stops. A near-full filesystem is an early warning that an outage is about to happen.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-fs-full/ck-fs-full.ksh",
-      "sha256": "bde5286f7d83771f0fc4a9be6f5dde859ed6b730da559cd83fcb44df012ef2d1"
+      "sha256": "dd09feb5488f2a424fbaded199062601169e0cb668f4cd5a1c08977840ecac1e"
     },
     {
       "id": "ck-fs-jfs-nodev",
@@ -7302,7 +7302,7 @@
       "blurb": "This check reports the health of the Shared Storage Pool (SSP) / CAA cluster on a VIOS. If a node or the pool reports DOWN, DEGRADED, FAILED or INCOMPLETE, shared storage for the SSP may have lost a redundant path, so it warns. When the cluster and all nodes report OK it passes, and when no cluster is defined it is not applicable.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-ssp-cluster/ck-ssp-cluster.ksh",
-      "sha256": "a6e5af99e371b0e63a68bac16af365ba21e02e844c0efaafb176a6709db50a74"
+      "sha256": "abf5b827b4c174a8c9fe12715448100ad125a5d9f38c4dcda1dce50b3b92fbf5"
     },
     {
       "id": "ck-stale-privileged-accounts",
@@ -12761,7 +12761,6 @@
       "pillar": "backup",
       "category": "resilience",
       "finding_ids": [
-        "sea_failover",
         "vios_topology"
       ],
       "captures": [],
@@ -12777,7 +12776,7 @@
       "blurb": "This check inspects the Shared Ethernet Adapter of a VIOS and CAA cluster state to infer whether the box is a single point of failure. A failover-ready SEA (ha_mode auto/standby, a control channel, a priority) or a CAA cluster implies a partner VIOS and passes; a SEA that cannot fail over, with no cluster to replace it, fails; and when no SEA and no cluster are visible the check reports not-applicable. It also records the SEA failover posture as its own finding.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-vios-topology/ck-vios-topology.ksh",
-      "sha256": "720375a4bca944e1939e4eb8dbba15591e340099a0a7c41f44fa37e0dbc761b0"
+      "sha256": "62f2b571b750943e26804b4e358db541ab30a229c34cb0730ff0cdd0283f5f2a"
     },
     {
       "id": "ck-vmm-tuning",
@@ -12823,7 +12822,6 @@
       "pillar": "resiliency",
       "category": "storage",
       "finding_ids": [
-        "vscsi_maps",
         "vscsi_reserve"
       ],
       "captures": [],
@@ -12837,7 +12835,7 @@
       "blurb": "This check confirms every vSCSI backing LUN on a VIOS is free of SCSI reservation (reserve_policy no_reserve), so dual-VIOS vSCSI failover can actually work. A reserved backing LUN fails silently: everything looks mapped and dual, but the partner VIOS cannot open the LUN and the disk of the client never comes back on failover.",
       "license": "Apache-2.0",
       "artifact": "checks/ck-vscsi-reserve/ck-vscsi-reserve.ksh",
-      "sha256": "53025e99df4b7bd462cc2f3600852e5bda7c65b28a37b3e3030cdf0603f03dbe"
+      "sha256": "d35ded91f22eefdfb2b3d62072f6cf98bc51e93697d3bb5a63931b56b73e2f3e"
     },
     {
       "id": "ck-world-writable",
@@ -12953,14 +12951,14 @@
   "assembled_scanner": {
     "artifact": "ptxray-aix.sh",
     "site_artifact": "site/ptxray-aix.sh",
-    "sha256": "5b7506117f36ebb37ac66c3b95b0726c94d48bfa7f9901e46649cc628933b51e"
+    "sha256": "06c0c6b1afa1536ca12e286932c79acb1cf6087995f0369af93cb8c79a73e5f8"
   },
   "review_pack": {
     "artifact": "ptxray-review-pack.sh",
-    "sha256": "f4fe5479880b030bf4453749541ee9015a1a486e0c7ef2b6b9a9d4ef3d55f96b"
+    "sha256": "cc9997955f7daaec147d51183edd35917779dee4e0394bf0e3ccf0013798b8bf"
   },
   "review_validator": {
     "artifact": "ptxray-review-validate.awk",
-    "sha256": "2ef59776833d4e533b134427ff4c490b9ec56fd709902b92d42927a474f355e3"
+    "sha256": "1cc0530b07093202dec0553526b77740e75beb15c4dff86b9c952dcc51afac93"
   }
 }
