@@ -2,7 +2,7 @@
 06c0c6b1afa1536ca12e286932c79acb1cf6087995f0369af93cb8c79a73e5f8  ptxray-aix.sh
 70230ba03d69710bb9f165e65bc492e61a8a9a07d6f82727718bb1fe01a62612  ptxray-defs.sh
 72915085b554dcf2436cf9bfdc45dfe16eb47719f71c15ded24042481fb5f69b  ptxray-ibmi.sh
-e58f6238f3148156a7fa34b09776eb5db0c21e4240e86eac9493acd794762374  ptxray-report-aix-1.6.0.tar
-c74154487617e0d236a888fce25f60954f7eb892b3bac04c047bfe3cab21c4c5  ptxray-report-ibmi-1.6.0.tar
+bca07313d1fc7f5ceb860c0abfb15bdfd58c59e88630d42e4eeffa7d582a23bc  ptxray-report-aix-1.6.0.tar
+a85b035aed44886d3238dd3cb83f1accc9272556cca7003aea878c9b20bc2c9d  ptxray-report-ibmi-1.6.0.tar
 cc9997955f7daaec147d51183edd35917779dee4e0394bf0e3ccf0013798b8bf  ptxray-review-pack.sh
 1cc0530b07093202dec0553526b77740e75beb15c4dff86b9c952dcc51afac93  ptxray-review-validate.awk
