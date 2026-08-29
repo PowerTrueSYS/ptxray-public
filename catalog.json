@@ -12951,14 +12951,14 @@
   "assembled_scanner": {
     "artifact": "ptxray-aix.sh",
     "site_artifact": "site/ptxray-aix.sh",
-    "sha256": "93d7a1cb50678c23184843c710e488cf3490d2abed8401ed3df0a68ae2fddf5a"
+    "sha256": "d9bf888c3b7dd012269cdb2b20988b6727761d2fe93bdfed0f3172d672594085"
   },
   "review_pack": {
     "artifact": "ptxray-review-pack.sh",
-    "sha256": "cc9997955f7daaec147d51183edd35917779dee4e0394bf0e3ccf0013798b8bf"
+    "sha256": "f23ea0c4c727e0ee34e0bace8fad2a271543df9993e64b64c3be3d959a8e74c1"
   },
   "review_validator": {
     "artifact": "ptxray-review-validate.awk",
-    "sha256": "1cc0530b07093202dec0553526b77740e75beb15c4dff86b9c952dcc51afac93"
+    "sha256": "48c2e353a2d04a61242f90e90b46148d9eb787c110a2b362352f4b29eb7a2197"
   }
 }

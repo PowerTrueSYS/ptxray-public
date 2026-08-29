@@ -3277,7 +3277,8 @@ function load_schema_contract() {
   load_word_set(KNOWN_CONTROL_SLOT, "id labels observed status")
   load_word_set(KNOWN_CURRENCY_SOURCE,
     "cisa-kev cis-ibm-aix disa-stig-ibm-aix-7 ibm-aix-lifecycle " \
-    "ibm-apar-csv ibm-flrt-firmware ibm-flrtvc ibm-security-advisories")
+    "ibm-apar-csv ibm-flrt-firmware ibm-flrtvc ibmi-psp-group-levels " \
+    "ibm-security-advisories")
   load_word_set(KNOWN_CURRENCY_SLOT,
     "age as-of limit source status version")
   load_word_set(KNOWN_CLASS,
@@ -3843,7 +3844,8 @@ function currency_version_allowed(location, value,    pieces, count, source) {
   count = split(location, pieces, ":")
   if (count != 3 || pieces[1] != "currency" || pieces[3] != "version") return 0
   source = pieces[2]
-  if (source == "ibm-apar-csv") return canonical_currency_date(value)
+  if (source == "ibm-apar-csv" || source == "ibmi-psp-group-levels") \
+    return canonical_currency_date(value)
   if (source == "ibm-flrtvc") return numeric_dotted_version(value)
   if (source == "cis-ibm-aix") return numeric_dotted_version(value)
   if (source == "disa-stig-ibm-aix-7") return value ~ /^V[0-9]+R[0-9]+$/

@@ -2643,6 +2643,7 @@ function currency_load_local_flrtvc_metadata {
   typeset actual_sha actual_version apar_sha apar_date pin_file pin_sha pin_version pin_asof
   typeset first second report_version report_date report_valid
   typeset embedded_sha embedded_version embedded_date embedded_integrity prov_unknown apar_valid
+  typeset apar_ci flrtvc_ci psp_ci
 
   # A complete fixture record file is the disclosed conformance package.  It
   # replaces metadata only during fixture replay and never exists in production.
@@ -2652,6 +2653,15 @@ function currency_load_local_flrtvc_metadata {
       || return $?
     return 0
   fi
+
+  # ibm-apar-csv, ibmi-psp-group-levels, and ibm-flrtvc are registry rows,
+  # not fixed slots. The nine-source splice inserted ibmi-psp-group-levels
+  # at the old engine index; look the rows up by source_id so a provenanced
+  # report lands on ibm-flrtvc and an unreadable operator input marks the
+  # PSP definitions row INVALID the same way ibm-flrt-firmware does.
+  apar_ci=$(currency_source_index ibm-apar-csv) || return 1
+  psp_ci=$(currency_source_index ibmi-psp-group-levels) || return 1
+  flrtvc_ci=$(currency_source_index ibm-flrtvc) || return 1
 
   # Delivery-only embedded inputs remain fail-closed unless their own bytes can
   # be checked.  apar.csv has a source-declared vintage; the engine needs the
@@ -2671,11 +2681,11 @@ function currency_load_local_flrtvc_metadata {
           embedded_integrity=invalid
         fi
       fi
-      currency_set_runtime_record 3 1 "$apar_csv_vintage" source-vintage \
+      currency_set_runtime_record "$apar_ci" 1 "$apar_csv_vintage" source-vintage \
         "$apar_csv_vintage" source-declared "sha256:$apar_csv_sha256" \
         "embedded apar.csv delivery slot" "$embedded_integrity" verified
     else
-      currency_set_runtime_record 3 1 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$apar_ci" 1 unknown unknown unknown unknown unknown \
         "embedded apar.csv delivery slot" invalid invalid
     fi
   fi
@@ -2695,19 +2705,21 @@ function currency_load_local_flrtvc_metadata {
           embedded_integrity=invalid
         fi
       fi
-      currency_set_runtime_record 4 1 "$flrtvc_ksh_version" source-version \
+      currency_set_runtime_record "$flrtvc_ci" 1 "$flrtvc_ksh_version" source-version \
         "$flrtvc_ksh_as_of" curator-verified "sha256:$flrtvc_ksh_sha256" \
         "embedded flrtvc.ksh delivery slot" "$embedded_integrity" verified
     else
-      currency_set_runtime_record 4 1 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$flrtvc_ci" 1 unknown unknown unknown unknown unknown \
         "embedded flrtvc.ksh delivery slot" invalid invalid
     fi
   fi
 
   if [ -n "$FLRTVC_KSH" ]; then
     if [ ! -r "$FLRTVC_KSH" ]; then
-      currency_set_runtime_record 4 0 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$flrtvc_ci" 0 unknown unknown unknown unknown unknown \
         "operator-supplied local flrtvc.ksh" invalid invalid
+      currency_set_runtime_record "$psp_ci" 0 unknown unknown unknown unknown unknown \
+        "${CU_LOCATOR[$psp_ci]}" invalid invalid
     else
       actual_sha=$(sha256_of "$FLRTVC_KSH")
       actual_version=$(awk -F= '
@@ -2727,18 +2739,18 @@ function currency_load_local_flrtvc_metadata {
       if [ -n "$actual_sha" ] && [ "$actual_sha" = "$pin_sha" ] \
           && [ "$actual_version" = "$pin_version" ] \
           && [ "$(valid_ymd "$pin_asof")" -eq 1 ]; then
-        currency_set_runtime_record 4 1 "$actual_version" source-version \
+        currency_set_runtime_record "$flrtvc_ci" 1 "$actual_version" source-version \
           "$pin_asof" curator-verified "sha256:$actual_sha" \
           "operator-supplied flrtvc.ksh verified by tools/flrtvc-pin.txt" \
           verified verified
       elif [ -n "$actual_sha" ] && { [ -n "$pin_sha" ] || [ -n "$pin_version" ]; }; then
-        currency_set_runtime_record 4 1 "$actual_version" observed-banner \
+        currency_set_runtime_record "$flrtvc_ci" 1 "$actual_version" observed-banner \
           unknown unknown "sha256:$actual_sha" \
           "operator-supplied flrtvc.ksh conflicts with tools/flrtvc-pin.txt" \
           invalid invalid
       else
         [ -n "$actual_sha" ] && actual_sha="sha256:$actual_sha" || actual_sha=unknown
-        currency_set_runtime_record 4 1 "$actual_version" observed-banner \
+        currency_set_runtime_record "$flrtvc_ci" 1 "$actual_version" observed-banner \
           unknown unknown "$actual_sha" "operator-supplied local flrtvc.ksh" \
           unknown unknown
       fi
@@ -2747,7 +2759,7 @@ function currency_load_local_flrtvc_metadata {
 
   if [ -n "$FLRTVC_APARCSV" ]; then
     if [ ! -r "$FLRTVC_APARCSV" ]; then
-      currency_set_runtime_record 3 0 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$apar_ci" 0 unknown unknown unknown unknown unknown \
         "operator-supplied local apar.csv" invalid invalid
     else
       apar_sha=$(sha256_of "$FLRTVC_APARCSV")
@@ -2757,11 +2769,11 @@ function currency_load_local_flrtvc_metadata {
       if [ "$apar_valid" -eq 0 ] \
           && [ "$(valid_ymd "$apar_date")" -eq 1 ] \
           && [ "$apar_sha" != unknown ]; then
-        currency_set_runtime_record 3 1 "$apar_date" source-vintage \
+        currency_set_runtime_record "$apar_ci" 1 "$apar_date" source-vintage \
           "$apar_date" source-declared "$apar_sha" \
           "IBM FLRT apar.csv row-2 vintage" verified verified
       else
-        currency_set_runtime_record 3 1 unknown unknown unknown unknown \
+        currency_set_runtime_record "$apar_ci" 1 unknown unknown unknown unknown \
           "$apar_sha" "IBM FLRT apar.csv failed structural validation" \
           invalid invalid
       fi
@@ -2772,9 +2784,11 @@ function currency_load_local_flrtvc_metadata {
   # exact engine or apar.csv bytes.  It therefore remains explicitly UNKNOWN.
   if [ -n "$FLRTVC_REPORT" ]; then
     if [ ! -r "$FLRTVC_REPORT" ]; then
-      currency_set_runtime_record 3 0 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$apar_ci" 0 unknown unknown unknown unknown unknown \
         "operator-supplied raw FLRTVC report" invalid invalid
-      currency_set_runtime_record 4 0 unknown unknown unknown unknown unknown \
+      currency_set_runtime_record "$psp_ci" 0 unknown unknown unknown unknown unknown \
+        "${CU_LOCATOR[$psp_ci]}" invalid invalid
+      currency_set_runtime_record "$flrtvc_ci" 0 unknown unknown unknown unknown unknown \
         "operator-supplied raw FLRTVC report" invalid invalid
     else
       first=$(awk 'NR==1{print; exit}' "$FLRTVC_REPORT")
@@ -2797,34 +2811,34 @@ function currency_load_local_flrtvc_metadata {
       [ "$(valid_ymd "$report_date")" -eq 1 ] \
         || { report_date=unknown; report_valid=0; }
       if [ "$report_valid" -eq 1 ]; then
-        currency_set_runtime_record 3 1 "$report_date" source-vintage \
+        currency_set_runtime_record "$apar_ci" 1 "$report_date" source-vintage \
           "$report_date" source-declared unknown \
           "raw FLRTVC report apar.csv banner" unknown unknown
-        currency_set_runtime_record 4 1 "$report_version" observed-banner \
+        currency_set_runtime_record "$flrtvc_ci" 1 "$report_version" observed-banner \
           unknown unknown unknown "raw FLRTVC report engine banner" unknown unknown
         prov_unknown=$(awk -F'|' '
           $0 ~ /^# AIXRAY_SOURCE\|/ \
             && $3 != "ibm-apar-csv" && $3 != "ibm-flrtvc" {print 1; exit}
         ' "$FLRTVC_REPORT")
         if [ "$prov_unknown" = 1 ]; then
-          currency_set_runtime_record 3 1 unknown unknown unknown unknown unknown \
+          currency_set_runtime_record "$apar_ci" 1 unknown unknown unknown unknown unknown \
             "conflicting PTxray provenance in operator-supplied FLRTVC report" \
             invalid invalid
-          currency_set_runtime_record 4 1 unknown unknown unknown unknown unknown \
+          currency_set_runtime_record "$flrtvc_ci" 1 unknown unknown unknown unknown unknown \
             "conflicting PTxray provenance in operator-supplied FLRTVC report" \
             invalid invalid
         else
           currency_apply_report_provenance "$FLRTVC_REPORT" \
-            ibm-apar-csv 3 "$report_version" "$report_date"
+            ibm-apar-csv "$apar_ci" "$report_version" "$report_date"
           currency_apply_report_provenance "$FLRTVC_REPORT" \
-            ibm-flrtvc 4 "$report_version" "$report_date"
+            ibm-flrtvc "$flrtvc_ci" "$report_version" "$report_date"
         fi
       else
-        currency_set_runtime_record 3 1 "$report_date" source-vintage \
+        currency_set_runtime_record "$apar_ci" 1 "$report_date" source-vintage \
           "$report_date" source-declared unknown \
           "operator-supplied FLRTVC report has invalid banner" \
           invalid invalid
-        currency_set_runtime_record 4 1 "$report_version" observed-banner \
+        currency_set_runtime_record "$flrtvc_ci" 1 "$report_version" observed-banner \
           unknown unknown unknown \
           "operator-supplied FLRTVC report has invalid banner" \
           invalid invalid
@@ -2921,7 +2935,18 @@ function currency_evaluate {
           CU_REASON[$ci]="operator-supplied source could not be read"
           ;;
         *)
-          CU_REASON[$ci]="source was not loaded and its proof state is invalid"
+          # URL locators on withheld definition-bundle sources (firmware,
+          # IBM i PSP group levels) are the registry's not-supplied form of
+          # the same operator-input row. An unreadable supplied file still
+          # uses this INVALID reason once the runtime record is marked.
+          case "${CU_ID[$ci]}" in
+            ibm-flrt-firmware|ibmi-psp-group-levels)
+              CU_REASON[$ci]="operator-supplied source could not be read"
+              ;;
+            *)
+              CU_REASON[$ci]="source was not loaded and its proof state is invalid"
+              ;;
+          esac
           ;;
       esac
     elif [ "${CU_LOADED[$ci]}" -ne 1 ]; then
@@ -3081,24 +3106,32 @@ function emit_currency_text {
 
 function currency_warning_text {
   typeset ci details optional_missing optional_noun optional_pronoun
-  typeset optional_detail
+  typeset optional_detail optional_source
   [ "$CURRENCY_STATUS" = VERIFIED ] && return
   details=""
   optional_missing=0
   ci=0
   while [ "$ci" -lt "$CURRENCY_SOURCE_COUNT" ]; do
     if [ "${CU_REQUIRED[$ci]}" -eq 1 ] && [ "${CU_STATUS[$ci]}" != CURRENT ]; then
+      # operator-supplied locators, plus withheld definition-bundle sources
+      # whose locators are publisher URLs (ibm-flrt-firmware and
+      # ibmi-psp-group-levels). Both join the scoped supply warning.
+      optional_source=0
       case "${CU_LOCATOR[$ci]}" in
-        operator-supplied*)
-          if [ "${CU_LOADED[$ci]}" -eq 0 ] &&
-             [ "${CU_STATUS[$ci]}" = UNKNOWN ] &&
-             [ "${CU_REASON[$ci]}" = "source was not loaded" ]; then
-            optional_missing=$((optional_missing+1))
-            ci=$((ci+1))
-            continue
-          fi
-          ;;
+        operator-supplied*) optional_source=1;;
       esac
+      case "${CU_ID[$ci]}" in
+        ibm-flrt-firmware|ibmi-psp-group-levels) optional_source=1;;
+      esac
+      if [ "$optional_source" -eq 1 ]; then
+        if [ "${CU_LOADED[$ci]}" -eq 0 ] &&
+           [ "${CU_STATUS[$ci]}" = UNKNOWN ] &&
+           [ "${CU_REASON[$ci]}" = "source was not loaded" ]; then
+          optional_missing=$((optional_missing+1))
+          ci=$((ci+1))
+          continue
+        fi
+      fi
       case "${CU_STATUS[$ci]}" in
         STALE)
           details="$details${details:+ }${CU_LABEL[$ci]} is ${CU_AGE[$ci]} days old; configured limit ${CU_THRESHOLD[$ci]} days."
@@ -3521,13 +3554,27 @@ set -A CN 0 0 0 0 0 0 0 0 0
 set -A CNA 0 0 0 0 0 0 0 0 0
 
 function currency_finding_indices {
+  # Registry order is not a stable slot map: ibmi-psp-group-levels was
+  # spliced at the old ibm-flrtvc index. Numeric 2 3 4 / 6 7 now name the
+  # PSP and ibm-flrt-firmware rows (both optional definitions sources) and
+  # cannot grade a clean result. Resolve by source_id so STIG findings keep
+  # cis-ibm-aix + disa-stig-ibm-aix-7 and apar_scan keeps cisa-kev +
+  # ibm-apar-csv + ibm-flrtvc — the same lists as FINDING_SOURCE_DEPENDENCIES.
+  typeset ids sid ci out
   case "$1" in
-    os_level|os_tl_sp|hw_gen|firmware|vios_level) echo "0";;
-    sec_apars) echo "1";;
-    apar_scan) echo "2 3 4";;
-    stig_fileperms|stig_secattr|stig_nettune|stig_svcoff) echo "6 7";;
-    *) echo "";;
+    os_level|os_tl_sp|hw_gen|firmware|vios_level) ids="ibm-aix-lifecycle";;
+    sec_apars) ids="ibm-security-advisories";;
+    apar_scan) ids="cisa-kev ibm-apar-csv ibm-flrtvc";;
+    stig_fileperms|stig_secattr|stig_nettune|stig_svcoff)
+      ids="cis-ibm-aix disa-stig-ibm-aix-7";;
+    *) echo ""; return;;
   esac
+  out=""
+  for sid in $ids; do
+    ci=$(currency_source_index "$sid") || continue
+    out="$out${out:+ }$ci"
+  done
+  echo "$out"
 }
 
 function currency_finding_dependency {
@@ -4322,6 +4369,7 @@ function checks_patch {
   typeset JAVALP HAS7 HAS8 V7 V8 RESULT NEXP APPLIC NAMES DVJ DVAGE
   typeset completion_disclosure completion_state COMPLETION_NOTE
   typeset LPPCHKOUT LPPCHK_RC LPPCHKCOUNT LPPCHKCOUNT_RC LPPCHKM3COUNT LPPCHKM3_RC
+  typeset apar_ci flrtvc_ci
 
   # patch_age — how old is the installed build?
   if [ -n "$BWEEK" ]; then
@@ -4746,6 +4794,11 @@ SEC_APARS_EOF
     # Paths 0 and 1 share capture gates, secure scratch, offline flags and parsing.
     # Only path 1 has external file/pin trust surfaces; path 0's bytes + pins are
     # already inside the same assembled script that is executing.
+    # ibm-apar-csv and ibm-flrtvc are registry rows, not fixed slots. The
+    # nine-source splice inserted ibmi-psp-group-levels at the old engine
+    # index; look the rows up by source_id so a runtime copy lands on ibm-flrtvc.
+    apar_ci=$(currency_source_index ibm-apar-csv) || return 1
+    flrtvc_ci=$(currency_source_index ibm-flrtvc) || return 1
     if [ "$FV_INVOKE_MODE" = "external" ] && [ ! -r "$FLRTVC_KSH" ]; then
       add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — cannot read $FLRTVC_KSH" \
           "The --flrtvc-ksh file could not be read." "check the path and permissions of the flrtvc.ksh script." "ffiec:II.C.10"
@@ -5110,39 +5163,39 @@ SEC_APARS_EOF
                 FV_DECODE_VINTAGE=$(apar_csv_metadata < "$FV_TMPAPAR")
                 FV_DECODE_VALID=$?
                 if [ -z "$FV_ACTUALSHA" ] || [ -z "$FV_ACTUALAPARSHA" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                  currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                     "decoded bundled apar.csv could not be integrity-bound"
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
+                  currency_mark_runtime_invalid "$flrtvc_ci" "$FV_ACTUALSHA" \
                     "decoded bundled flrtvc.ksh could not be integrity-bound"
                   add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not checksum decoded bundled FLRTVC data" \
                       "The decoded private copies could not be integrity-checked, so neither is trusted or executed." \
                       "confirm openssl works and rebuild the local delivery artifact." "ffiec:II.C.10"
                 elif [ "$FV_ACTUALSHA" != "$FV_PINSHA" ]; then
-                  currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
+                  currency_mark_runtime_invalid "$flrtvc_ci" "$FV_ACTUALSHA" \
                     "decoded bundled flrtvc.ksh conflicts with embedded pin"
                   add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — bundled flrtvc.ksh SHA256 does not match the embedded pin — REFUSING to execute it" \
                       "The decoded bundled script does not match the delivery artifact's expected SHA256 ($FV_ACTUALSHA vs. expected $FV_PINSHA). Corrupt or tampered embedded code is never executed, especially as root." \
                       "discard and rebuild the local delivery artifact." "ffiec:II.C.10"
                 elif [ "$FV_ACTUALAPARSHA" != "$apar_csv_sha256" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                  currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                     "decoded bundled apar.csv conflicts with embedded digest"
                   add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — bundled apar.csv SHA256 does not match the embedded pin" \
                       "The decoded bundled feed does not match the delivery artifact's expected SHA256 ($FV_ACTUALAPARSHA vs. expected $apar_csv_sha256), so it is not a trustworthy assessment input." \
                       "discard and rebuild the local delivery artifact." "ffiec:II.C.10"
                 elif [ "$FV_DECODE_VALID" -ne 0 ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                  currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                     "decoded bundled apar.csv failed structural validation"
                   add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — bundled apar.csv failed structural validation" \
                       "The decoded feed did not contain the required FLRT CSV header, source-vintage row, and structurally complete advisory records." \
                       "discard and rebuild the local delivery artifact." "ffiec:II.C.10"
                 elif [ "$FV_DECODE_VINTAGE" != "$apar_csv_vintage" ]; then
-                  currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                  currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                     "decoded bundled apar.csv vintage conflicts with embedded metadata"
                   add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — bundled apar.csv row-2 vintage does not match embedded metadata ($FV_DECODE_VINTAGE vs. $apar_csv_vintage)" \
                       "The feed bytes and advertised vintage disagree; the scanner refuses to present either as authoritative." \
                       "discard and rebuild the local delivery artifact." "ffiec:II.C.10"
                 else
-                  currency_set_runtime_record 3 1 "$FV_DECODE_VINTAGE" source-vintage \
+                  currency_set_runtime_record "$apar_ci" 1 "$FV_DECODE_VINTAGE" source-vintage \
                     "$FV_DECODE_VINTAGE" source-declared "sha256:$FV_ACTUALAPARSHA" \
                     "IBM FLRT apar.csv row-2 vintage" verified verified
                   currency_evaluate
@@ -5181,31 +5234,31 @@ SEC_APARS_EOF
               fi
               chmod 0600 "$FV_TMPKSH" "$FV_TMPAPAR" 2>/dev/null
               if [ "$FV_SCRIPT_COPIED" -ne 1 ] || [ -z "$FV_ACTUALSHA" ]; then
-                currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
+                currency_mark_runtime_invalid "$flrtvc_ci" "$FV_ACTUALSHA" \
                   "private flrtvc.ksh runtime copy could not be integrity-bound"
                 add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy and checksum the supplied flrtvc.ksh script" \
                     "The supplied --flrtvc-ksh script could not be copied into the private scratch directory and hashed there — an unverified script must never be executed." \
                     "check the file, free space in ${TMPDIR:-/tmp}, and that openssl works, then re-run." "ffiec:II.C.10"
               elif [ "$FV_APAR_COPIED" -ne 1 ] || [ -z "$FV_ACTUALAPARSHA" ]; then
-                currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                   "private apar.csv runtime copy could not be integrity-bound"
                 add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — could not copy and checksum the supplied apar.csv" \
                     "The supplied --flrtvc-apar-csv file could not be copied into the private scratch directory and hashed there, so no assessment input is claimed." \
                     "check the file, free space in ${TMPDIR:-/tmp}, and that openssl works, then re-run." "ffiec:II.C.10"
               elif [ "$FV_ACTUALSHA" != "$FV_PINSHA" ]; then
-                currency_mark_runtime_invalid 4 "$FV_ACTUALSHA" \
+                currency_mark_runtime_invalid "$flrtvc_ci" "$FV_ACTUALSHA" \
                   "private flrtvc.ksh runtime copy conflicts with tools/flrtvc-pin.txt"
                 add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — supplied flrtvc.ksh SHA256 does not match the pinned hash — REFUSING to execute it" \
                     "The file at --flrtvc-ksh does not match tools/flrtvc-pin.txt's pinned SHA256 ($FV_ACTUALSHA vs. expected $FV_PINSHA). This may be a tampered, swapped, or corrupted script — it is never executed unverified, especially since this scan typically runs as root." \
                     "re-fetch flrtvc.ksh and re-run; if IBM genuinely shipped a new version, verify it by hand and update tools/flrtvc-pin.txt deliberately." "ffiec:II.C.10"
               elif [ "$FV_COPY_APAR_VALID" -ne 0 ]; then
-                currency_mark_runtime_invalid 3 "$FV_ACTUALAPARSHA" \
+                currency_mark_runtime_invalid "$apar_ci" "$FV_ACTUALAPARSHA" \
                   "private apar.csv runtime copy failed structural validation"
                 add patch apar_scan "FLRT APAR exposure scan" WARN high "not assessed — supplied apar.csv failed structural validation" \
                     "The private copy did not contain the required FLRT CSV header, source-vintage row, and structurally complete advisory records, so it was not passed to flrtvc.ksh." \
                     "re-fetch apar.csv and re-run." "ffiec:II.C.10"
               else
-                currency_set_runtime_record 3 1 "$FV_COPY_VINTAGE" source-vintage \
+                currency_set_runtime_record "$apar_ci" 1 "$FV_COPY_VINTAGE" source-vintage \
                   "$FV_COPY_VINTAGE" source-declared "sha256:$FV_ACTUALAPARSHA" \
                   "IBM FLRT apar.csv row-2 vintage" verified verified
                 FV_COPY_VERSION=$(awk -F= '
@@ -5219,12 +5272,12 @@ SEC_APARS_EOF
                 [ -n "$FV_COPY_VERSION" ] || FV_COPY_VERSION=unknown
                 if [ "$FV_COPY_VERSION" = "$FV_PINVERSION" ] \
                     && [ "$(valid_ymd "$FV_PINASOF")" -eq 1 ]; then
-                  currency_set_runtime_record 4 1 "$FV_COPY_VERSION" source-version \
+                  currency_set_runtime_record "$flrtvc_ci" 1 "$FV_COPY_VERSION" source-version \
                     "$FV_PINASOF" curator-verified "sha256:$FV_ACTUALSHA" \
                     "operator-supplied flrtvc.ksh verified by tools/flrtvc-pin.txt" \
                     verified verified
                 else
-                  currency_set_runtime_record 4 1 "$FV_COPY_VERSION" observed-banner \
+                  currency_set_runtime_record "$flrtvc_ci" 1 "$FV_COPY_VERSION" observed-banner \
                     unknown unknown "sha256:$FV_ACTUALSHA" \
                     "private flrtvc.ksh copy has incomplete or conflicting pin metadata" \
                     verified invalid
