@@ -25,7 +25,7 @@ LC_ALL=C
 export LC_ALL
 PTXRAY_SELF=$0
 PTXRAY_DEFS_INTEGRATION=1
-PTXRAY_DEFS_DOWNLOADER_SHA256='70230ba03d69710bb9f165e65bc492e61a8a9a07d6f82727718bb1fe01a62612'
+PTXRAY_DEFS_DOWNLOADER_SHA256='d05ee08bc41478f02a989474760266d72c1239a0a34f0f1737450684d7d99f91'
 # Shared post-identity-gate selector for the adjacent signed-data downloader.
 # This module contains no transport implementation and no endpoint. Assemblers
 # bind the exact same-release downloader digest above it.
@@ -854,12 +854,74 @@ function ibmi_cl {
   /QOpenSys/usr/bin/system "$*" 2>/dev/null
 }
 
-if ! ibmi_require_qsecofr; then
-  echo 'PTxray IBM i requires SESSION_USER=QSECOFR and SYSTEM_USER=QSECOFR; no scan was run.' >&2
+function ibmi_require_scan_authority {
+  typeset raw rc line user held pipe
+  if [ -z "${AIXRAY_FIXTURES:-}" ] && [ ! -x /QOpenSys/usr/bin/qsh ]; then
+    printf '%s\n' 'PTxray IBM i requires a session user holding *ALLOBJ and *SECADM special authority (read-only scan); holds: none. No scan was run.' >&2
+    return 2
+  fi
+  raw=$(ibmi_sql scan_identity "SELECT VARCHAR(TRIM(SESSION_USER),128) CONCAT '|' CONCAT VARCHAR(SPECIAL_AUTHORITIES,200) FROM QSYS2.USER_INFO WHERE AUTHORIZATION_NAME = SESSION_USER")
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' 'PTxray IBM i requires a session user holding *ALLOBJ and *SECADM special authority (read-only scan); holds: none. No scan was run.' >&2
+    return 2
+  fi
+  line=$(printf '%s\n' "$raw" | awk '
+    {
+      row=$0
+      sub(/^[ \t]+/, "", row)
+      sub(/[ \t]+$/, "", row)
+      if (row == "") next
+      count++
+      if (count == 1) keep=row
+    }
+    END { if (count == 1) print keep }
+  ')
+  if [ -z "$line" ]; then
+    printf '%s\n' 'PTxray IBM i requires a session user holding *ALLOBJ and *SECADM special authority (read-only scan); holds: none. No scan was run.' >&2
+    return 2
+  fi
+  pipe=$(printf '%s\n' "$line" | awk '{print (index($0,"|")>0)?1:0}')
+  if [ "$pipe" -eq 0 ]; then
+    held=$line
+    user=""
+  else
+    user=$(printf '%s\n' "$line" | awk -F'|' '{print $1}')
+    held=$(printf '%s\n' "$line" | awk -F'|' '{print $2}')
+  fi
+  user=$(printf '%s\n' "$user" | awk '{sub(/^[ \t]+/,"");sub(/[ \t]+$/,"");print}')
+  held=$(printf '%s\n' "$held" | awk '{sub(/^[ \t]+/,"");sub(/[ \t]+$/,"");print}')
+  IBMI_SCAN_USER=$user
+  IBMI_SCAN_SPCAUT=$held
+  if printf '%s\n' "$held" | awk '
+    {
+      n=split($0, tok, /[ \t]+/)
+      for (i=1; i<=n; i++) {
+        if (tok[i]=="*ALLOBJ") allobj=1
+        if (tok[i]=="*SECADM") secadm=1
+      }
+    }
+    END { exit !(allobj && secadm) }
+  '
+  then
+    return 0
+  fi
+  case "$held" in
+    ""|"-"|"*NONE") held=none ;;
+  esac
+  if [ -n "$user" ]; then
+    printf '%s\n' "PTxray IBM i requires a session user holding *ALLOBJ and *SECADM special authority (read-only scan); $user holds: $held. No scan was run." >&2
+  else
+    printf '%s\n' "PTxray IBM i requires a session user holding *ALLOBJ and *SECADM special authority (read-only scan); holds: $held. No scan was run." >&2
+  fi
+  return 2
+}
+
+if ! ibmi_require_scan_authority; then
   exit 2
 fi
 
-# Definitions are selected only after the normalized QSECOFR identity gate and
+# Definitions are selected only after the special-authority scan gate and
 # before any assessment probe. No SYSTOOLS or network-backed SQL source is used
 # as a substitute for the adjacent signed-data downloader.
 ptxray_defs_select_for_run "$DEFINITIONS_OFFLINE" "$DEFINITIONS_BUNDLE"
@@ -2161,6 +2223,168 @@ add patch sec_group_currency "Security and HIPER group PTF currency" NOT_ASSESSE
     "not assessed — network-backed IBM PSP query is disabled" \
     "The public assessment makes no SYSTOOLS.GROUP_PTF_CURRENCY request, because that view may contact IBM PSP." \
     "compare the installed Security and HIPER groups against IBM Preventive Service Planning outside this assessment."
+# cur_firmware — IBM i DSPFMWSTS level vs bundled FLRT firmware rows.
+# Local facts only: ibmi_cl DSPFMWSTS for the active VL/ML fix level,
+# ibmi_sql QSYS2.SYSTEM_STATUS_INFO MACHINE_TYPE and MACHINE_MODEL
+# for the MTM. Never SELECT MACHINE_SERIAL_NUMBER.
+# Reference rows come from $PTXRAY_DEFS_DIR/ibm-flrt-firmware.tsv
+# (snapshot id ibm-flrt-firmware). The door never calls IBM, never
+# SELECTs QSYS2.FIRMWARE_CURRENCY or SYSTOOLS.FIRMWARE_CURRENCY, and
+# never SELECTs HOST_NAME (D82).
+# Grading: PASS at the update level or newer; WARN behind update on
+# the current family; FAIL on a superseded (older) firmware family.
+# Unset/missing definitions, an MTM absent from the table, or an
+# unreadable local fact is NOT_ASSESSED with a typed reason.
+# One finding. Not a CIS rec.
+FW_DEFS_TSV=""
+if [ -z "${PTXRAY_DEFS_DIR:-}" ] \
+    || [ ! -r "$PTXRAY_DEFS_DIR/ibm-flrt-firmware.tsv" ]; then
+  add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+      "not assessed — reference data missing (definitions not supplied)" \
+      "The bundled FLRT firmware table was not supplied, so firmware currency cannot be graded from local DSPFMWSTS evidence." \
+      "re-run with definitions supplied (ptxray-defs snapshot or --definitions-bundle FILE). This scanner never changes firmware."
+else
+  FW_DEFS_TSV=$PTXRAY_DEFS_DIR/ibm-flrt-firmware.tsv
+  FW_RAW=$(ibmi_cl dspfmwsts "DSPFMWSTS")
+  FW_RC=$?
+  if [ "$FW_RC" -ne 0 ]; then
+    add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+        "not assessed — capture failed (rc=$FW_RC)" \
+        "The DSPFMWSTS probe did not yield a readable firmware-status dump, so firmware currency cannot be graded." \
+        "re-run the scan as the scan profile and confirm DSPFMWSTS returns the active firmware level. This scanner never changes firmware."
+  elif [ -z "$FW_RAW" ]; then
+    add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The DSPFMWSTS probe returned no text, so firmware currency cannot be graded." \
+        "re-run the scan as the scan profile and confirm DSPFMWSTS returns the active firmware level. This scanner never changes firmware."
+  else
+    FW_LEVEL=$(printf '%s\n' "$FW_RAW" | awk '{
+      for (i = 1; i <= NF; i++) {
+        tok = $i
+        if (tok ~ /^[A-Za-z][A-Za-z][0-9][0-9]+_[0-9]+/) {
+          print tok
+          exit
+        }
+      }
+    }')
+    if [ -z "$FW_LEVEL" ]; then
+      add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+          "not assessed — DSPFMWSTS firmware level unreadable" \
+          "The DSPFMWSTS dump was readable, but it did not contain a VL/ML firmware fix-level token, so firmware currency cannot be graded." \
+          "inspect DSPFMWSTS for the active firmware level token (for example VL950_179). This scanner never changes firmware."
+    else
+      FW_MTM_RAW=$(ibmi_sql mtm "SELECT 'MTM' CONCAT '|' CONCAT VARCHAR(TRIM(MACHINE_TYPE),4) CONCAT '-' CONCAT VARCHAR(TRIM(MACHINE_MODEL),4) FROM QSYS2.SYSTEM_STATUS_INFO")
+      FW_MTM_RC=$?
+      if [ "$FW_MTM_RC" -ne 0 ]; then
+        add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+            "not assessed — capture failed (rc=$FW_MTM_RC)" \
+            "The MACHINE_TYPE/MACHINE_MODEL probe did not yield a readable SYSTEM_STATUS_INFO dump, so firmware currency cannot be graded." \
+            "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO returns MACHINE_TYPE and MACHINE_MODEL. This scanner never changes firmware."
+      elif [ -z "$FW_MTM_RAW" ]; then
+        add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+            "not assessed — capture empty (rc=0)" \
+            "The MACHINE_TYPE/MACHINE_MODEL probe returned no pipe row, so firmware currency cannot be graded." \
+            "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO returns MACHINE_TYPE and MACHINE_MODEL. This scanner never changes firmware."
+      else
+        FW_MTM=$(printf '%s\n' "$FW_MTM_RAW" | awk -F'|' '
+          $1 == "MTM" {
+            n++
+            v = $2
+            sub(/^[ \t]+/, "", v)
+            sub(/[ \t]+$/, "", v)
+            sub(/^IBM,/, "", v)
+            val = v
+          }
+          END { if (n == 1 && val != "" && val != "-") print val }
+        ')
+        case "$FW_MTM" in
+          [0-9][0-9][0-9][0-9]-?*) ;;
+          *) FW_MTM="" ;;
+        esac
+        if [ -z "$FW_MTM" ]; then
+          add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+              "not assessed — MACHINE_TYPE/MACHINE_MODEL unreadable" \
+              "The SYSTEM_STATUS_INFO dump was readable, but MACHINE_TYPE/MACHINE_MODEL was not a machine type-model token, so firmware currency cannot be graded." \
+              "inspect QSYS2.SYSTEM_STATUS_INFO MACHINE_TYPE and MACHINE_MODEL. This scanner never changes firmware."
+        else
+          FW_ROW=$(awk -F'\t' -v mtm="$FW_MTM" '
+            {
+              sub(/\r$/, "", $0)
+            }
+            $1 == mtm && NF >= 5 {
+              print $2 "\t" $4
+              found = 1
+              exit
+            }
+            END { if (!found) exit 1 }
+          ' "$FW_DEFS_TSV")
+          FW_ROW_RC=$?
+          if [ "$FW_ROW_RC" -ne 0 ] || [ -z "$FW_ROW" ]; then
+            add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+                "not assessed — MTM $FW_MTM not in reference data" \
+                "The bundled FLRT firmware table has no row for this machine type-model, so firmware currency cannot be graded." \
+                "confirm the machine type-model is listed in the ibm-flrt-firmware definitions table, then re-run. This scanner never changes firmware."
+          else
+            FW_UPD=$(printf '%s\n' "$FW_ROW" | awk -F'\t' '{ print $1 }')
+            FW_UPG=$(printf '%s\n' "$FW_ROW" | awk -F'\t' '{ print $2 }')
+            FW_GRADE=$(awk -v inst="$FW_LEVEL" -v upd="$FW_UPD" -v upg="$FW_UPG" '
+            function parse(tok, rest) {
+              fam = 0
+              pack = 0
+              if (tok == "" || tok == "-") return 0
+              if (match(tok, /^[A-Za-z][A-Za-z][0-9][0-9]+/) == 0) return 0
+              fam = substr(tok, 3, RLENGTH - 2) + 0
+              rest = substr(tok, RSTART + RLENGTH)
+              sub(/^[-._]+/, "", rest)
+              if (match(rest, /^[0-9]+/) == 0) return 1
+              pack = substr(rest, RSTART, RLENGTH) + 0
+              return 1
+            }
+            BEGIN {
+              if (parse(inst) == 0) { print "UNREADABLE"; exit }
+              ifam = fam; ipack = pack
+              hasu = parse(upd); ufam = fam; upack = pack
+              hasg = parse(upg)
+              if (hasu) { cfam = ufam; cpack = upack }
+              else if (hasg) { cfam = fam; cpack = pack }
+              else { print "NOREF"; exit }
+              if (ifam > cfam) print "PASS"
+              else if (ifam < cfam) print "FAIL"
+              else if (ipack >= cpack) print "PASS"
+              else print "WARN"
+            }')
+            FW_OBS="current=$FW_LEVEL mtm=$FW_MTM update=$FW_UPD"
+            if [ -n "$FW_UPG" ] && [ "$FW_UPG" != "-" ]; then
+              FW_OBS="$FW_OBS upgrade=$FW_UPG"
+            fi
+            if [ "$FW_GRADE" = "PASS" ]; then
+              add lifecycle cur_firmware "IBM i firmware currency" PASS low \
+                  "$FW_OBS" \
+                  "The installed firmware fix level matches or exceeds the bundled FLRT update level, so this partition is not behind on server firmware." \
+                  "n/a"
+            elif [ "$FW_GRADE" = "WARN" ]; then
+              add lifecycle cur_firmware "IBM i firmware currency" WARN high \
+                  "$FW_OBS" \
+                  "The installed firmware fix level is behind the bundled FLRT update level on the current firmware family, so newly published firmware fixes are not installed here." \
+                  "apply the recommended firmware update from the HMC or provider control plane. This scanner never changes firmware."
+            elif [ "$FW_GRADE" = "FAIL" ]; then
+              add lifecycle cur_firmware "IBM i firmware currency" FAIL high \
+                  "$FW_OBS" \
+                  "The installed firmware family is behind the bundled FLRT current family, so this partition is on a superseded firmware stream." \
+                  "plan and apply the firmware family upgrade on the HMC or provider control plane. This scanner never changes firmware."
+            else
+              add lifecycle cur_firmware "IBM i firmware currency" NOT_ASSESSED low \
+                  "not assessed — firmware level unreadable against reference data" \
+                  "The local firmware level or the bundled FLRT update/upgrade tokens could not be compared, so firmware currency cannot be graded." \
+                  "inspect DSPFMWSTS and the ibm-flrt-firmware row for this machine type-model. This scanner never changes firmware."
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
 # cur_os_lifecycle — IBM i OS release vs embedded EOS table.
 # Authority: IBM Release life cycle as of the embedded IBM i source-registry
 # ibmi-lifecycle as_of. Not a CIS rec. One finding. Calls ibmi_sql for
@@ -2319,6 +2543,192 @@ else
                     "This IBM i release is in active support." "n/a"
               fi
             fi
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
+# cur_ptf_groups — IBM i PTF group levels vs the bundled PSP TSV.
+# Local QSYS2.GROUP_PTF_INFO only. One finding. Grades the cumulative
+# package and every group whose PTF_GROUP_DESCRIPTION does not
+# contain " Group Security" / " Group Hiper". Never classifies
+# groups from a side file. Never hardcode SF-numbers. Calls ibmi_sql
+# only. Never calls IBM. Grade numeric level only when
+# PTF_GROUP_STATUS is INSTALLED.
+PG_TITLE="PTF group currency"
+PG_FIX_NA="n/a"
+PG_FIX_APPLY="download and apply the current PTF group levels. This scanner never applies PTFs."
+PG_FIX_DEFS="supply a signed definitions snapshot so PTXRAY_DEFS_DIR contains ibmi-psp-group-levels.tsv, then re-run. This scanner never applies PTFs."
+PG_FIX_PROBE="re-run the scan as the scan profile and confirm QSYS2.GROUP_PTF_INFO returns PTF_GROUP_NAME, PTF_GROUP_LEVEL, and PTF_GROUP_STATUS. This scanner never applies PTFs."
+PG_FIX_OS="re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never applies PTFs."
+PG_MEAN_PASS="Every IBM i PTF group on this partition other than Security and HIPER matches the bundled PSP level, including the cumulative package."
+PG_MEAN_WARN="One or more IBM i PTF groups other than Security and HIPER are one bundled PSP level behind."
+PG_MEAN_FAIL="One or more IBM i PTF groups other than Security and HIPER are more than one bundled PSP level behind, or are not installed."
+PG_MEAN_DEFS="The bundled PSP group-level table was not supplied, so PTF group currency cannot be graded."
+PG_MEAN_CAPTURE="The group-PTF probe did not yield a readable GROUP_PTF_INFO dump, so PTF group currency cannot be graded."
+PG_MEAN_OS="The IBM i OS-release probe did not yield a readable ENV_SYS_INFO dump, so PTF group currency cannot be graded against the release PSP rows."
+PG_DEFS=""
+if [ -n "${PTXRAY_DEFS_DIR:-}" ]; then
+  PG_DEFS=$PTXRAY_DEFS_DIR/ibmi-psp-group-levels.tsv
+fi
+if [ -z "${PTXRAY_DEFS_DIR:-}" ] || [ ! -f "$PG_DEFS" ] || [ ! -r "$PG_DEFS" ] || [ ! -s "$PG_DEFS" ]; then
+  add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+      "not assessed — reference data missing (definitions not supplied)" \
+      "$PG_MEAN_DEFS" \
+      "$PG_FIX_DEFS" \
+      "cis-l1"
+else
+  OS_RAW=$(ibmi_sql os_vrm "SELECT 'OS' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_VERSION,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_RELEASE,'-')),10) FROM SYSIBMADM.ENV_SYS_INFO")
+  OS_RC=$?
+  if [ "$OS_RC" -ne 0 ]; then
+    add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+        "not assessed — OS release capture failed (rc=$OS_RC)" \
+        "$PG_MEAN_OS" \
+        "$PG_FIX_OS" \
+        "cis-l1"
+  elif [ -z "$OS_RAW" ]; then
+    add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+        "not assessed — OS release capture empty" \
+        "$PG_MEAN_OS" \
+        "$PG_FIX_OS" \
+        "cis-l1"
+  else
+    OS_LINE=$(printf '%s\n' "$OS_RAW" | awk -F'|' '$1=="OS"{n++; line=$0} END{if(n==1) print line}')
+    OS_VER=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    OS_REL=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    case "$OS_VER" in
+      ''|*[!0-9]*) OS_VER="" ;;
+    esac
+    case "$OS_REL" in
+      ''|*[!0-9]*) OS_REL="" ;;
+    esac
+    if [ -z "$OS_LINE" ] || [ -z "$OS_VER" ] || [ -z "$OS_REL" ]; then
+      add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+          "not assessed — OS_VERSION or OS_RELEASE unreadable" \
+          "$PG_MEAN_OS" \
+          "$PG_FIX_OS" \
+          "cis-l1"
+    else
+      PG_REL="V${OS_VER}R${OS_REL}M0"
+      GRP_RAW=$(ibmi_sql grp_ptf_info "SELECT 'GRP' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_NAME, '-')), 7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_DESCRIPTION, '-')), 80) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(PTF_GROUP_LEVEL), '-'), 11) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_STATUS, '-')), 20) FROM QSYS2.GROUP_PTF_INFO")
+      GRP_RC=$?
+      if [ "$GRP_RC" -ne 0 ]; then
+        add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+            "not assessed — capture failed (rc=$GRP_RC)" \
+            "$PG_MEAN_CAPTURE" \
+            "$PG_FIX_PROBE" \
+            "cis-l1"
+      elif [ -z "$GRP_RAW" ]; then
+        add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+            "not assessed — capture empty (rc=0)" \
+            "$PG_MEAN_CAPTURE" \
+            "$PG_FIX_PROBE" \
+            "cis-l1"
+      else
+        PG_PARSE=$(printf '%s\n' "$GRP_RAW" | awk -F'|' -v rel="$PG_REL" -v pspfile="$PG_DEFS" '
+          function trim(s) {
+            sub(/^[ \t]+/, "", s)
+            sub(/[ \t]+$/, "", s)
+            return s
+          }
+          BEGIN {
+            while ((getline line < pspfile) > 0) {
+              nf = split(line, fld, "\t")
+              if (nf < 3) continue
+              r=fld[1]; g=fld[2]; l=fld[3]
+              sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r)
+              sub(/^[ \t]+/, "", g); sub(/[ \t]+$/, "", g)
+              sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l)
+              if (r == rel && g != "" && l ~ /^[0-9]+$/) {
+                psp_lvl[g] = l + 0
+                psp_n++
+              }
+            }
+            close(pspfile)
+          }
+          $1 == "GRP" {
+            id = trim($2)
+            desc = trim($3)
+            inst = trim($4)
+            sts = trim($5)
+            is_sec = (index(desc, " Group Security") > 0)
+            is_hip = (index(desc, " Group Hiper") > 0)
+            if (index(desc, " Group HIPER") > 0) is_hip = 1
+            is_cum = (index(desc, "Cumulative PTF Package") > 0)
+            if (is_sec && is_hip) { junk = 1; next }
+            if (!is_cum && (is_sec || is_hip)) { skip[id] = 1; next }
+            if (id in skip) next
+            if (id == "" || id == "-") { junk = 1; next }
+            if (!(id in psp_lvl)) next
+            if (id in seen) next
+            seen[id] = 1
+            if (sts != "INSTALLED") { m++; next }
+            if (inst == "" || inst == "-" || inst !~ /^[0-9]+$/) { junk = 1; next }
+            avail = psp_lvl[id]
+            delta = avail - (inst + 0)
+            if (delta == 0) c++
+            else if (delta == 1) w++
+            else nfail++
+            next
+          }
+          END {
+            if (junk) { print "JUNK"; exit }
+            if (psp_n + 0 == 0) { print "NOPSP"; exit }
+            for (g in psp_lvl) {
+              if (g in skip) continue
+              if (!(g in seen)) m++
+            }
+            b = w + nfail
+            n = c + b + m
+            if (m > 0 || nfail > 0) print "OK|FAIL|" n+0 "|" c+0 "|" b+0 "|" m+0
+            else if (w > 0) print "OK|WARN|" n+0 "|" c+0 "|" b+0 "|" m+0
+            else print "OK|PASS|" n+0 "|" c+0 "|" b+0 "|" m+0
+          }')
+        if [ -z "$PG_PARSE" ] || [ "$PG_PARSE" = "JUNK" ]; then
+          add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+              "not assessed — GROUP_PTF_INFO value unreadable" \
+              "The group-PTF dump was readable, but a row carried a level or status token that could not be graded." \
+              "$PG_FIX_PROBE" \
+              "cis-l1"
+        elif [ "$PG_PARSE" = "NOPSP" ]; then
+          add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+              "not assessed — PSP has no group levels for this release" \
+              "The bundled PSP table has no group-level rows for the running IBM i release, so PTF group currency cannot be graded." \
+              "$PG_FIX_DEFS" \
+              "cis-l1"
+        else
+          PG_KIND=$(printf '%s\n' "$PG_PARSE" | awk -F'|' '{ print $2 }')
+          PG_N=$(printf '%s\n' "$PG_PARSE" | awk -F'|' '{ print $3 }')
+          PG_C=$(printf '%s\n' "$PG_PARSE" | awk -F'|' '{ print $4 }')
+          PG_B=$(printf '%s\n' "$PG_PARSE" | awk -F'|' '{ print $5 }')
+          PG_M=$(printf '%s\n' "$PG_PARSE" | awk -F'|' '{ print $6 }')
+          PG_OBS="groups=$PG_N current=$PG_C behind=$PG_B missing=$PG_M"
+          if [ "$PG_KIND" = "FAIL" ]; then
+            add patch cur_ptf_groups "$PG_TITLE" FAIL high \
+                "$PG_OBS" \
+                "$PG_MEAN_FAIL" \
+                "$PG_FIX_APPLY" \
+                "cis-l1"
+          elif [ "$PG_KIND" = "WARN" ]; then
+            add patch cur_ptf_groups "$PG_TITLE" WARN med \
+                "$PG_OBS" \
+                "$PG_MEAN_WARN" \
+                "$PG_FIX_APPLY" \
+                "cis-l1"
+          elif [ "$PG_KIND" = "PASS" ]; then
+            add patch cur_ptf_groups "$PG_TITLE" PASS low \
+                "$PG_OBS" \
+                "$PG_MEAN_PASS" \
+                "$PG_FIX_NA" \
+                "cis-l1"
+          else
+            add patch cur_ptf_groups "$PG_TITLE" NOT_ASSESSED low \
+                "not assessed — GROUP_PTF_INFO value unreadable" \
+                "The group-PTF dump was readable, but a row carried a level or status token that could not be graded." \
+                "$PG_FIX_PROBE" \
+                "cis-l1"
           fi
         fi
       fi
@@ -7138,6 +7548,2096 @@ fi
     fi
   fi
 
+  # res_abnormal_ipl — IBM i QABNORMSW (abnormal IPL indicator).
+  # QIPLSTS is observed context only and does not change the grade.
+  # One finding. Parses the shared cap-system-values dump. Does not call
+  # ibmi_sql. Does not CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # Exact 0 is PASS (normal IPL). Exact 1 is WARN (abnormal IPL).
+  # live Phase 0 dump is QABNORMSW||0 and QIPLSTS||0.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add resilience res_abnormal_ipl "Abnormal IPL indicator" NOT_ASSESSED med \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QABNORMSW cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "-"
+  else
+    QABN_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QABNORMSW"{n++; line=$0} END{if(n==1) print line}')
+    QABN_RC=$?
+    if [ -z "$QABN_LINE" ]; then
+      add resilience res_abnormal_ipl "Abnormal IPL indicator" NOT_ASSESSED med \
+          "not assessed — QABNORMSW row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QABNORMSW row, so the value cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QABNORMSW." \
+          "-"
+    else
+      QABN_VAL=$(printf '%s\n' "$QABN_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$QABN_VAL" = "*NOTAVL" ]; then
+        add resilience res_abnormal_ipl "Abnormal IPL indicator" NOT_ASSESSED med \
+            "not assessed — QABNORMSW=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QABNORMSW — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
+            "-"
+      elif [ -z "$QABN_VAL" ]; then
+        add resilience res_abnormal_ipl "Abnormal IPL indicator" NOT_ASSESSED med \
+            "not assessed — QABNORMSW value unreadable" \
+            "The QABNORMSW row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QABNORMSW row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QABNORMSW)." \
+            "-"
+      elif [ "$QABN_VAL" = "0" ] || [ "$QABN_VAL" = "1" ]; then
+        QIPL_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QIPLSTS"{n++; line=$0} END{if(n==1) print line}')
+        QIPL_RC=$?
+        if [ -z "$QIPL_LINE" ]; then
+          QIPL_OBS="missing"
+        else
+          QIPL_VAL=$(printf '%s\n' "$QIPL_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+          if [ -z "$QIPL_VAL" ]; then
+            QIPL_OBS="unreadable"
+          else
+            QIPL_OBS=$QIPL_VAL
+          fi
+        fi
+        QABN_OBS="QABNORMSW=${QABN_VAL} QIPLSTS=${QIPL_OBS}"
+        if [ "$QABN_VAL" = "0" ]; then
+          add resilience res_abnormal_ipl "Abnormal IPL indicator" PASS med \
+              "$QABN_OBS" \
+              "QABNORMSW is 0, so the previous end of system was normal." \
+              "n/a" \
+              "-"
+        else
+          add resilience res_abnormal_ipl "Abnormal IPL indicator" WARN med \
+              "$QABN_OBS" \
+              "QABNORMSW is 1, so the previous end of system was abnormal. Damaged objects may wait." \
+              "review the previous abnormal end, inspect damaged objects, and IPL normally once the partition is healthy. This scanner never changes system values." \
+              "-"
+        fi
+      else
+        add resilience res_abnormal_ipl "Abnormal IPL indicator" NOT_ASSESSED med \
+            "not assessed — QABNORMSW value unreadable" \
+            "The QABNORMSW row was present, but the catalog value was not 0, 1, or *NOTAVL, so it is not graded." \
+            "inspect the QABNORMSW row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QABNORMSW)." \
+            "-"
+      fi
+    fi
+  fi
+
+  # res_asp_used — IBM i system ASP fill.
+  # Probe QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED (key system-asp-used).
+  # On rc!=0, empty, missing, or non-unique, fall back to QSYS2.ASP_INFO
+  # ASP 1 ASP_NUM / TOTCAP / TOTCAPA (key asp-info-asp1).
+  # Never use QSYS2.ASP_VARY_INFO. Never PASS on absence.
+  # PASS used < 80. WARN 80-89.99. FAIL >= 90. *NOTAVL/junk is a refusal.
+  # One finding. ibmi_sql only. Tag -: no CIS/STIG control.
+  ASP_KIND=""
+  ASP_PCT=""
+  ASP_OBS=""
+  ASP_RAW=$(ibmi_sql system-asp-used "SELECT 'SYSASP' CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(SYSTEM_ASP_USED)), '*NOTAVL'), 32) FROM QSYS2.SYSTEM_STATUS_INFO")
+  ASP_RC=$?
+  if [ "$ASP_RC" -ne 0 ]; then
+    ASP_KIND=FAILRC
+  elif [ -z "$ASP_RAW" ]; then
+    ASP_KIND=EMPTY
+  else
+    ASP_PARSE=$(printf '%s\n' "$ASP_RAW" | awk -F'|' '
+      {
+        gsub(/\r/, "")
+        k=$1; v=$2
+        gsub(/^[ \t]+|[ \t]+$/, "", k)
+        gsub(/^[ \t]+|[ \t]+$/, "", v)
+        if (k=="" && v=="") next
+        if (k=="SYSASP") { n++; val=v }
+        else other++
+      }
+      END {
+        if (n==0) { print "MISSING"; exit }
+        if (n!=1) { print "NOTUNIQ"; exit }
+        if (val=="*NOTAVL" || val=="") { print "JUNK"; exit }
+        if (val !~ /^(0|[1-9][0-9]*)(\.[0-9]+)?$/) { print "JUNK"; exit }
+        if (val+0<0 || val+0>100) { print "JUNK"; exit }
+        print "OK|" val
+      }')
+    ASP_KIND=$(printf '%s\n' "$ASP_PARSE" | awk -F'|' '{ print $1 }')
+    if [ "$ASP_KIND" = "OK" ]; then
+      ASP_PCT=$(printf '%s\n' "$ASP_PARSE" | awk -F'|' '{ print $2 }')
+      ASP_OBS="SYSTEM_ASP_USED=$ASP_PCT"
+    fi
+  fi
+  if [ "$ASP_KIND" != "OK" ] && [ "$ASP_KIND" != "JUNK" ]; then
+    FB_RAW=$(ibmi_sql asp-info-asp1 "SELECT 'ASP' CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(ASP_NUM)), 8) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(TOTCAP)), '*NOTAVL'), 32) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(TOTCAPA)), '*NOTAVL'), 32) FROM QSYS2.ASP_INFO WHERE ASP_NUM = 1")
+    FB_RC=$?
+    if [ "$FB_RC" -ne 0 ]; then
+      ASP_KIND=FAILRC
+      ASP_RC=$FB_RC
+    elif [ -z "$FB_RAW" ]; then
+      ASP_KIND=EMPTY
+    else
+      ASP_PARSE=$(printf '%s\n' "$FB_RAW" | awk -F'|' '
+        {
+          gsub(/\r/, "")
+          k=$1; a=$2; c=$3; p=$4
+          gsub(/^[ \t]+|[ \t]+$/, "", k)
+          gsub(/^[ \t]+|[ \t]+$/, "", a)
+          gsub(/^[ \t]+|[ \t]+$/, "", c)
+          gsub(/^[ \t]+|[ \t]+$/, "", p)
+          if (k=="" && a=="") next
+          if (k=="ASP" && a ~ /^[0-9]+$/ && a+0==1) { n++; cap=c; av=p }
+          else other++
+        }
+        END {
+          if (n==0) { print "MISSING"; exit }
+          if (n!=1) { print "NOTUNIQ"; exit }
+          if (cap=="*NOTAVL" || av=="*NOTAVL" || cap=="" || av=="") { print "JUNK"; exit }
+          if (cap !~ /^(0|[1-9][0-9]*)(\.[0-9]+)?$/) { print "JUNK"; exit }
+          if (av !~ /^(0|[1-9][0-9]*)(\.[0-9]+)?$/) { print "JUNK"; exit }
+          capn=cap+0; avn=av+0
+          if (capn<=0 || avn<0 || avn>capn) { print "JUNK"; exit }
+          printf "OK|%.2f\n", (capn-avn)*100/capn
+        }')
+      ASP_KIND=$(printf '%s\n' "$ASP_PARSE" | awk -F'|' '{ print $1 }')
+      if [ "$ASP_KIND" = "OK" ]; then
+        ASP_PCT=$(printf '%s\n' "$ASP_PARSE" | awk -F'|' '{ print $2 }')
+        ASP_OBS="ASP_1_USED=$ASP_PCT"
+      fi
+    fi
+  fi
+  if [ "$ASP_KIND" = "OK" ]; then
+    ASP_BAND=$(printf '%s\n' "$ASP_PCT" | awk '{
+      u=$1+0
+      if (u<80) print "PASS"
+      else if (u<90) print "WARN"
+      else print "FAIL"
+    }')
+    if [ "$ASP_BAND" = "PASS" ]; then
+      add resilience res_asp_used "System ASP fill" PASS high \
+          "$ASP_OBS" \
+          "System ASP used space is below 80 percent, so the partition has storage headroom." \
+          "n/a" \
+          "-"
+    elif [ "$ASP_BAND" = "WARN" ]; then
+      add resilience res_asp_used "System ASP fill" WARN high \
+          "$ASP_OBS" \
+          "System ASP used space is 80 to 89.99 percent. A full ASP stops the partition." \
+          "reduce system ASP used space below 80 percent by deleting unused objects, moving data to a user ASP, or adding disk units to ASP 1. This scanner never changes storage." \
+          "-"
+    else
+      add resilience res_asp_used "System ASP fill" FAIL high \
+          "$ASP_OBS" \
+          "System ASP used space is 90 percent or more. A full ASP stops the partition." \
+          "reduce system ASP used space below 80 percent by deleting unused objects, moving data to a user ASP, or adding disk units to ASP 1. This scanner never changes storage." \
+          "-"
+    fi
+  elif [ "$ASP_KIND" = "JUNK" ]; then
+    add resilience res_asp_used "System ASP fill" NOT_ASSESSED low \
+        "not assessed — ASP used value unreadable" \
+        "The ASP used row was present, but the catalog value was not a usable percentage, so system ASP fill is not graded." \
+        "inspect QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED and QSYS2.ASP_INFO TOTCAP and TOTCAPA for ASP 1." \
+        "-"
+  elif [ "$ASP_KIND" = "FAILRC" ]; then
+    add resilience res_asp_used "System ASP fill" NOT_ASSESSED low \
+        "not assessed — capture failed (rc=$ASP_RC)" \
+        "The SYSTEM_ASP_USED probe did not yield a readable row, so system ASP fill cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED and QSYS2.ASP_INFO ASP 1 return rows. This scanner never changes storage." \
+        "-"
+  elif [ "$ASP_KIND" = "EMPTY" ]; then
+    add resilience res_asp_used "System ASP fill" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The SYSTEM_ASP_USED probe returned no pipe row, so system ASP fill cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED and QSYS2.ASP_INFO ASP 1 return rows. This scanner never changes storage." \
+        "-"
+  else
+    add resilience res_asp_used "System ASP fill" NOT_ASSESSED low \
+        "not assessed — ASP used row missing or not unique" \
+        "The ASP used dump was readable, but it did not contain exactly one SYSTEM_ASP_USED or ASP 1 capacity row, so system ASP fill cannot be graded." \
+        "inspect QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED and QSYS2.ASP_INFO for ASP_NUM = 1." \
+        "-"
+  fi
+
+  # res_brms_backup_status — last successful BRMS control-group backup.
+  # Presence: QSYS2.SOFTWARE_PRODUCT_INFO PRODUCT_ID 5770BR1 INSTALLED=YES,
+  # fallback library QBRM via OBJECT_STATISTICS('QSYS','LIB').
+  # Recency: QUSRBRM.BACKUP_STATUS last COMPLETE SAVE_END, not *SAVSYS.
+  # PASS <=7d, WARN 8-31, FAIL >31 or none. NA if BRMS absent.
+  # Unparseable, non-Gregorian, or future SAVE_END is NOT_ASSESSED.
+  # NOT_ASSESSED if BRMS is present but BACKUP_STATUS is unreadable
+  # (SQL services not initialized). Never runs INZBRM. Never DSP*.
+  # One finding. Tag is `-`. Severity high.
+  BRMS_DONE=0
+  BRMS_PRESENT=0
+  BRMS_PROD_ABSENT=0
+  BRMS_LABEL="BRMS last good backup"
+  BRMS_FIX_PRESENCE="re-run the scan as the scan profile and confirm QSYS2.SOFTWARE_PRODUCT_INFO and QSYS2.OBJECT_STATISTICS can list product 5770BR1 or library QBRM. This scanner never changes BRMS and never runs INZBRM."
+  BRMS_FIX_UNINIT="run INZBRM OPTION(*SQLSRVINZ) as the operator, then re-run this scan. This scanner never runs INZBRM and never changes BRMS."
+  BRMS_FIX_BACKUP="inspect QUSRBRM.BACKUP_STATUS for the last COMPLETE control-group SAVE_END. This scanner never changes BRMS and never runs INZBRM."
+  BRMS_FIX_OLD="run a BRMS control-group backup and restore the schedule so a successful run completes at least weekly. This scanner never changes BRMS and never runs INZBRM."
+  BRMS_FIX_NONE="run a BRMS control-group backup and confirm a successful completion is recorded in QUSRBRM.BACKUP_STATUS. This scanner never changes BRMS and never runs INZBRM."
+  BRMS_FIX_WARN="confirm the BRMS control-group schedule still completes; the last successful run is older than 7 days. This scanner never changes BRMS and never runs INZBRM."
+  BRMS_MEAN_CAPTURE="The BRMS presence or backup-status probe did not yield a readable row, so backup recency cannot be graded."
+  BRMS_MEAN_UNINIT="BRMS is present but QUSRBRM SQL services are not initialized, so backup recency cannot be graded."
+  BRMS_PROD_RAW=$(ibmi_sql brms-product "SELECT VARCHAR('5770BR1',7) CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(COUNT(*))),10) FROM QSYS2.SOFTWARE_PRODUCT_INFO WHERE PRODUCT_ID = '5770BR1' AND INSTALLED = 'YES'")
+  BRMS_PROD_RC=$?
+  if [ "$BRMS_PROD_RC" -ne 0 ]; then
+    :
+  elif [ -z "$BRMS_PROD_RAW" ]; then
+    :
+  else
+    BRMS_PROD_LINE=$(printf '%s\n' "$BRMS_PROD_RAW" | awk -F'|' '
+      {
+        id=$1; val=$2
+        gsub(/^[ \t]+|[ \t]+$/, "", id)
+        gsub(/^[ \t]+|[ \t]+$/, "", val)
+        if (id != "" && val != "") { n++; pid=id; pval=val }
+      }
+      END { if (n == 1) print pid "#" pval }
+    ')
+    if [ -n "$BRMS_PROD_LINE" ]; then
+      BRMS_PROD_ID=$(printf '%s\n' "$BRMS_PROD_LINE" | awk -F'#' '{print $1}')
+      BRMS_PROD_VAL=$(printf '%s\n' "$BRMS_PROD_LINE" | awk -F'#' '{print $2}')
+      if [ "$BRMS_PROD_VAL" = "*NOTAVL" ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — BRMS product row is *NOTAVL" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_PRESENCE" \
+            "-"
+        BRMS_DONE=1
+      elif [ "$BRMS_PROD_ID" = "5770BR1" ]; then
+        case "$BRMS_PROD_VAL" in
+          YES|yes)
+            BRMS_PRESENT=1
+            ;;
+          NO|no|0)
+            BRMS_PROD_ABSENT=1
+            ;;
+          ''|*[!0-9]*)
+            ;;
+          *)
+            if [ "$BRMS_PROD_VAL" -ge 1 ]; then
+              BRMS_PRESENT=1
+            else
+              BRMS_PROD_ABSENT=1
+            fi
+            ;;
+        esac
+      fi
+    fi
+  fi
+  if [ "$BRMS_DONE" -eq 0 ] && [ "$BRMS_PRESENT" -eq 0 ]; then
+    BRMS_LIB_RAW=$(ibmi_sql brms-qbrm "SELECT VARCHAR('QBRM',10) CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(COUNT(*))),10) FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS','LIB')) WHERE OBJNAME = 'QBRM'")
+    BRMS_LIB_RC=$?
+    if [ "$BRMS_LIB_RC" -ne 0 ]; then
+      add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+          "not assessed — capture failed (rc=$BRMS_LIB_RC)" \
+          "$BRMS_MEAN_CAPTURE" \
+          "$BRMS_FIX_PRESENCE" \
+          "-"
+      BRMS_DONE=1
+    elif [ -z "$BRMS_LIB_RAW" ]; then
+      if [ "$BRMS_PROD_RC" -ne 0 ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — capture failed (rc=$BRMS_PROD_RC)" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_PRESENCE" \
+            "-"
+        BRMS_DONE=1
+      elif [ -z "$BRMS_PROD_RAW" ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — capture empty (rc=0)" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_PRESENCE" \
+            "-"
+        BRMS_DONE=1
+      else
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — QBRM row missing or not unique" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_PRESENCE" \
+            "-"
+        BRMS_DONE=1
+      fi
+    else
+      BRMS_LIB_LINE=$(printf '%s\n' "$BRMS_LIB_RAW" | awk -F'|' '
+        {
+          id=$1; val=$2
+          gsub(/^[ \t]+|[ \t]+$/, "", id)
+          gsub(/^[ \t]+|[ \t]+$/, "", val)
+          if (id != "" && val != "") { n++; pid=id; pval=val }
+        }
+        END { if (n == 1) print pid "#" pval }
+      ')
+      if [ -z "$BRMS_LIB_LINE" ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — QBRM row missing or not unique" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_PRESENCE" \
+            "-"
+        BRMS_DONE=1
+      else
+        BRMS_LIB_ID=$(printf '%s\n' "$BRMS_LIB_LINE" | awk -F'#' '{print $1}')
+        BRMS_LIB_VAL=$(printf '%s\n' "$BRMS_LIB_LINE" | awk -F'#' '{print $2}')
+        if [ "$BRMS_LIB_VAL" = "*NOTAVL" ]; then
+          add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+              "not assessed — QBRM row is *NOTAVL" \
+              "$BRMS_MEAN_CAPTURE" \
+              "$BRMS_FIX_PRESENCE" \
+              "-"
+          BRMS_DONE=1
+        elif [ "$BRMS_LIB_ID" = "QBRM" ]; then
+          case "$BRMS_LIB_VAL" in
+            YES|yes|LIB)
+              BRMS_PRESENT=1
+              ;;
+            NO|no|0)
+              if [ "$BRMS_PROD_ABSENT" -eq 1 ]; then
+                add resilience res_brms_backup_status "$BRMS_LABEL" NOT_APPLICABLE high \
+                    "BRMS not installed" \
+                    "BRMS is not installed, so control-group backup recency is not graded." \
+                    "n/a" \
+                    "-"
+                BRMS_DONE=1
+              else
+                add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                    "not assessed — QBRM row missing or not unique" \
+                    "$BRMS_MEAN_CAPTURE" \
+                    "$BRMS_FIX_PRESENCE" \
+                    "-"
+                BRMS_DONE=1
+              fi
+              ;;
+            ''|*[!0-9]*)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — QBRM row unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_PRESENCE" \
+                  "-"
+              BRMS_DONE=1
+              ;;
+            *)
+              if [ "$BRMS_LIB_VAL" -ge 1 ]; then
+                BRMS_PRESENT=1
+              elif [ "$BRMS_PROD_ABSENT" -eq 1 ]; then
+                add resilience res_brms_backup_status "$BRMS_LABEL" NOT_APPLICABLE high \
+                    "BRMS not installed" \
+                    "BRMS is not installed, so control-group backup recency is not graded." \
+                    "n/a" \
+                    "-"
+                BRMS_DONE=1
+              else
+                add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                    "not assessed — QBRM row missing or not unique" \
+                    "$BRMS_MEAN_CAPTURE" \
+                    "$BRMS_FIX_PRESENCE" \
+                    "-"
+                BRMS_DONE=1
+              fi
+              ;;
+          esac
+        else
+          add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+              "not assessed — QBRM row unreadable" \
+              "$BRMS_MEAN_CAPTURE" \
+              "$BRMS_FIX_PRESENCE" \
+              "-"
+          BRMS_DONE=1
+        fi
+      fi
+    fi
+  fi
+  if [ "$BRMS_DONE" -eq 0 ] && [ "$BRMS_PRESENT" -eq 0 ]; then
+    if [ "$BRMS_PROD_RC" -ne 0 ]; then
+      add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+          "not assessed — capture failed (rc=$BRMS_PROD_RC)" \
+          "$BRMS_MEAN_CAPTURE" \
+          "$BRMS_FIX_PRESENCE" \
+          "-"
+    elif [ -z "$BRMS_PROD_RAW" ]; then
+      add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+          "not assessed — capture empty (rc=0)" \
+          "$BRMS_MEAN_CAPTURE" \
+          "$BRMS_FIX_PRESENCE" \
+          "-"
+    else
+      add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+          "not assessed — BRMS product row missing or not unique" \
+          "$BRMS_MEAN_CAPTURE" \
+          "$BRMS_FIX_PRESENCE" \
+          "-"
+    fi
+    BRMS_DONE=1
+  fi
+  if [ "$BRMS_DONE" -eq 0 ]; then
+    BRMS_BAK_RAW=$(ibmi_sql brms-backup-status "SELECT VARCHAR(TRIM(CONTROL_GROUP),10) CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(SAVE_END)),26) CONCAT '|' CONCAT VARCHAR(TRIM(SAVE_STATUS),10) FROM QUSRBRM.BACKUP_STATUS WHERE SAVE_STATUS = 'COMPLETE' AND SAVE_END IS NOT NULL AND CONTROL_GROUP <> '*SAVSYS' ORDER BY SAVE_END DESC FETCH FIRST 1 ROW ONLY")
+    BRMS_BAK_RC=$?
+    if [ "$BRMS_BAK_RC" -ne 0 ]; then
+      add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+          "not assessed — BRMS present but QUSRBRM.BACKUP_STATUS capture failed (rc=$BRMS_BAK_RC); SQL services may not be initialized" \
+          "$BRMS_MEAN_UNINIT" \
+          "$BRMS_FIX_UNINIT" \
+          "-"
+      BRMS_DONE=1
+    elif [ -z "$BRMS_BAK_RAW" ]; then
+      add resilience res_brms_backup_status "$BRMS_LABEL" FAIL high \
+          "BRMS present last_good=none" \
+          "BRMS is installed but no successful control-group backup is recorded." \
+          "$BRMS_FIX_NONE" \
+          "-"
+      BRMS_DONE=1
+    else
+      BRMS_BAK_PARSE=$(printf '%s\n' "$BRMS_BAK_RAW" | awk -F'|' '
+        {
+          n++
+          if (NF < 3) { bad=1; next }
+          cg=$1; ts=$2; st=$3
+          gsub(/^[ \t]+|[ \t]+$/, "", cg)
+          gsub(/^[ \t]+|[ \t]+$/, "", ts)
+          gsub(/^[ \t]+|[ \t]+$/, "", st)
+          if (match(ts, /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/))
+            date=substr(ts, 1, 10)
+          else if (ts == "")
+            date=""
+          else {
+            bad=1
+            next
+          }
+          pcg=cg; pdate=date; pst=st
+        }
+        END {
+          if (n == 1 && bad) print "UNREADABLE"
+          else if (n == 1) print pcg "#" pdate "#" pst
+        }
+      ')
+      if [ -z "$BRMS_BAK_PARSE" ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — BACKUP_STATUS row missing or not unique" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_BACKUP" \
+            "-"
+        BRMS_DONE=1
+      elif [ "$BRMS_BAK_PARSE" = "UNREADABLE" ]; then
+        add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+            "not assessed — BACKUP_STATUS row unreadable" \
+            "$BRMS_MEAN_CAPTURE" \
+            "$BRMS_FIX_BACKUP" \
+            "-"
+        BRMS_DONE=1
+      else
+        BRMS_CG=$(printf '%s\n' "$BRMS_BAK_PARSE" | awk -F'#' '{print $1}')
+        BRMS_DATE=$(printf '%s\n' "$BRMS_BAK_PARSE" | awk -F'#' '{print $2}')
+        BRMS_ST=$(printf '%s\n' "$BRMS_BAK_PARSE" | awk -F'#' '{print $3}')
+        if [ "$BRMS_ST" = "*NOTAVL" ] || [ "$BRMS_DATE" = "*NOTAVL" ] || [ "$BRMS_CG" = "*NOTAVL" ]; then
+          add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+              "not assessed — BACKUP_STATUS row is *NOTAVL" \
+              "$BRMS_MEAN_UNINIT" \
+              "$BRMS_FIX_UNINIT" \
+              "-"
+          BRMS_DONE=1
+        elif [ -z "$BRMS_DATE" ]; then
+          add resilience res_brms_backup_status "$BRMS_LABEL" FAIL high \
+              "BRMS present last_good=none" \
+              "BRMS is installed but no successful control-group backup is recorded." \
+              "$BRMS_FIX_NONE" \
+              "-"
+          BRMS_DONE=1
+        elif [ "$BRMS_ST" != "COMPLETE" ]; then
+          add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+              "not assessed — BACKUP_STATUS row unreadable" \
+              "$BRMS_MEAN_CAPTURE" \
+              "$BRMS_FIX_BACKUP" \
+              "-"
+          BRMS_DONE=1
+        else
+          case "$BRMS_DATE" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+            *)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — BACKUP_STATUS timestamp unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              BRMS_DONE=1
+              ;;
+          esac
+        fi
+        if [ "$BRMS_DONE" -eq 0 ]; then
+          if [ -n "${AIXRAY_TODAY:-}" ]; then
+            BRMS_TODAY=$AIXRAY_TODAY
+          else
+            BRMS_TODAY=$(date +%Y-%m-%d)
+          fi
+          case "$BRMS_TODAY" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]) ;;
+            *)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — check clock date unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              BRMS_DONE=1
+              ;;
+          esac
+        fi
+        if [ "$BRMS_DONE" -eq 0 ]; then
+          BRMS_AGE=$(printf '%s %s\n' "$BRMS_TODAY" "$BRMS_DATE" | awk '
+            function valid_ymd(y, m, d, dim) {
+              y = int(y)
+              m = int(m)
+              d = int(d)
+              if (y < 1 || m < 1 || m > 12 || d < 1) return 0
+              if (m == 2) {
+                if ((y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)) dim = 29
+                else dim = 28
+              } else if (m == 4 || m == 6 || m == 9 || m == 11) dim = 30
+              else dim = 31
+              if (d > dim) return 0
+              return 1
+            }
+            function jdn(y, m, d, a) {
+              a = int((14 - m) / 12)
+              y = y + 4800 - a
+              m = m + 12 * a - 3
+              return d + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - int(y / 100) + int(y / 400) - 32045
+            }
+            {
+              split($1, t, "-")
+              split($2, b, "-")
+              ty = t[1] + 0; tm = t[2] + 0; td = t[3] + 0
+              by = b[1] + 0; bm = b[2] + 0; bd = b[3] + 0
+              if (!valid_ymd(by, bm, bd)) { print "INVALID"; exit }
+              if (!valid_ymd(ty, tm, td)) { print "CLOCK"; exit }
+              age = jdn(ty, tm, td) - jdn(by, bm, bd)
+              if (age < 0) { print "FUTURE"; exit }
+              print age
+            }
+          ')
+          case "$BRMS_AGE" in
+            INVALID)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — BACKUP_STATUS timestamp unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              ;;
+            CLOCK)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — check clock date unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              ;;
+            FUTURE)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — BACKUP_STATUS timestamp is in the future" \
+                  "The last successful BRMS control-group backup timestamp is in the future, so recency cannot be graded." \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              ;;
+            ''|*[!0-9]*)
+              add resilience res_brms_backup_status "$BRMS_LABEL" NOT_ASSESSED high \
+                  "not assessed — BACKUP_STATUS timestamp unreadable" \
+                  "$BRMS_MEAN_CAPTURE" \
+                  "$BRMS_FIX_BACKUP" \
+                  "-"
+              ;;
+            *)
+              if [ "$BRMS_AGE" -le 7 ]; then
+                add resilience res_brms_backup_status "$BRMS_LABEL" PASS high \
+                    "BRMS present last_good=$BRMS_DATE control_group=$BRMS_CG age_days=$BRMS_AGE" \
+                    "The last successful BRMS control-group backup is within 7 days." \
+                    "n/a" \
+                    "-"
+              elif [ "$BRMS_AGE" -le 31 ]; then
+                add resilience res_brms_backup_status "$BRMS_LABEL" WARN high \
+                    "BRMS present last_good=$BRMS_DATE control_group=$BRMS_CG age_days=$BRMS_AGE" \
+                    "The last successful BRMS control-group backup is 8 to 31 days old." \
+                    "$BRMS_FIX_WARN" \
+                    "-"
+              else
+                add resilience res_brms_backup_status "$BRMS_LABEL" FAIL high \
+                    "BRMS present last_good=$BRMS_DATE control_group=$BRMS_CG age_days=$BRMS_AGE" \
+                    "The backup product runs but its last good run is old." \
+                    "$BRMS_FIX_OLD" \
+                    "-"
+              fi
+              ;;
+          esac
+        fi
+      fi
+    fi
+  fi
+
+  # res_disk_protection — IBM i disk-unit mirroring / device-parity.
+  # PTxray posture, not a CIS rec. One finding. Probes QSYS2.ASP_INFO
+  # then QSYS2.SYSDISKSTAT; keeps whichever dump parses as real.
+  # Prefers SYSDISKSTAT when it yields unique unit rows. PASS all
+  # protected, WARN degraded/resuming, FAIL any unprotected. rc != 0,
+  # empty, missing, not unique, junk, or *NOTAVL is NOT_ASSESSED.
+  # Never PASS on absence. Does not call ibmi_cl / DSPHDWRSC /
+  # or ASP vary-step history.
+  ASP_RAW=$(ibmi_sql asp_info_diskprot "SELECT 'ASP' CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(ASP_NUMBER)),5) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(PROTECTED_CAPACITY)),'*NOTAVL'),20) CONCAT '|' CONCAT VARCHAR(COALESCE(TRIM(CHAR(UNPROTECTED_CAPACITY)),'*NOTAVL'),20) CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(NUMBER_OF_DISK_UNITS)),5) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(ASP_STATE,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(DISK_UNITS_PRESENT,'-')),4) FROM QSYS2.ASP_INFO")
+  ASP_RC=$?
+  DISK_RAW=$(ibmi_sql sysdiskstat_diskprot "SELECT 'DISK' CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(ASP_NUMBER)),5) CONCAT '|' CONCAT VARCHAR(TRIM(CHAR(UNIT_NUMBER)),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(RESOURCE_NAME,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PROTECTION_TYPE,'')),8) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PROTECTION_STATUS,'')),21) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(RAID_TYPE,'-')),6) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(LOGICAL_MIRRORED_PAIR_STATUS,'-')),1) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(MIRRORED_UNIT_STATUS,'-')),1) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(MIRRORED_SUBUNIT,'-')),1) FROM QSYS2.SYSDISKSTAT")
+  DISK_RC=$?
+
+  DISK_KIND=NONE
+  DISK_PARSE=""
+  if [ "$DISK_RC" -eq 0 ] && [ -n "$DISK_RAW" ]; then
+    DISK_PARSE=$(printf '%s\n' "$DISK_RAW" | awk -F'|' '
+      function trim(s) {
+        sub(/^[ \t]+/, "", s)
+        sub(/[ \t]+$/, "", s)
+        return s
+      }
+      function up(s) { return toupper(s) }
+      {
+        pfx = trim($1)
+        if (pfx == "") next
+        if (pfx != "DISK") next
+        if (NF < 6) { junk++; next }
+        asp = trim($2)
+        unit = trim($3)
+        ptype = up(trim($5))
+        pstat = up(trim($6))
+        pair = trim($8)
+        ustat = trim($9)
+        subu = trim($10)
+        if (subu == "") subu = "-"
+        if (asp == "" || unit == "") { junk++; next }
+        key = asp "|" unit "|" subu
+        if (seen[key]++) { dup++; next }
+        if (ptype == "*NOTAVL" || pstat == "*NOTAVL") { notavl++; next }
+        if (ptype == "" || ptype == "-") { unprot++; next }
+        if (ptype != "MIRRORED" && ptype != "PARITY") { junk++; next }
+        if (pstat == "" || pstat == "-") { junk++; next }
+        if (pstat == "UNKNOWN") { notavl++; next }
+        if (pstat == "UNPROTECTED") { unprot++; next }
+        deg = 0
+        if (pstat == "ACTIVE" || pstat == "BUSY") {
+          deg = 0
+        } else if (pstat == "DEGRADED" || pstat == "FAILED" || pstat == "HARDWARE FAILURE" || pstat == "NOT READY" || pstat == "PARITY REBUILD" || pstat == "POWER LOSS" || pstat == "READ WRITE PROTECTED" || pstat == "RESUME" || pstat == "RESUME PENDING" || pstat == "SUSPEND" || pstat == "WRITE PROTECTED") {
+          deg = 1
+        } else {
+          junk++; next
+        }
+        if (ptype == "MIRRORED") {
+          if (pair == "0" || ustat == "2" || ustat == "3") deg = 1
+        }
+        if (deg) degc++; else prot++
+      }
+      END {
+        if (dup) { print "DUP"; exit }
+        if (junk) { print "JUNK"; exit }
+        if (notavl) { print "NOTAVL"; exit }
+        n = prot + degc + unprot
+        if (n == 0) { print "EMPTY"; exit }
+        printf "OK %d %d %d %d\n", n, prot, degc, unprot
+      }')
+    DISK_KIND=$(printf '%s\n' "$DISK_PARSE" | awk '{ print $1 }')
+  fi
+
+  ASP_KIND=NONE
+  ASP_PARSE=""
+  if [ "$ASP_RC" -eq 0 ] && [ -n "$ASP_RAW" ]; then
+    ASP_PARSE=$(printf '%s\n' "$ASP_RAW" | awk -F'|' '
+      function trim(s) {
+        sub(/^[ \t]+/, "", s)
+        sub(/[ \t]+$/, "", s)
+        return s
+      }
+      {
+        pfx = trim($1)
+        if (pfx == "") next
+        if (pfx != "ASP") next
+        if (NF < 5) { junk++; next }
+        asp = trim($2)
+        prot = trim($3)
+        unprot = trim($4)
+        units = trim($5)
+        if (asp == "") { junk++; next }
+        if (seen[asp]++) { dup++; next }
+        if (prot == "*NOTAVL" || unprot == "*NOTAVL") { notavl++; next }
+        if (prot ~ /^-[0-9]+$/ || unprot ~ /^-[0-9]+$/) { sentinel++; next }
+        if (prot !~ /^[0-9]+$/ || unprot !~ /^[0-9]+$/ || units !~ /^[0-9]+$/) { junk++; next }
+        asps++
+        pmb += prot + 0
+        umb += unprot + 0
+        nu += units + 0
+        if (unprot != "0") uasp++
+      }
+      END {
+        if (dup) { print "DUP"; exit }
+        if (junk) { print "JUNK"; exit }
+        if (notavl) { print "NOTAVL"; exit }
+        if (sentinel) { print "SENTINEL"; exit }
+        if (asps == 0) { print "EMPTY"; exit }
+        printf "OK %d %d %d %d %d\n", asps, umb, pmb, nu, uasp
+      }')
+    ASP_KIND=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $1 }')
+  fi
+
+  if [ "$DISK_KIND" = "OK" ]; then
+    DISK_N=$(printf '%s\n' "$DISK_PARSE" | awk '{ print $2 }')
+    DISK_PROT=$(printf '%s\n' "$DISK_PARSE" | awk '{ print $3 }')
+    DISK_DEG=$(printf '%s\n' "$DISK_PARSE" | awk '{ print $4 }')
+    DISK_UN=$(printf '%s\n' "$DISK_PARSE" | awk '{ print $5 }')
+    DISK_OBS="source=sysdiskstat units=$DISK_N protected=$DISK_PROT degraded=$DISK_DEG unprotected=$DISK_UN"
+    if [ "$DISK_UN" -gt 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" FAIL critical \
+          "$DISK_OBS" \
+          "One or more disk units have no mirroring or device parity, so a single disk failure can take the partition down." \
+          "protect every disk unit with device parity or mirroring (SST Disk Units or the ASP configuration). This scanner never changes disk protection." \
+          "-"
+    elif [ "$DISK_DEG" -gt 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" WARN critical \
+          "$DISK_OBS" \
+          "Mirroring or device parity is degraded or resuming on one or more disk units, so a further disk failure can take the partition down." \
+          "complete the mirror resume or parity rebuild and inspect SST Disk Units for degraded units. This scanner never changes disk protection." \
+          "-"
+    elif [ "$DISK_PROT" -gt 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" PASS low \
+          "$DISK_OBS" \
+          "Every disk unit is protected by mirroring or device parity, so a single disk failure does not take the partition down." \
+          "n/a" \
+          "-"
+    else
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — SYSDISKSTAT disk-protection rows missing" \
+          "The SYSDISKSTAT dump was readable, but it did not name any disk unit, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.SYSDISKSTAT returns disk-unit rows. This scanner never changes disk protection." \
+          "-"
+    fi
+  elif [ "$ASP_KIND" = "OK" ]; then
+    ASP_N=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $2 }')
+    ASP_UMB=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $3 }')
+    ASP_PMB=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $4 }')
+    ASP_NU=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $5 }')
+    ASP_UASP=$(printf '%s\n' "$ASP_PARSE" | awk '{ print $6 }')
+    ASP_OBS="source=asp_info asps=$ASP_N unprotected_mb=$ASP_UMB protected_mb=$ASP_PMB units=$ASP_NU"
+    if [ "$ASP_UASP" -gt 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" FAIL critical \
+          "$ASP_OBS" \
+          "One or more ASPs report unprotected capacity, so a single disk failure can take the partition down." \
+          "protect every disk unit with device parity or mirroring (SST Disk Units or the ASP configuration). This scanner never changes disk protection." \
+          "-"
+    elif [ "$ASP_N" -gt 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" PASS low \
+          "$ASP_OBS" \
+          "Every ASP reports zero unprotected capacity, so disk units are protected by mirroring or device parity." \
+          "n/a" \
+          "-"
+    else
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — ASP_INFO rows missing" \
+          "The ASP_INFO dump was readable, but it did not name any ASP, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.ASP_INFO returns ASP rows. This scanner never changes disk protection." \
+          "-"
+    fi
+  else
+    if [ "$DISK_RC" -ne 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — capture failed (rc=$DISK_RC)" \
+          "The SYSDISKSTAT probe did not yield a readable disk-protection dump, and ASP_INFO did not yield a usable fallback, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.SYSDISKSTAT and QSYS2.ASP_INFO return disk-protection rows. This scanner never changes disk protection." \
+          "-"
+    elif [ "$ASP_RC" -ne 0 ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — capture failed (rc=$ASP_RC)" \
+          "The ASP_INFO probe did not yield a readable capacity dump, and SYSDISKSTAT did not yield a usable unit dump, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.SYSDISKSTAT and QSYS2.ASP_INFO return disk-protection rows. This scanner never changes disk protection." \
+          "-"
+    elif [ -z "$DISK_RAW" ] && [ -z "$ASP_RAW" ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — capture empty (rc=0)" \
+          "The ASP_INFO and SYSDISKSTAT probes returned no pipe row after a successful rc, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.SYSDISKSTAT and QSYS2.ASP_INFO return disk-protection rows. This scanner never changes disk protection." \
+          "-"
+    elif [ "$DISK_KIND" = "DUP" ] || [ "$ASP_KIND" = "DUP" ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — disk-protection row missing or not unique" \
+          "The disk-protection dump was readable, but an ASP or disk-unit key was not unique, so disk protection cannot be graded." \
+          "inspect QSYS2.SYSDISKSTAT UNIT_NUMBER and QSYS2.ASP_INFO ASP_NUMBER for duplicate rows." \
+          "-"
+    elif [ "$DISK_KIND" = "NOTAVL" ] || [ "$ASP_KIND" = "NOTAVL" ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — disk protection=*NOTAVL (scan profile cannot read this column)" \
+          "The catalog returned *NOTAVL for a protection or capacity column, so disk protection cannot be graded." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
+          "-"
+    elif [ "$DISK_KIND" = "SENTINEL" ] || [ "$ASP_KIND" = "SENTINEL" ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — ASP_INFO capacity sentinel (value not representable)" \
+          "The ASP_INFO dump returned a negative capacity sentinel, so disk protection cannot be graded." \
+          "re-run the scan as the scan profile and confirm QSYS2.ASP_INFO returns representable protected and unprotected capacities. This scanner never changes disk protection." \
+          "-"
+    elif [ "$DISK_KIND" = "JUNK" ] || [ "$ASP_KIND" = "JUNK" ]; then
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — disk-protection value unreadable" \
+          "The disk-protection dump was readable, but a row carried a protection type, status, or capacity value that could not be graded." \
+          "inspect QSYS2.SYSDISKSTAT PROTECTION_TYPE PROTECTION_STATUS and QSYS2.ASP_INFO PROTECTED_CAPACITY UNPROTECTED_CAPACITY." \
+          "-"
+    else
+      add resilience res_disk_protection "Unprotected disk units" NOT_ASSESSED low \
+          "not assessed — disk-protection rows missing" \
+          "The ASP_INFO and SYSDISKSTAT probes returned pipe rows, but none were ASP or DISK protection rows, so disk protection cannot be graded." \
+          "inspect QSYS2.SYSDISKSTAT and QSYS2.ASP_INFO and confirm the views return disk-protection rows." \
+          "-"
+    fi
+  fi
+
+  # res_journal_receiver_management — IBM i QSYS2.JOURNAL_INFO receiver
+  # management. PTxray posture, not CIS. One finding. Calls ibmi_sql
+  # only. Does not call ibmi_cl / WRKJRNA / CHGJRN / CRTJRN.
+  # Exclude IBM-supplied journals (Q* libraries) and remote journals
+  # (JOURNAL_TYPE *REMOTE: MNGRCV/DLTRCV are null; the source drives
+  # receiver changes). PASS remaining local MNGRCV(*SYSTEM). WARN any
+  # local MNGRCV(*USER). NOT_APPLICABLE if no non-IBM local journals
+  # remain. DELETE_RECEIVER_OPTION is YES/NO (also *YES/*NO). rc!=0,
+  # empty, junk, *NOTAVL, missing/non-unique: NOT_ASSESSED. Never PASS
+  # on absence.
+  JRN_RAW=$(ibmi_sql journal_info "SELECT 'JRN' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(JOURNAL_NAME,'')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(JOURNAL_LIBRARY,'')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(JOURNAL_TYPE,'')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(MANAGE_RECEIVER_OPTION,'')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(DELETE_RECEIVER_OPTION,'')),10) FROM QSYS2.JOURNAL_INFO")
+  JRN_RC=$?
+  if [ "$JRN_RC" -ne 0 ]; then
+    add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+        "not assessed — capture failed (rc=$JRN_RC)" \
+        "The JOURNAL_INFO probe did not yield a readable journal dump, so receiver management cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.JOURNAL_INFO returns journal rows. This scanner never changes journals." \
+        "-"
+  elif [ -z "$JRN_RAW" ]; then
+    add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+        "not assessed — capture empty (rc=0)" \
+        "The JOURNAL_INFO probe returned no pipe row, so receiver management cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.JOURNAL_INFO returns journal rows. This scanner never changes journals." \
+        "-"
+  else
+    JRN_PARSE=$(printf '%s\n' "$JRN_RAW" | awk -F'|' '
+      function trim(s) {
+        sub(/^[ \t]+/, "", s)
+        sub(/[ \t]+$/, "", s)
+        return s
+      }
+      $1=="JRN" {
+        name=trim($2)
+        lib=trim($3)
+        typ=trim($4)
+        mng=trim($5)
+        del=trim($6)
+        if (NF != 6) { junk=1; next }
+        if (name=="*NOTAVL" || lib=="*NOTAVL" || typ=="*NOTAVL" || mng=="*NOTAVL" || del=="*NOTAVL") {
+          notavl=1
+          next
+        }
+        if (name=="" || lib=="") { junk=1; next }
+        if (name !~ /^[A-Z#$@][A-Z0-9_#$@]*$/ || lib !~ /^[A-Z#$@][A-Z0-9_#$@]*$/) { junk=1; next }
+        if (typ != "*LOCAL" && typ != "*REMOTE" && typ != "LOCAL" && typ != "REMOTE") { junk=1; next }
+        key=lib "/" name
+        got=mng "|" del "|" typ
+        if (typ == "*REMOTE" || typ == "REMOTE") {
+          if (seen[key]) {
+            if (attr[key] != got) conflict=1
+            next
+          }
+          seen[key]=1
+          attr[key]=got
+          rem++
+          next
+        }
+        if (mng != "*SYSTEM" && mng != "*USER") { junk=1; next }
+        if (del != "YES" && del != "NO" && del != "*YES" && del != "*NO") { junk=1; next }
+        if (seen[key]) {
+          if (attr[key] != got) conflict=1
+          next
+        }
+        seen[key]=1
+        attr[key]=got
+        if (lib ~ /^Q/) { ibm++; next }
+        n++
+        if (mng == "*SYSTEM") sys++
+        else usr++
+      }
+      END {
+        if (notavl) { print "NOTAVL"; exit }
+        if (junk) { print "JUNK"; exit }
+        if (conflict) { print "DUP"; exit }
+        printf "OK %d %d %d %d %d\n", n+0, sys+0, usr+0, ibm+0, rem+0
+      }')
+    if [ "$JRN_PARSE" = "NOTAVL" ]; then
+      add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+          "not assessed — JOURNAL_INFO=*NOTAVL (scan profile cannot read this journal attribute)" \
+          "The catalog returned *NOTAVL for a journal receiver-management attribute, so the value is not graded." \
+          "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
+          "-"
+    elif [ "$JRN_PARSE" = "JUNK" ]; then
+      add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+          "not assessed — JOURNAL_INFO value unreadable" \
+          "The journal dump was readable, but a row carried a journal name, library, type, or receiver-management token that could not be graded." \
+          "inspect QSYS2.JOURNAL_INFO JOURNAL_NAME, JOURNAL_LIBRARY, JOURNAL_TYPE, MANAGE_RECEIVER_OPTION, and DELETE_RECEIVER_OPTION." \
+          "-"
+    elif [ "$JRN_PARSE" = "DUP" ]; then
+      add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+          "not assessed — JOURNAL_INFO row missing or not unique" \
+          "The journal dump was readable, but it did not contain a unique pipe-delimited journal row, so receiver management cannot be graded." \
+          "inspect QSYS2.JOURNAL_INFO for JOURNAL_NAME and JOURNAL_LIBRARY rows." \
+          "-"
+    else
+      JRN_N=$(printf '%s\n' "$JRN_PARSE" | awk '{ print $2 }')
+      JRN_SYS=$(printf '%s\n' "$JRN_PARSE" | awk '{ print $3 }')
+      JRN_USR=$(printf '%s\n' "$JRN_PARSE" | awk '{ print $4 }')
+      JRN_IBM=$(printf '%s\n' "$JRN_PARSE" | awk '{ print $5 }')
+      JRN_REM=$(printf '%s\n' "$JRN_PARSE" | awk '{ print $6 }')
+      if [ -z "$JRN_N" ] || [ -z "$JRN_SYS" ] || [ -z "$JRN_USR" ] || [ -z "$JRN_IBM" ] || [ -z "$JRN_REM" ]; then
+        add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+            "not assessed — JOURNAL_INFO value unreadable" \
+            "The journal dump was readable, but a row carried a journal name, library, type, or receiver-management token that could not be graded." \
+            "inspect QSYS2.JOURNAL_INFO JOURNAL_NAME, JOURNAL_LIBRARY, JOURNAL_TYPE, MANAGE_RECEIVER_OPTION, and DELETE_RECEIVER_OPTION." \
+            "-"
+      elif [ "$JRN_N" -eq 0 ] && [ "$JRN_IBM" -eq 0 ] && [ "$JRN_REM" -eq 0 ]; then
+        add resilience res_journal_receiver_management "Journal receiver management" NOT_ASSESSED med \
+            "not assessed — JOURNAL_INFO row missing or not unique" \
+            "The journal dump was readable, but it did not contain a unique pipe-delimited journal row, so receiver management cannot be graded." \
+            "inspect QSYS2.JOURNAL_INFO for JOURNAL_NAME and JOURNAL_LIBRARY rows." \
+            "-"
+      elif [ "$JRN_N" -eq 0 ]; then
+        add resilience res_journal_receiver_management "Journal receiver management" NOT_APPLICABLE med \
+            "non-IBM journals=0" \
+            "No non-IBM local journals were present, so journal receiver management is not applicable." \
+            "if application journals are created, use CRTJRN with MNGRCV(*SYSTEM) and DLTRCV(*YES). This scanner never changes journals." \
+            "-"
+      elif [ "$JRN_USR" -eq 0 ]; then
+        add resilience res_journal_receiver_management "Journal receiver management" PASS med \
+            "journals=$JRN_N system_managed=$JRN_SYS user_managed=$JRN_USR" \
+            "Every non-IBM journal is system-managed, so the system changes receivers before they fill the disk." \
+            "n/a" \
+            "-"
+      else
+        add resilience res_journal_receiver_management "Journal receiver management" WARN med \
+            "journals=$JRN_N system_managed=$JRN_SYS user_managed=$JRN_USR" \
+            "One or more non-IBM journals are user-managed, so receivers can fill the disk and stop the applications." \
+            "set MNGRCV(*SYSTEM) DLTRCV(*YES) on each user-managed journal using CHGJRN. This scanner never changes journals." \
+            "-"
+      fi
+    fi
+  fi
+
+# res_library_save_age — IBM i per-library save-age coverage.
+# Authority: PTxray resiliency posture, not CIS/STIG. One finding.
+# Calls ibmi_sql for OBJECT_STATISTICS QSYS *LIB OBJNAME|SAVE_TIMESTAMP.
+# Does not call ibmi_cl / DSPOBJD / SAVLIB / BRMS.
+# CONCAT of a NULL SAVE_TIMESTAMP is NULL and would drop the row, so
+# COALESCE keeps never-saved libraries as name|. Skip Q* / #* after
+# the probe so an all-IBM-prefix list is NOT_APPLICABLE, not empty.
+# NULL/empty/-/*NONE SAVE_TIMESTAMP is never saved.
+# A stamp must be the full IBM i VARCHAR form
+# YYYY-MM-DD-HH.MM.SS.ffffff; validate calendar year 0001-9999,
+# month/day, AND hours 00-23, minutes 00-59, seconds 00-59
+# before grading. A well-shaped invalid time or year-zero
+# date is malformed SAVE_TIMESTAMP, never graded from the
+# date prefix. A stamp later than the scan date is
+# unreadable, never coerced to age 0.
+# Zero remaining user libraries -> NOT_APPLICABLE.
+# Any never or >180d -> FAIL; else any 36-180d -> WARN; else all <=35d -> PASS.
+# DSPOBJD OBJTYPE(*LIB) DETAIL(*FULL) is named only in fix text.
+# UPDHST(*NO) suppresses SAVE_TIMESTAMP.
+LSA_RAW=$(ibmi_sql library_save_age "SELECT VARCHAR(TRIM(OBJNAME),10) CONCAT '|' CONCAT COALESCE(VARCHAR(SAVE_TIMESTAMP),'') FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS','LIB'))")
+LSA_RC=$?
+LSA_LABEL="Per-library coverage"
+LSA_FIX_RETRY="re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS('QSYS','LIB') returns OBJNAME and SAVE_TIMESTAMP. This scanner never saves or changes objects."
+LSA_FIX_INSPECT="inspect QSYS2.OBJECT_STATISTICS('QSYS','LIB') OBJNAME and SAVE_TIMESTAMP. DSPOBJD OBJTYPE(*LIB) DETAIL(*FULL) shows the last save date when SQL is unavailable."
+LSA_FIX_NOTAVL="run the complete assessment as QSECOFR and investigate why the required evidence was unreadable."
+LSA_MEAN_RISK="a library in no save list surfaces only at restore time."
+if [ "$LSA_RC" -ne 0 ]; then
+  add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+      "not assessed — capture failed (rc=$LSA_RC)" \
+      "The OBJECT_STATISTICS probe did not yield a readable QSYS *LIB dump, so per-library save age cannot be graded." \
+      "$LSA_FIX_RETRY" \
+      "-"
+elif [ -z "$LSA_RAW" ]; then
+  add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+      "not assessed — capture empty (rc=0)" \
+      "The OBJECT_STATISTICS probe returned no pipe row, so per-library save age cannot be graded." \
+      "$LSA_FIX_RETRY" \
+      "-"
+else
+  LSA_TODAY=${AIXRAY_TODAY:-}
+  if [ -z "$LSA_TODAY" ]; then
+    LSA_TODAY=${TODAY:-}
+  fi
+  if [ -z "$LSA_TODAY" ]; then
+    LSA_TODAY=$(date +%Y-%m-%d 2>/dev/null)
+  fi
+  LSA_PARSE=$(printf '%s\n' "$LSA_RAW" | awk -F'|' -v today="$LSA_TODAY" '
+    function leap(y) {
+      return (y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))
+    }
+    function dim(y, m) {
+      if (m == 2) return leap(y) ? 29 : 28
+      if (m == 4 || m == 6 || m == 9 || m == 11) return 30
+      return 31
+    }
+    function valid_ymd(s, y, m, d) {
+      if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return 0
+      y = substr(s, 1, 4) + 0
+      m = substr(s, 6, 2) + 0
+      d = substr(s, 9, 2) + 0
+      if (y < 1 || y > 9999 || m < 1 || m > 12 || d < 1 || d > dim(y, m)) return 0
+      return 1
+    }
+    function ts_shape(s) {
+      return (s ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9][0-9][0-9][0-9][0-9]$/)
+    }
+    function julian(s, y, m, d, a) {
+      y = substr(s, 1, 4) + 0
+      m = substr(s, 6, 2) + 0
+      d = substr(s, 9, 2) + 0
+      a = int((14 - m) / 12)
+      y = y + 4800 - a
+      m = m + 12 * a - 3
+      return d + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - int(y / 100) + int(y / 400) - 32045
+    }
+    function trim(s) {
+      sub(/^[ \t]+/, "", s)
+      sub(/[ \t\r]+$/, "", s)
+      return s
+    }
+    function consider(name, never, age) {
+      if (!worst_set) {
+        worst_set = 1
+        worst_name = name
+        worst_never = never
+        worst_age = age
+        return
+      }
+      if (never) {
+        if (!worst_never || name < worst_name) {
+          worst_name = name
+          worst_never = 1
+          worst_age = 0
+        }
+        return
+      }
+      if (worst_never) return
+      if (age > worst_age || (age == worst_age && name < worst_name)) {
+        worst_name = name
+        worst_age = age
+      }
+    }
+    BEGIN {
+      today_ok = valid_ymd(today)
+      if (today_ok) today_j = julian(today)
+    }
+    {
+      line = trim($0)
+      if (line == "") next
+      if (index(line, "|") == 0) next
+      if (NF != 2) { junk = 1; next }
+      name = trim($1)
+      ts = trim($2)
+      if (name == "") { missing = 1; next }
+      first = toupper(substr(name, 1, 1))
+      if (first == "Q" || first == "#") next
+      if (substr(name, 11, 1) != "") { junk = 1; next }
+      if (name !~ /^[A-Za-z0-9$#@_]+$/) { junk = 1; next }
+      if (name in seen) { missing = 1; next }
+      seen[name] = 1
+      nuser++
+      uts = toupper(ts)
+      if (uts == "*NOTAVL") { notavl = 1; next }
+      if (ts == "" || ts == "-" || uts == "NULL" || uts == "*NONE") {
+        consider(name, 1, 0)
+        next
+      }
+      if (!ts_shape(ts)) { junk = 1; next }
+      ymd = substr(ts, 1, 10)
+      h = substr(ts, 12, 2) + 0
+      mi = substr(ts, 15, 2) + 0
+      se = substr(ts, 18, 2) + 0
+      if (!valid_ymd(ymd) || h > 23 || mi > 59 || se > 59) { malformed = 1; next }
+      if (!today_ok) next
+      age = today_j - julian(ymd)
+      if (age < 0) { junk = 1; next }
+      consider(name, 0, age)
+    }
+    END {
+      if (notavl) { print "NOTAVL"; exit }
+      if (missing) { print "MISSING"; exit }
+      if (junk) { print "JUNK"; exit }
+      if (malformed) { print "MALFORMED"; exit }
+      if (nuser + 0 == 0) { print "NA"; exit }
+      if (!today_ok) { print "NODATE"; exit }
+      if (!worst_set) { print "MISSING"; exit }
+      if (worst_never) kind = "FAILN"
+      else if (worst_age > 180) kind = "FAILO"
+      else if (worst_age >= 36) kind = "WARN"
+      else kind = "PASS"
+      age_tok = worst_never ? "never" : worst_age
+      print kind, worst_name, age_tok, nuser + 0
+    }')
+  LSA_KIND=$(printf '%s\n' "$LSA_PARSE" | awk '{ print $1 }')
+  LSA_NAME=$(printf '%s\n' "$LSA_PARSE" | awk '{ print $2 }')
+  LSA_AGE=$(printf '%s\n' "$LSA_PARSE" | awk '{ print $3 }')
+  LSA_N=$(printf '%s\n' "$LSA_PARSE" | awk '{ print $4 }')
+  LSA_FIX_SAVE="include every user library in SAVLIB or BRMS control groups (worst: $LSA_NAME"
+  if [ "$LSA_KIND" = "FAILN" ]; then
+    LSA_FIX_SAVE="$LSA_FIX_SAVE never saved). UPDHST(*NO) suppresses SAVE_TIMESTAMP. DSPOBJD OBJTYPE(*LIB) DETAIL(*FULL) shows the last save date when SQL is unavailable. This scanner never saves or changes objects."
+  else
+    LSA_FIX_SAVE="$LSA_FIX_SAVE saved ${LSA_AGE}d ago). UPDHST(*NO) suppresses SAVE_TIMESTAMP. DSPOBJD OBJTYPE(*LIB) DETAIL(*FULL) shows the last save date when SQL is unavailable. This scanner never saves or changes objects."
+  fi
+  if [ "$LSA_KIND" = "NOTAVL" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — SAVE_TIMESTAMP=*NOTAVL (scan profile cannot read this object)" \
+        "The catalog returned *NOTAVL for a library SAVE_TIMESTAMP, so per-library save age cannot be graded." \
+        "$LSA_FIX_NOTAVL" \
+        "-"
+  elif [ "$LSA_KIND" = "MISSING" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — library row missing or not unique" \
+        "The OBJECT_STATISTICS dump was readable, but a library row was missing OBJNAME or named a library more than once, so per-library save age cannot be graded." \
+        "$LSA_FIX_INSPECT" \
+        "-"
+  elif [ "$LSA_KIND" = "JUNK" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — SAVE_TIMESTAMP value unreadable" \
+        "The OBJECT_STATISTICS dump was readable, but a remaining library row carried a SAVE_TIMESTAMP that was not a complete timestamp or was later than the scan date, so per-library save age cannot be graded." \
+        "$LSA_FIX_INSPECT" \
+        "-"
+  elif [ "$LSA_KIND" = "MALFORMED" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — malformed SAVE_TIMESTAMP" \
+        "The OBJECT_STATISTICS dump was readable, but a remaining library row carried a well-shaped SAVE_TIMESTAMP that was not a valid calendar date with hours 00-23, minutes 00-59, and seconds 00-59, so per-library save age cannot be graded." \
+        "$LSA_FIX_INSPECT" \
+        "-"
+  elif [ "$LSA_KIND" = "NODATE" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — scan date unreadable" \
+        "The remaining user-library dump was readable, but the scan date was not a calendar day, so save age cannot be graded." \
+        "$LSA_FIX_RETRY" \
+        "-"
+  elif [ "$LSA_KIND" = "NA" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" NOT_APPLICABLE high \
+        "no remaining user libraries" \
+        "No remaining user libraries after skipping Q* and #* IBM-prefix libraries, so per-library save age is not graded." \
+        "n/a" \
+        "-"
+  elif [ "$LSA_KIND" = "PASS" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" PASS high \
+        "$LSA_NAME saved ${LSA_AGE}d ago (user libraries=$LSA_N)" \
+        "Every remaining user library was saved within 35 days (oldest $LSA_NAME ${LSA_AGE}d); $LSA_MEAN_RISK" \
+        "n/a" \
+        "-"
+  elif [ "$LSA_KIND" = "WARN" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" WARN high \
+        "$LSA_NAME saved ${LSA_AGE}d ago (user libraries=$LSA_N)" \
+        "$LSA_NAME was last saved ${LSA_AGE}d ago; $LSA_MEAN_RISK" \
+        "$LSA_FIX_SAVE" \
+        "-"
+  elif [ "$LSA_KIND" = "FAILN" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" FAIL high \
+        "$LSA_NAME never saved (user libraries=$LSA_N)" \
+        "$LSA_NAME has never been saved; $LSA_MEAN_RISK" \
+        "$LSA_FIX_SAVE" \
+        "-"
+  elif [ "$LSA_KIND" = "FAILO" ]; then
+    add resilience res_library_save_age "$LSA_LABEL" FAIL high \
+        "$LSA_NAME saved ${LSA_AGE}d ago (user libraries=$LSA_N)" \
+        "$LSA_NAME was last saved ${LSA_AGE}d ago; $LSA_MEAN_RISK" \
+        "$LSA_FIX_SAVE" \
+        "-"
+  else
+    add resilience res_library_save_age "$LSA_LABEL" NOT_ASSESSED high \
+        "not assessed — library row missing or not unique" \
+        "The OBJECT_STATISTICS dump was readable, but it did not yield a unique per-library grade, so save age cannot be graded." \
+        "$LSA_FIX_INSPECT" \
+        "-"
+  fi
+fi
+
+  # res_power_restore_ipl — IBM i QPWRRSTIPL / QUPSDLYTIM / QUPSMSGQ.
+  # PTxray posture, no mapped benchmark control. One finding. Parses the
+  # shared cap-system-values dump. Does not call ibmi_sql. Does not
+  # CHGSYSVAL. *NOTAVL is a refusal, never PASS.
+  # PASS: QPWRRSTIPL=1 and QUPSMSGQ is a real queue (not *NONE/empty).
+  # WARN: QPWRRSTIPL=0 (unattended site stays down after a power blip).
+  # FAIL: QPWRRSTIPL=1 without a UPS message queue.
+  # Live QUPSDLYTIM character value is 00000002000000000200 (two 10-digit
+  # zoned fields, both 200 seconds).
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so QPWRRSTIPL, QUPSDLYTIM, and QUPSMSGQ cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "-"
+  else
+    RPWR_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QPWRRSTIPL"{n++; line=$0} END{if(n==1) print line}')
+    RPWR_RC=$?
+    RDLY_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QUPSDLYTIM"{n++; line=$0} END{if(n==1) print line}')
+    RDLY_RC=$?
+    RMSG_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QUPSMSGQ"{n++; line=$0} END{if(n==1) print line}')
+    RMSG_RC=$?
+    if [ -z "$RPWR_LINE" ]; then
+      add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+          "not assessed — QPWRRSTIPL row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QPWRRSTIPL row, so power-restore IPL cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QPWRRSTIPL." \
+          "-"
+    elif [ -z "$RDLY_LINE" ]; then
+      add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+          "not assessed — QUPSDLYTIM row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QUPSDLYTIM row, so the UPS delay cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QUPSDLYTIM." \
+          "-"
+    elif [ -z "$RMSG_LINE" ]; then
+      add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+          "not assessed — QUPSMSGQ row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QUPSMSGQ row, so the UPS message queue cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QUPSMSGQ." \
+          "-"
+    else
+      RPWR_VAL=$(printf '%s\n' "$RPWR_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      RDLY_VAL=$(printf '%s\n' "$RDLY_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      RMSG_VAL=$(printf '%s\n' "$RMSG_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/[ \t]+$/, "", v); print v }')
+      if [ "$RPWR_VAL" = "*NOTAVL" ] || [ "$RDLY_VAL" = "*NOTAVL" ] || [ "$RMSG_VAL" = "*NOTAVL" ]; then
+        if [ "$RPWR_VAL" = "*NOTAVL" ]; then
+          RNAV_WHICH=QPWRRSTIPL
+        elif [ "$RDLY_VAL" = "*NOTAVL" ]; then
+          RNAV_WHICH=QUPSDLYTIM
+        else
+          RNAV_WHICH=QUPSMSGQ
+        fi
+        add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+            "not assessed — ${RNAV_WHICH}=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for ${RNAV_WHICH} — the scan profile lacks authority to read this system value, so power-restore IPL is not graded." \
+            "grant the scan profile read access to QPWRRSTIPL, QUPSDLYTIM, and QUPSMSGQ and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "-"
+      else
+        RDLY_DISP=$(printf '%s\n' "$RDLY_VAL" | awk '
+          {
+            sub(/^[ \t]+/, "")
+            sub(/[ \t]+$/, "")
+            if ($0 == "") { print "UNREADABLE"; exit }
+            if ($0 ~ /^\*/) {
+              tok = $0
+              if (length($0) >= 10) {
+                tok = substr($0, 1, 10)
+                sub(/[ \t]+$/, "", tok)
+              } else {
+                split($0, a, /[ \t]+/)
+                tok = a[1]
+              }
+              if (tok == "*CALC" || tok == "*NOMAX" || tok == "*BASIC") { print tok; exit }
+              print "UNREADABLE"
+              exit
+            }
+            if ($0 !~ /^[0-9]+$/) { print "UNREADABLE"; exit }
+            if (length($0) >= 10 && (length($0) % 10) == 0) {
+              out = ""
+              prev = ""
+              n = length($0)
+              for (i = 1; i <= n; i += 10) {
+                v = substr($0, i, 10) + 0
+                if (out == "") { out = v; prev = v }
+                else if (v != prev) { out = out "," v; prev = v }
+              }
+              print out
+              exit
+            }
+            print $0 + 0
+          }')
+        RMSG_DISP=$(printf '%s\n' "$RMSG_VAL" | awk '
+          {
+            sub(/^[ \t]+/, "")
+            sub(/[ \t]+$/, "")
+            if ($0 == "") { print ""; exit }
+            if (index($0, "/")) { print $0; exit }
+            if ($0 ~ /^\*/) {
+              tok = $0
+              if (length($0) >= 10) {
+                tok = substr($0, 1, 10)
+                sub(/[ \t]+$/, "", tok)
+              } else {
+                split($0, a, /[ \t]+/)
+                tok = a[1]
+              }
+              print tok
+              exit
+            }
+            obj = substr($0, 1, 10)
+            lib = substr($0, 11)
+            sub(/[ \t]+$/, "", obj)
+            sub(/^[ \t]+/, "", lib)
+            sub(/[ \t]+$/, "", lib)
+            if (lib != "") print lib "/" obj
+            else print obj
+          }')
+        if [ -z "$RPWR_VAL" ] || { [ "$RPWR_VAL" != "0" ] && [ "$RPWR_VAL" != "1" ]; }; then
+          add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+              "not assessed — QPWRRSTIPL value unreadable" \
+              "The QPWRRSTIPL row was present, but the catalog value was not 0, 1, or *NOTAVL, so power-restore IPL is not graded." \
+              "inspect the QPWRRSTIPL, QUPSDLYTIM, and QUPSMSGQ rows in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL." \
+              "-"
+        elif [ -z "$RDLY_DISP" ] || [ "$RDLY_DISP" = "UNREADABLE" ]; then
+          add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+              "not assessed — QUPSDLYTIM value unreadable" \
+              "The QUPSDLYTIM row was present, but the catalog value was not a delay in seconds, *CALC, *BASIC, or *NOMAX, so power-restore IPL is not graded." \
+              "inspect the QPWRRSTIPL, QUPSDLYTIM, and QUPSMSGQ rows in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL." \
+              "-"
+        elif [ -n "$RMSG_DISP" ] && [ "$RMSG_DISP" != "*NONE" ] && [ "$RMSG_DISP" != "${RMSG_DISP#\*}" ]; then
+          add resilience res_power_restore_ipl "Power-restore IPL" NOT_ASSESSED med \
+              "not assessed — QUPSMSGQ value unreadable" \
+              "The QUPSMSGQ row was present, but the catalog value was not a message queue or *NONE, so power-restore IPL is not graded." \
+              "inspect the QPWRRSTIPL, QUPSDLYTIM, and QUPSMSGQ rows in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL." \
+              "-"
+        else
+          ROBS="QPWRRSTIPL=${RPWR_VAL} QUPSDLYTIM=${RDLY_DISP} QUPSMSGQ=${RMSG_DISP}"
+          if [ "$RPWR_VAL" = "1" ] && [ -n "$RMSG_DISP" ] && [ "$RMSG_DISP" != "*NONE" ]; then
+            add resilience res_power_restore_ipl "Power-restore IPL" PASS med \
+                "$ROBS" \
+                "QPWRRSTIPL is 1 and a UPS message queue is set, so the partition will IPL when utility power returns." \
+                "n/a" \
+                "-"
+          elif [ "$RPWR_VAL" = "0" ]; then
+            add resilience res_power_restore_ipl "Power-restore IPL" WARN med \
+                "$ROBS" \
+                "QPWRRSTIPL is 0, so an unattended site stays down after a power blip." \
+                "set QPWRRSTIPL to 1 using CHGSYSVAL SYSVAL(QPWRRSTIPL) VALUE('1') and assign QUPSMSGQ a monitored message queue. This scanner never changes system values." \
+                "-"
+          else
+            add resilience res_power_restore_ipl "Power-restore IPL" FAIL med \
+                "$ROBS" \
+                "QPWRRSTIPL is 1 but QUPSMSGQ is not a real message queue, so power-restore IPL has no UPS message destination." \
+                "set QUPSMSGQ to a monitored message queue using CHGSYSVAL SYSVAL(QUPSMSGQ) VALUE('msgq library'). This scanner never changes system values." \
+                "-"
+          fi
+        fi
+      fi
+    fi
+  fi
+
+# res_savlib_nonsys_recency — last full library save.
+# Grades the newer of QSAVLIBALL (SAVLIB *NONSYS) and QSAVALLUSR
+# (SAVLIB *ALLUSR) SAVE_TIMESTAMP from OBJECT_STATISTICS.
+# PASS <=7d, WARN 8-31, FAIL >31 or neither ever.
+# UPDHST(*NO) suppresses the stamp. One finding. Does not save.
+# *NOTAVL, empty, rc!=0, missing/non-unique named rows, or junk -> NOT_ASSESSED.
+# Grade only after exactly one QSAVLIBALL row and exactly one QSAVALLUSR row.
+NSAV_LABEL="Last full library save"
+NSAV_PASS_MAX=7
+NSAV_WARN_MAX=31
+NSAV_NEVER_STATUS=FAIL
+NSAV_FIX_SAVE="run SAVLIB LIB(*NONSYS) or SAVLIB LIB(*ALLUSR) with UPDHST(*YES). UPDHST(*NO) suppresses the QSAVLIBALL and QSAVALLUSR stamp. Fallback: DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never saves."
+NSAV_FIX_RETRY="re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS returns QSAVLIBALL and QSAVALLUSR. Fallback: DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never saves."
+NSAV_FIX_MISSING="inspect QSYS2.OBJECT_STATISTICS for OBJNAME QSAVLIBALL and QSAVALLUSR. Fallback: DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never saves."
+NSAV_FIX_UNREADABLE="inspect QSAVLIBALL and QSAVALLUSR SAVE_TIMESTAMP in QSYS2.OBJECT_STATISTICS. Fallback: DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never saves."
+NSAV_FIX_NOTAVL="run the complete assessment as QSECOFR and investigate why the required evidence was unreadable. Fallback: DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never saves."
+NSAV_MEAN_PASS="The newer of QSAVLIBALL (SAVLIB *NONSYS) and QSAVALLUSR (SAVLIB *ALLUSR) is within 7 days, so application libraries have a recent restore point."
+NSAV_MEAN_WARN="The newer of QSAVLIBALL (SAVLIB *NONSYS) and QSAVALLUSR (SAVLIB *ALLUSR) is 8 to 31 days old, so application libraries may not have a current restore point."
+NSAV_MEAN_FAIL="The newer of QSAVLIBALL (SAVLIB *NONSYS) and QSAVALLUSR (SAVLIB *ALLUSR) is older than 31 days, so application libraries have no recent restore point."
+NSAV_MEAN_NEVER="Neither QSAVLIBALL (SAVLIB *NONSYS) nor QSAVALLUSR (SAVLIB *ALLUSR) has a save timestamp, so application libraries have no restore point from a full library save."
+NSAV_RAW=$(ibmi_sql res_savlib_nonsys "SELECT VARCHAR(TRIM(OBJNAME),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(CHAR(SAVE_TIMESTAMP),'-')),26) FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS','DTAARA')) WHERE OBJNAME IN ('QSAVLIBALL','QSAVALLUSR')")
+NSAV_RC=$?
+if [ "$NSAV_RC" -ne 0 ]; then
+  add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+      "not assessed — capture failed (rc=$NSAV_RC)" \
+      "The OBJECT_STATISTICS probe did not yield a readable QSAVLIBALL/QSAVALLUSR row, so the last full library save cannot be graded." \
+      "$NSAV_FIX_RETRY" \
+      "-"
+else
+  NSAV_PIPES=$(printf '%s\n' "$NSAV_RAW" | awk '/\|/ { print }')
+  if [ -z "$NSAV_PIPES" ]; then
+    add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+        "not assessed — capture empty (rc=0)" \
+        "The OBJECT_STATISTICS probe returned no pipe row, so the last full library save cannot be graded." \
+        "$NSAV_FIX_RETRY" \
+        "-"
+  else
+    NSAV_PARSE=$(printf '%s\n' "$NSAV_PIPES" | awk -F'|' '
+      {
+        n=$1
+        t=$2
+        sub(/^[ \t]+/, "", n)
+        sub(/[ \t]+$/, "", n)
+        sub(/^[ \t]+/, "", t)
+        sub(/[ \t]+$/, "", t)
+        if (NF != 2) { junk++; next }
+        if (n == "QSAVLIBALL") { libn++; libt=t; next }
+        if (n == "QSAVALLUSR") { usrn++; usrt=t; next }
+        other++
+      }
+      END {
+        printf "%s|%s|%s|%s|%s|%s\n", libn+0, usrn+0, junk+0, other+0, libt, usrt
+      }
+    ')
+    NSAV_LIBN=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $1 }')
+    NSAV_USRN=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $2 }')
+    NSAV_JUNK=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $3 }')
+    NSAV_OTHER=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $4 }')
+    NSAV_LIBT=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $5 }')
+    NSAV_USRT=$(printf '%s\n' "$NSAV_PARSE" | awk -F'|' '{ print $6 }')
+    NSAV_NUM_OK=1
+    case "$NSAV_LIBN$NSAV_USRN$NSAV_JUNK$NSAV_OTHER" in
+      *[!0-9]*) NSAV_NUM_OK=0 ;;
+    esac
+    if [ "$NSAV_NUM_OK" -ne 1 ]; then
+      add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+          "not assessed — SAVE_TIMESTAMP unreadable" \
+          "A QSAVLIBALL or QSAVALLUSR SAVE_TIMESTAMP was not a timestamp, null, or *NOTAVL, so the last full library save cannot be graded." \
+          "$NSAV_FIX_UNREADABLE" \
+          "-"
+    elif [ "$NSAV_JUNK" -gt 0 ]; then
+      add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+          "not assessed — SAVE_TIMESTAMP unreadable" \
+          "A QSAVLIBALL or QSAVALLUSR SAVE_TIMESTAMP was not a timestamp, null, or *NOTAVL, so the last full library save cannot be graded." \
+          "$NSAV_FIX_UNREADABLE" \
+          "-"
+    elif [ "$NSAV_LIBN" -ne 1 ] || [ "$NSAV_USRN" -ne 1 ]; then
+      add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+          "not assessed — QSAVLIBALL/QSAVALLUSR row missing or not unique" \
+          "The OBJECT_STATISTICS dump did not contain a unique QSAVLIBALL/QSAVALLUSR row, so the last full library save cannot be graded." \
+          "$NSAV_FIX_MISSING" \
+          "-"
+    else
+      NSAV_LIB_KIND=absent
+      NSAV_USR_KIND=absent
+      NSAV_LIB_DATE=""
+      NSAV_USR_DATE=""
+      NSAV_LIB_J=""
+      NSAV_USR_J=""
+      if [ "$NSAV_LIBN" -eq 1 ]; then
+        if [ "$NSAV_LIBT" = "*NOTAVL" ]; then
+          NSAV_LIB_KIND=notavl
+        elif [ -z "$NSAV_LIBT" ] || [ "$NSAV_LIBT" = "-" ]; then
+          NSAV_LIB_KIND=never
+        else
+          case "$NSAV_LIBT" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*)
+              NSAV_LIB_DATE=$(printf '%s\n' "$NSAV_LIBT" | awk '{ print substr($0,1,10) }')
+              NSAV_LIB_J=$(d2j "$NSAV_LIB_DATE" 2>/dev/null) || NSAV_LIB_J=""
+              case "$NSAV_LIB_J" in
+                ''|*[!0-9]*) NSAV_LIB_KIND=bad ;;
+                *) NSAV_LIB_KIND=stamp ;;
+              esac
+              ;;
+            *) NSAV_LIB_KIND=bad ;;
+          esac
+        fi
+      fi
+      if [ "$NSAV_USRN" -eq 1 ]; then
+        if [ "$NSAV_USRT" = "*NOTAVL" ]; then
+          NSAV_USR_KIND=notavl
+        elif [ -z "$NSAV_USRT" ] || [ "$NSAV_USRT" = "-" ]; then
+          NSAV_USR_KIND=never
+        else
+          case "$NSAV_USRT" in
+            [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]|[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-*)
+              NSAV_USR_DATE=$(printf '%s\n' "$NSAV_USRT" | awk '{ print substr($0,1,10) }')
+              NSAV_USR_J=$(d2j "$NSAV_USR_DATE" 2>/dev/null) || NSAV_USR_J=""
+              case "$NSAV_USR_J" in
+                ''|*[!0-9]*) NSAV_USR_KIND=bad ;;
+                *) NSAV_USR_KIND=stamp ;;
+              esac
+              ;;
+            *) NSAV_USR_KIND=bad ;;
+          esac
+        fi
+      fi
+      if [ "$NSAV_LIB_KIND" = "notavl" ] || [ "$NSAV_USR_KIND" = "notavl" ]; then
+        NSAV_NOTAVL_OBS="QSAVALLUSR=*NOTAVL (scan profile cannot read this data area)"
+        [ "$NSAV_LIB_KIND" = "notavl" ] && NSAV_NOTAVL_OBS="QSAVLIBALL=*NOTAVL (scan profile cannot read this data area)"
+        add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+            "not assessed — $NSAV_NOTAVL_OBS" \
+            "The catalog returned *NOTAVL for a full-library-save data area, so the last full library save cannot be graded." \
+            "$NSAV_FIX_NOTAVL" \
+            "-"
+      elif [ "$NSAV_LIB_KIND" = "bad" ] || [ "$NSAV_USR_KIND" = "bad" ]; then
+        add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+            "not assessed — SAVE_TIMESTAMP unreadable" \
+            "A QSAVLIBALL or QSAVALLUSR SAVE_TIMESTAMP was not a timestamp, null, or *NOTAVL, so the last full library save cannot be graded." \
+            "$NSAV_FIX_UNREADABLE" \
+            "-"
+      elif [ "$NSAV_LIB_KIND" != "stamp" ] && [ "$NSAV_USR_KIND" != "stamp" ]; then
+        NSAV_LIB_OBS=absent
+        NSAV_USR_OBS=absent
+        [ "$NSAV_LIB_KIND" = "never" ] && NSAV_LIB_OBS=never
+        [ "$NSAV_USR_KIND" = "never" ] && NSAV_USR_OBS=never
+        add resilience res_savlib_nonsys_recency "$NSAV_LABEL" "$NSAV_NEVER_STATUS" critical \
+            "QSAVLIBALL=$NSAV_LIB_OBS QSAVALLUSR=$NSAV_USR_OBS" \
+            "$NSAV_MEAN_NEVER" \
+            "$NSAV_FIX_SAVE" \
+            "-"
+      else
+        NSAV_TODAY_OK=1
+        case "${TODAY_J:-}" in
+          ''|*[!0-9]*) NSAV_TODAY_OK=0 ;;
+        esac
+        if [ "$NSAV_TODAY_OK" -ne 1 ]; then
+          add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+              "not assessed — scan date unreadable" \
+              "The scan date was not a Julian day, so the last full library save cannot be graded against it." \
+              "re-run the scan so the prelude can set a calendar date. This scanner never saves." \
+              "-"
+        else
+          NSAV_NEWER=QSAVLIBALL
+          NSAV_NEWER_J=$NSAV_LIB_J
+          NSAV_NEWER_DATE=$NSAV_LIB_DATE
+          if [ "$NSAV_LIB_KIND" != "stamp" ]; then
+            NSAV_NEWER=QSAVALLUSR
+            NSAV_NEWER_J=$NSAV_USR_J
+            NSAV_NEWER_DATE=$NSAV_USR_DATE
+          elif [ "$NSAV_USR_KIND" = "stamp" ] && [ "$NSAV_USR_J" -gt "$NSAV_LIB_J" ]; then
+            NSAV_NEWER=QSAVALLUSR
+            NSAV_NEWER_J=$NSAV_USR_J
+            NSAV_NEWER_DATE=$NSAV_USR_DATE
+          fi
+          if [ "$NSAV_NEWER_J" -gt "$TODAY_J" ]; then
+            add resilience res_savlib_nonsys_recency "$NSAV_LABEL" NOT_ASSESSED critical \
+                "not assessed — SAVE_TIMESTAMP $NSAV_NEWER_DATE is after today $TODAY" \
+                "A SAVE_TIMESTAMP is later than the scan date, so the last full library save cannot be graded." \
+                "re-run with a real calendar date. This scanner never saves." \
+                "-"
+          else
+            NSAV_AGE=$((TODAY_J - NSAV_NEWER_J))
+            NSAV_LIB_OBS=absent
+            NSAV_USR_OBS=absent
+            [ "$NSAV_LIB_KIND" = "never" ] && NSAV_LIB_OBS=never
+            [ "$NSAV_USR_KIND" = "never" ] && NSAV_USR_OBS=never
+            [ "$NSAV_LIB_KIND" = "stamp" ] && NSAV_LIB_OBS=$NSAV_LIB_DATE
+            [ "$NSAV_USR_KIND" = "stamp" ] && NSAV_USR_OBS=$NSAV_USR_DATE
+            NSAV_OBS="QSAVLIBALL=$NSAV_LIB_OBS QSAVALLUSR=$NSAV_USR_OBS newer=$NSAV_NEWER age=$NSAV_AGE"
+            if [ "$NSAV_AGE" -le "$NSAV_PASS_MAX" ]; then
+              add resilience res_savlib_nonsys_recency "$NSAV_LABEL" PASS critical \
+                  "$NSAV_OBS" \
+                  "$NSAV_MEAN_PASS" \
+                  "n/a" \
+                  "-"
+            elif [ "$NSAV_AGE" -le "$NSAV_WARN_MAX" ]; then
+              add resilience res_savlib_nonsys_recency "$NSAV_LABEL" WARN critical \
+                  "$NSAV_OBS" \
+                  "$NSAV_MEAN_WARN" \
+                  "$NSAV_FIX_SAVE" \
+                  "-"
+            else
+              add resilience res_savlib_nonsys_recency "$NSAV_LABEL" FAIL critical \
+                  "$NSAV_OBS" \
+                  "$NSAV_MEAN_FAIL" \
+                  "$NSAV_FIX_SAVE" \
+                  "-"
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
+# res_savsecdta_recency — last IBM i security-data save (QSAVUSRPRF).
+# SAVSECDTA and SAVSYS both update QSYS/QSAVUSRPRF. UPDHST(*NO)
+# suppresses the update. One finding. Calls ibmi_sql for
+# OBJECT_STATISTICS('QSYS','DTAARA') OBJNAME and SAVE_TIMESTAMP.
+# Does not call ibmi_cl / DSPOBJD / SAVSECDTA / SAVSYS as a probe.
+# NULL or empty timestamp is never-saved (FAIL). *NOTAVL is a
+# refusal, never PASS. PASS age<=7, WARN 8-31, FAIL >31 or never.
+# Missing or non-unique row is not assessed.
+SAV_RAW=$(ibmi_sql qsavusrprf "SELECT VARCHAR(TRIM(OBJNAME),10) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(SAVE_TIMESTAMP),'NULL'),26) FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS','DTAARA')) WHERE OBJNAME='QSAVUSRPRF'")
+SAV_RC=$?
+if [ "$SAV_RC" -ne 0 ]; then
+  add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+      "not assessed — capture failed (rc=$SAV_RC)" \
+      "The OBJECT_STATISTICS probe did not yield a readable QSAVUSRPRF row, so the last security-data save cannot be graded." \
+      "re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS can list QSYS DTAARA objects. This scanner never runs save commands." \
+      "-"
+elif [ -z "$SAV_RAW" ]; then
+  add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+      "not assessed — capture empty (rc=0)" \
+      "The OBJECT_STATISTICS probe returned no pipe row, so the last security-data save cannot be graded." \
+      "re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS can list QSYS DTAARA objects. This scanner never runs save commands." \
+      "-"
+else
+  if [ -n "${TODAY:-}" ]; then
+    SAV_TODAY=$TODAY
+  else
+    SAV_TODAY=$(date +%Y-%m-%d)
+  fi
+  SAV_PARSE=$(printf '%s\n' "$SAV_RAW" | awk -F'|' -v today="$SAV_TODAY" '
+    function is_leap(y) {
+      return (y % 400 == 0) || (y % 4 == 0 && y % 100 != 0)
+    }
+    function valid_ymd(s, y, m, d, dim) {
+      if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return 0
+      y = substr(s, 1, 4) + 0
+      m = substr(s, 6, 2) + 0
+      d = substr(s, 9, 2) + 0
+      if (m < 1 || m > 12) return 0
+      dim = 31
+      if (m == 4 || m == 6 || m == 9 || m == 11) dim = 30
+      if (m == 2) dim = is_leap(y) ? 29 : 28
+      if (d < 1 || d > dim) return 0
+      return 1
+    }
+    function d2j(s, y, m, d, a) {
+      y = substr(s, 1, 4) + 0
+      m = substr(s, 6, 2) + 0
+      d = substr(s, 9, 2) + 0
+      a = int((14 - m) / 12)
+      y = y + 4800 - a
+      m = m + 12 * a - 3
+      return d + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - int(y / 100) + int(y / 400) - 32045
+    }
+    {
+      sub(/\r$/, "")
+      line = $0
+      sub(/^[ \t]+/, "", line)
+      sub(/[ \t]+$/, "", line)
+      if (line == "") next
+      nlines++
+      name = $1
+      sub(/^[ \t]+/, "", name)
+      sub(/[ \t]+$/, "", name)
+      ts = $2
+      sub(/^[ \t]+/, "", ts)
+      sub(/[ \t]+$/, "", ts)
+      if (name == "QSAVUSRPRF") {
+        n++
+        val = ts
+      }
+    }
+    END {
+      if (nlines == 0) { print "EMPTY"; exit }
+      if (n != 1) { print "MISSING"; exit }
+      if (val == "*NOTAVL") { print "NOTAVL"; exit }
+      if (val == "" || val == "NULL" || val == "-" || val == "*NULL") { print "NEVER"; exit }
+      ymd = substr(val, 1, 10)
+      if (valid_ymd(ymd) == 0) { print "UNREADABLE"; exit }
+      if (valid_ymd(today) == 0) { print "UNREADABLE"; exit }
+      age = d2j(today) - d2j(ymd)
+      if (age < 0) { print "UNREADABLE"; exit }
+      printf "OK %s %d\n", val, age
+    }')
+  if [ "$SAV_PARSE" = "EMPTY" ]; then
+    add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+        "not assessed — capture empty (rc=0)" \
+        "The OBJECT_STATISTICS probe returned no pipe row, so the last security-data save cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS can list QSYS DTAARA objects. This scanner never runs save commands." \
+        "-"
+  elif [ "$SAV_PARSE" = "MISSING" ]; then
+    add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+        "not assessed — QSAVUSRPRF row missing or not unique in OBJECT_STATISTICS" \
+        "The OBJECT_STATISTICS dump was readable, but it did not contain exactly one QSAVUSRPRF row, so the last security-data save cannot be graded." \
+        "inspect TABLE(QSYS2.OBJECT_STATISTICS('QSYS','DTAARA')) for OBJNAME = QSAVUSRPRF." \
+        "-"
+  elif [ "$SAV_PARSE" = "NOTAVL" ]; then
+    add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+        "not assessed — QSAVUSRPRF=*NOTAVL (scan profile cannot read this object)" \
+        "The catalog returned *NOTAVL for QSAVUSRPRF — the scan profile lacks authority to read this data area, so the last security-data save is not graded." \
+        "grant the scan profile read access to QSYS/QSAVUSRPRF and re-run. Do not run this check as QSECOFR to paper over the gap." \
+        "-"
+  elif [ "$SAV_PARSE" = "UNREADABLE" ]; then
+    add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+        "not assessed — QSAVUSRPRF SAVE_TIMESTAMP unreadable" \
+        "The QSAVUSRPRF row was present, but SAVE_TIMESTAMP was not a timestamp, so the last security-data save cannot be graded." \
+        "inspect QSYS2.OBJECT_STATISTICS SAVE_TIMESTAMP for QSYS/QSAVUSRPRF and DSPOBJD OBJ(QSYS/QSAVUSRPRF) OBJTYPE(*DTAARA) DETAIL(*FULL)." \
+        "-"
+  elif [ "$SAV_PARSE" = "NEVER" ]; then
+    add resilience res_savsecdta_recency "Last security-data save" FAIL high \
+        "QSAVUSRPRF=never" \
+        "QSAVUSRPRF has no save timestamp, so security data has never been saved or UPDHST(*NO) suppressed the history update. Restored data can return with no matching user profiles." \
+        "run SAVSECDTA or SAVSYS (both update QSAVUSRPRF) without UPDHST(*NO). Confirm the last save with DSPOBJD OBJ(QSYS/QSAVUSRPRF) OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never runs save commands." \
+        "-"
+  else
+    SAV_KIND=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $1 }')
+    SAV_TS=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $2 }')
+    SAV_AGE=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $3 }')
+    if [ "$SAV_KIND" != "OK" ] || [ -z "$SAV_TS" ] || [ -z "$SAV_AGE" ]; then
+      add resilience res_savsecdta_recency "Last security-data save" NOT_ASSESSED low \
+          "not assessed — QSAVUSRPRF SAVE_TIMESTAMP unreadable" \
+          "The QSAVUSRPRF row was present, but SAVE_TIMESTAMP was not a timestamp, so the last security-data save cannot be graded." \
+          "inspect QSYS2.OBJECT_STATISTICS SAVE_TIMESTAMP for QSYS/QSAVUSRPRF and DSPOBJD OBJ(QSYS/QSAVUSRPRF) OBJTYPE(*DTAARA) DETAIL(*FULL)." \
+          "-"
+    elif [ "$SAV_AGE" -le 7 ]; then
+      add resilience res_savsecdta_recency "Last security-data save" PASS low \
+          "QSAVUSRPRF=$SAV_TS age=${SAV_AGE}d" \
+          "QSAVUSRPRF was updated within 7 days, so user profiles and other security data have a recent restore point." \
+          "n/a" \
+          "-"
+    elif [ "$SAV_AGE" -le 31 ]; then
+      add resilience res_savsecdta_recency "Last security-data save" WARN high \
+          "QSAVUSRPRF=$SAV_TS age=${SAV_AGE}d" \
+          "QSAVUSRPRF is between 8 and 31 days old, so a restore of application data may not have matching user profiles." \
+          "run SAVSECDTA or SAVSYS (both update QSAVUSRPRF) without UPDHST(*NO). Confirm the last save with DSPOBJD OBJ(QSYS/QSAVUSRPRF) OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never runs save commands." \
+          "-"
+    else
+      add resilience res_savsecdta_recency "Last security-data save" FAIL high \
+          "QSAVUSRPRF=$SAV_TS age=${SAV_AGE}d" \
+          "QSAVUSRPRF is older than 31 days, so a restore of application data can return with no matching user profiles." \
+          "run SAVSECDTA or SAVSYS (both update QSAVUSRPRF) without UPDHST(*NO). Confirm the last save with DSPOBJD OBJ(QSYS/QSAVUSRPRF) OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never runs save commands." \
+          "-"
+    fi
+  fi
+fi
+
+  # res_savsys_recency — IBM i last SAVSYS (QSAVSYS SAVE_TIMESTAMP).
+  # PTxray resiliency door, not CIS. One finding. Calls ibmi_sql once for
+  # OBJECT_STATISTICS QSYS DTAARA QSAVSYS. Does not call ibmi_cl / DSPOBJD
+  # / SAVSYS. DSPOBJD OBJTYPE(*DTAARA) DETAIL(*FULL) is documented fallback
+  # only. CONCAT of NULL SAVE_TIMESTAMP is NULL and would drop the row,
+  # so COALESCE keeps never-saved QSAVSYS as QSAVSYS|. NULL/empty
+  # timestamp is never saved (FAIL). *NOTAVL, probe failure, missing or
+  # non-unique row, or unparseable junk is a refusal.
+  # Age vs scan date: PASS <=90d, WARN 91-365, FAIL >365 or never.
+  # UPDHST(*NO) suppresses the history update.
+  SAV_RAW=$(ibmi_sql objstat-qsavsys "SELECT VARCHAR(OBJNAME) CONCAT '|' CONCAT COALESCE(VARCHAR(SAVE_TIMESTAMP), '') FROM TABLE(QSYS2.OBJECT_STATISTICS('QSYS','DTAARA')) WHERE OBJNAME='QSAVSYS'")
+  SAV_RC=$?
+  if [ "$SAV_RC" -ne 0 ]; then
+    add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+        "not assessed — capture failed (rc=$SAV_RC)" \
+        "The OBJECT_STATISTICS probe did not yield a readable QSAVSYS row, so last SAVSYS cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS returns QSAVSYS. Fallback is DSPOBJD OBJ(QSAVSYS) OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never runs DSPOBJD or changes save history." \
+        "-"
+  elif [ -z "$SAV_RAW" ]; then
+    add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+        "not assessed — capture empty (rc=0)" \
+        "The OBJECT_STATISTICS probe returned no pipe row, so last SAVSYS cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.OBJECT_STATISTICS returns QSAVSYS. Fallback is DSPOBJD OBJ(QSAVSYS) OBJTYPE(*DTAARA) DETAIL(*FULL). This scanner never runs DSPOBJD or changes save history." \
+        "-"
+  else
+    SAV_LINE=$(printf '%s\n' "$SAV_RAW" | awk -F'|' '{ n1=$1; sub(/^[ \t]+/, "", n1); sub(/[ \t]+$/, "", n1); if (n1=="QSAVSYS") { n++; line=$0 } } END { if (n==1) print line }')
+    SAV_LINE_RC=$?
+    if [ -z "$SAV_LINE" ]; then
+      add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+          "not assessed — QSAVSYS row missing or not unique in OBJECT_STATISTICS" \
+          "The OBJECT_STATISTICS dump was readable, but it did not contain exactly one QSAVSYS row, so last SAVSYS cannot be graded." \
+          "inspect QSYS2.OBJECT_STATISTICS for OBJNAME = QSAVSYS." \
+          "-"
+    else
+      SAV_TODAY=${AIXRAY_TODAY:-${TODAY:-}}
+      [ -n "$SAV_TODAY" ] || SAV_TODAY=$(date +%Y-%m-%d)
+      SAV_PARSE=$(printf '%s\n' "$SAV_LINE" | awk -F'|' -v today="$SAV_TODAY" '
+        function jd(y, m, d, a) {
+          a = int((14 - m) / 12)
+          y = y + 4800 - a
+          m = m + 12 * a - 3
+          return d + int((153 * m + 2) / 5) + 365 * y + int(y / 4) - int(y / 100) + int(y / 400) - 32045
+        }
+        function dim(y, m) {
+          if (m == 1 || m == 3 || m == 5 || m == 7 || m == 8 || m == 10 || m == 12) return 31
+          if (m == 4 || m == 6 || m == 9 || m == 11) return 30
+          if ((y % 400) == 0) return 29
+          if ((y % 100) == 0) return 28
+          if ((y % 4) == 0) return 29
+          return 28
+        }
+        function valid_ymd(s, y, m, d) {
+          if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return 0
+          y = substr(s, 1, 4) + 0
+          m = substr(s, 6, 2) + 0
+          d = substr(s, 9, 2) + 0
+          if (m < 1 || m > 12) return 0
+          if (d < 1 || d > dim(y, m)) return 0
+          return 1
+        }
+        {
+          name=$1; sub(/^[ \t]+/, "", name); sub(/[ \t]+$/, "", name)
+          ts=$2; sub(/^[ \t]+/, "", ts); sub(/[ \t]+$/, "", ts)
+          if (name != "QSAVSYS") { print "JUNK"; exit }
+          if (ts == "*NOTAVL") { print "NOTAVL"; exit }
+          if (ts == "" || ts == "NULL" || ts == "null" || ts == "*NULL") { print "NEVER"; exit }
+          if (ts !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]-[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9]\.[0-9][0-9][0-9][0-9][0-9][0-9]$/) {
+            print "JUNK"; exit
+          }
+          ymd = substr(ts, 1, 10)
+          if (!valid_ymd(today)) { print "BADTODAY"; exit }
+          if (!valid_ymd(ymd)) { print "JUNK"; exit }
+          y = substr(ymd, 1, 4) + 0
+          m = substr(ymd, 6, 2) + 0
+          d = substr(ymd, 9, 2) + 0
+          ty = substr(today, 1, 4) + 0
+          tm = substr(today, 6, 2) + 0
+          td = substr(today, 9, 2) + 0
+          age = jd(ty, tm, td) - jd(y, m, d)
+          if (age < 0) { print "FUTURE"; exit }
+          printf "AGE %d %s\n", age, ts
+        }')
+      SAV_KIND=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $1 }')
+      if [ "$SAV_KIND" = "NEVER" ]; then
+        add resilience res_savsys_recency "Last SAVSYS" FAIL high \
+            "QSAVSYS never saved" \
+            "QSAVSYS has never been saved, so there is no restorable OS copy. A lost load source is a rebuild, not a restore." \
+            "run SAVSYS and retain restorable media. UPDHST(*NO) suppresses the QSAVSYS history update. This scanner never changes save history." \
+            "-"
+      elif [ "$SAV_KIND" = "NOTAVL" ]; then
+        add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+            "not assessed — QSAVSYS=*NOTAVL (scan profile cannot read this object)" \
+            "The catalog returned *NOTAVL for QSAVSYS — the scan profile lacks authority to read this data area, so last SAVSYS is not graded." \
+            "run the complete assessment as QSECOFR and investigate why the required evidence was unreadable." \
+            "-"
+      elif [ "$SAV_KIND" = "AGE" ]; then
+        SAV_DAYS=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $2 }')
+        SAV_TS=$(printf '%s\n' "$SAV_PARSE" | awk '{ print $3 }')
+        if [ -z "$SAV_DAYS" ] || [ -z "$SAV_TS" ]; then
+          add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+              "not assessed — QSAVSYS value unreadable" \
+              "The QSAVSYS row was present, but the SAVE_TIMESTAMP could not be graded." \
+              "inspect the QSAVSYS SAVE_TIMESTAMP in QSYS2.OBJECT_STATISTICS and DSPOBJD OBJ(QSAVSYS) OBJTYPE(*DTAARA) DETAIL(*FULL)." \
+              "-"
+        elif [ "$SAV_DAYS" -le 90 ]; then
+          add resilience res_savsys_recency "Last SAVSYS" PASS high \
+              "QSAVSYS=$SAV_TS (${SAV_DAYS}d)" \
+              "SAVSYS completed $SAV_DAYS days ago, so a restorable OS copy exists. A lost load source without a current SAVSYS is a rebuild, not a restore." \
+              "n/a" \
+              "-"
+        elif [ "$SAV_DAYS" -le 365 ]; then
+          add resilience res_savsys_recency "Last SAVSYS" WARN high \
+              "QSAVSYS=$SAV_TS (${SAV_DAYS}d)" \
+              "SAVSYS is $SAV_DAYS days old. Without a restorable OS copy, a lost load source is a rebuild, not a restore." \
+              "run SAVSYS and retain restorable media. UPDHST(*NO) suppresses the QSAVSYS history update. This scanner never changes save history." \
+              "-"
+        else
+          add resilience res_savsys_recency "Last SAVSYS" FAIL high \
+              "QSAVSYS=$SAV_TS (${SAV_DAYS}d)" \
+              "SAVSYS is $SAV_DAYS days old, so there is no restorable OS copy. A lost load source is a rebuild, not a restore." \
+              "run SAVSYS and retain restorable media. UPDHST(*NO) suppresses the QSAVSYS history update. This scanner never changes save history." \
+              "-"
+        fi
+      else
+        add resilience res_savsys_recency "Last SAVSYS" NOT_ASSESSED high \
+            "not assessed — QSAVSYS value unreadable" \
+            "The QSAVSYS row was present, but the SAVE_TIMESTAMP was not a timestamp, empty/NULL, or *NOTAVL, so last SAVSYS is not graded." \
+            "inspect the QSAVSYS SAVE_TIMESTAMP in QSYS2.OBJECT_STATISTICS and DSPOBJD OBJ(QSAVSYS) OBJTYPE(*DTAARA) DETAIL(*FULL)." \
+            "-"
+      fi
+    fi
+  fi
+
+  # res_storage_low_threshold — IBM i QSTGLOWLMT / QSTGLOWACN vs remaining ASP.
+  # PTxray resiliency posture, not CIS. One finding. Parses the shared
+  # cap-system-values dump for QSTGLOWLMT (4-decimal percent; live numeric
+  # 50000 is 5.0000%) and QSTGLOWACN (live *MSG). Probes remaining capacity
+  # from QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED; fallback QSYS2.ASP_INFO
+  # ASP 1 (ASP_NUM/TOTCAP/TOTCAPA). Does not call ibmi_cl / qsh / db2 /
+  # QSYS2.ASP_VARY_INFO. Does not CHGSYSVAL.
+  # available% > 1.5x limit and action not *MSG is PASS.
+  # available% in (limit, 1.5x] or action *MSG is WARN.
+  # available% <= limit is FAIL.
+  # rc!=0, empty, missing/non-unique row, *NOTAVL is NOT_ASSESSED.
+  if [ "${SYSVAL_OK:-0}" -ne 1 ]; then
+    add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+        "not assessed — ${SYSVAL_WHY:-capture unavailable}" \
+        "The SYSTEM_VALUE_INFO capture did not yield a readable dump, so the storage lower limit cannot be graded." \
+        "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_VALUE_INFO returns rows. This scanner never changes system values." \
+        "-"
+  else
+    STL_LMT_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSTGLOWLMT"{n++; line=$0} END{if(n==1) print line}')
+    STL_LMT_RC=$?
+    if [ -z "$STL_LMT_LINE" ]; then
+      add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+          "not assessed — QSTGLOWLMT row missing or not unique in SYSTEM_VALUE_INFO" \
+          "The system-value dump was readable, but it did not contain exactly one QSTGLOWLMT row, so the storage lower limit cannot be graded." \
+          "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSTGLOWLMT." \
+          "-"
+    else
+      STL_LMT_RAW=$(printf '%s\n' "$STL_LMT_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+      if [ "$STL_LMT_RAW" = "*NOTAVL" ]; then
+        add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+            "not assessed — QSTGLOWLMT=*NOTAVL (scan profile cannot read this system value)" \
+            "The catalog returned *NOTAVL for QSTGLOWLMT — the scan profile lacks authority to read this system value, so the value is not graded." \
+            "grant the scan profile read access to QSTGLOWLMT and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+            "-"
+      elif [ -z "$STL_LMT_RAW" ]; then
+        add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+            "not assessed — QSTGLOWLMT value unreadable" \
+            "The QSTGLOWLMT row was present, but the catalog value was empty, so it is not graded." \
+            "inspect the QSTGLOWLMT row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSTGLOWLMT)." \
+            "-"
+      else
+        STL_LMT=$(printf '%s\n' "$STL_LMT_RAW" | awk '
+          {
+            v=$0
+            if (v ~ /^[0-9]+$/) pct = v / 10000
+            else if (v ~ /^[0-9]+\.[0-9]+$/) {
+              n = v + 0
+              if (n > 100) pct = n / 10000
+              else pct = n
+            } else { print "JUNK"; exit }
+            if (pct < 0 || pct > 99.9999) { print "JUNK"; exit }
+            printf "%.4f\n", pct
+          }')
+        if [ -z "$STL_LMT" ] || [ "$STL_LMT" = "JUNK" ]; then
+          add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+              "not assessed — QSTGLOWLMT value unreadable" \
+              "The QSTGLOWLMT row was present, but the catalog value was not a 4-decimal percent, so it is not graded." \
+              "inspect the QSTGLOWLMT row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSTGLOWLMT)." \
+              "-"
+        else
+          STL_ACN_LINE=$(printf '%s\n' "$SYSVAL_RAW" | awk -F'|' '$1=="QSTGLOWACN"{n++; line=$0} END{if(n==1) print line}')
+          STL_ACN_RC=$?
+          if [ -z "$STL_ACN_LINE" ]; then
+            add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                "not assessed — QSTGLOWACN row missing or not unique in SYSTEM_VALUE_INFO" \
+                "The system-value dump was readable, but it did not contain exactly one QSTGLOWACN row, so the storage-low action cannot be graded." \
+                "inspect QSYS2.SYSTEM_VALUE_INFO for SYSTEM_VALUE_NAME = QSTGLOWACN." \
+                "-"
+          else
+            STL_ACN=$(printf '%s\n' "$STL_ACN_LINE" | awk -F'|' '{ v=$3; if (v=="") v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+            if [ "$STL_ACN" = "*NOTAVL" ]; then
+              add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                  "not assessed — QSTGLOWACN=*NOTAVL (scan profile cannot read this system value)" \
+                  "The catalog returned *NOTAVL for QSTGLOWACN — the scan profile lacks authority to read this system value, so the value is not graded." \
+                  "grant the scan profile read access to QSTGLOWACN and re-take cap-system-values. Do not run this check as QSECOFR to paper over the gap." \
+                  "-"
+            elif [ -z "$STL_ACN" ]; then
+              add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                  "not assessed — QSTGLOWACN value unreadable" \
+                  "The QSTGLOWACN row was present, but the catalog value was empty, so it is not graded." \
+                  "inspect the QSTGLOWACN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSTGLOWACN)." \
+                  "-"
+            else
+              case "$STL_ACN" in
+                "*MSG"|"*CRITMSG"|"*REGFAC"|"*ENDSYS"|"*PWRDWNSYS")
+                  STL_SYS_RAW=$(ibmi_sql stg_low_sysasp "SELECT 'SYSASP' CONCAT '|' CONCAT VARCHAR(SYSTEM_ASP_USED) FROM QSYS2.SYSTEM_STATUS_INFO")
+                  STL_SYS_RC=$?
+                  STL_USED=""
+                  STL_AVAIL=""
+                  STL_ASP_WHY=""
+                  if [ "$STL_SYS_RC" -ne 0 ]; then
+                    STL_ASP_WHY="rc"
+                    STL_ASP_RC_SAVE=$STL_SYS_RC
+                  elif [ -z "$STL_SYS_RAW" ]; then
+                    STL_ASP_WHY="empty"
+                  else
+                    STL_USED=$(printf '%s\n' "$STL_SYS_RAW" | awk -F'|' '
+                      $1=="SYSASP" {
+                        n++
+                        v=$2
+                        sub(/^[ \t]+/, "", v)
+                        sub(/[ \t]+$/, "", v)
+                        val=v
+                      }
+                      END {
+                        if (n==1) print val
+                      }')
+                    STL_USED_RC=$?
+                    if [ -z "$STL_USED" ]; then
+                      STL_ASP_WHY="missing"
+                    else
+                      STL_USED_N=$(printf '%s\n' "$STL_USED" | awk '
+                        $0 ~ /^[0-9]+(\.[0-9]+)?$/ {
+                          n=$0+0
+                          if (n>=0 && n<=100) { printf "%.4f\n", n; ok=1 }
+                        }
+                        END { if (!ok) exit 1 }')
+                      STL_USED_N_RC=$?
+                      if [ "$STL_USED_N_RC" -ne 0 ] || [ -z "$STL_USED_N" ]; then
+                        STL_ASP_WHY="junk"
+                      else
+                        STL_USED=$STL_USED_N
+                        STL_AVAIL=$(printf '%s\n' "$STL_USED" | awk '{ printf "%.4f\n", 100-$1 }')
+                      fi
+                    fi
+                  fi
+                  if [ -z "$STL_AVAIL" ]; then
+                    STL_FB_RAW=$(ibmi_sql stg_low_aspinfo "SELECT 'ASP1' CONCAT '|' CONCAT VARCHAR(ASP_NUM) CONCAT '|' CONCAT VARCHAR(TOTCAP) CONCAT '|' CONCAT VARCHAR(TOTCAPA) FROM QSYS2.ASP_INFO WHERE ASP_NUM=1")
+                    STL_FB_RC=$?
+                    if [ "$STL_FB_RC" -eq 0 ] && [ -n "$STL_FB_RAW" ]; then
+                      STL_FB_PARSE=$(printf '%s\n' "$STL_FB_RAW" | awk -F'|' '
+                        $1=="ASP1" {
+                          n++
+                          asp=$2; cap=$3; av=$4
+                          gsub(/[ \t]/, "", asp)
+                          gsub(/[ \t]/, "", cap)
+                          gsub(/[ \t]/, "", av)
+                          row=asp "|" cap "|" av
+                        }
+                        END { if (n==1) print row }')
+                      STL_FB_PARSE_RC=$?
+                      if [ -n "$STL_FB_PARSE" ]; then
+                        STL_FB_AVAIL=$(printf '%s\n' "$STL_FB_PARSE" | awk -F'|' '
+                          $1=="1" && $2 ~ /^[0-9]+(\.[0-9]+)?$/ && $3 ~ /^[0-9]+(\.[0-9]+)?$/ {
+                            cap=$2+0; av=$3+0
+                            if (cap>0 && av>=0 && av<=cap) {
+                              printf "%.4f\n", (av/cap)*100
+                              ok=1
+                            }
+                          }
+                          END { if (!ok) exit 1 }')
+                        STL_FB_AVAIL_RC=$?
+                        if [ "$STL_FB_AVAIL_RC" -eq 0 ] && [ -n "$STL_FB_AVAIL" ]; then
+                          STL_AVAIL=$STL_FB_AVAIL
+                          STL_USED=$(printf '%s\n' "$STL_AVAIL" | awk '{ printf "%.4f\n", 100-$1 }')
+                          STL_ASP_WHY=""
+                        fi
+                      fi
+                    fi
+                  fi
+                  if [ -z "$STL_AVAIL" ]; then
+                    if [ "$STL_ASP_WHY" = "rc" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                          "not assessed — capture failed (rc=$STL_ASP_RC_SAVE)" \
+                          "The SYSTEM_ASP_USED probe did not yield a readable row and ASP_INFO ASP 1 was not a unique usable fallback, so remaining capacity cannot be graded." \
+                          "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED or QSYS2.ASP_INFO ASP 1 returns a unique row. This scanner never changes ASP configuration." \
+                          "-"
+                    elif [ "$STL_ASP_WHY" = "empty" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                          "not assessed — capture empty (rc=0)" \
+                          "The SYSTEM_ASP_USED probe returned no pipe row and ASP_INFO ASP 1 was not a unique usable fallback, so remaining capacity cannot be graded." \
+                          "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED or QSYS2.ASP_INFO ASP 1 returns a unique row. This scanner never changes ASP configuration." \
+                          "-"
+                    elif [ "$STL_ASP_WHY" = "junk" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                          "not assessed — SYSTEM_ASP_USED value unreadable" \
+                          "The SYSTEM_ASP_USED row was present, but the used percent was not a number in 0 through 100, so remaining capacity is not graded." \
+                          "inspect QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED and QSYS2.ASP_INFO ASP 1 TOTCAP/TOTCAPA." \
+                          "-"
+                    else
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                          "not assessed — SYSTEM_ASP_USED row missing or not unique" \
+                          "The SYSTEM_ASP_USED probe did not contain exactly one SYSASP row and ASP_INFO ASP 1 was not a unique usable fallback, so remaining capacity cannot be graded." \
+                          "re-run the scan as the scan profile and confirm QSYS2.SYSTEM_STATUS_INFO SYSTEM_ASP_USED or QSYS2.ASP_INFO ASP 1 returns a unique row. This scanner never changes ASP configuration." \
+                          "-"
+                    fi
+                  else
+                    STL_GRADE=$(awk -v avail="$STL_AVAIL" -v limit="$STL_LMT" -v action="$STL_ACN" 'BEGIN {
+                      a=avail+0; l=limit+0; band=l*1.5
+                      if (a<=l) print "FAIL"
+                      else if (action=="*MSG") print "WARN_MSG"
+                      else if (a<=band) print "WARN_BAND"
+                      else print "PASS"
+                    }')
+                    STL_OBS="QSTGLOWLMT=${STL_LMT}% QSTGLOWACN=${STL_ACN} available=${STL_AVAIL}%"
+                    if [ "$STL_GRADE" = "FAIL" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" FAIL high \
+                          "$STL_OBS" \
+                          "Remaining system ASP is at or below QSTGLOWLMT, so the partition is past the storage line it was told to defend." \
+                          "free or add ASP storage until remaining capacity is above QSTGLOWLMT, then raise headroom above 1.5 times the limit. Review QSTGLOWACN. This scanner never changes system values or ASP configuration." \
+                          "-"
+                    elif [ "$STL_GRADE" = "WARN_MSG" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" WARN high \
+                          "$STL_OBS" \
+                          "QSTGLOWACN is *MSG, so reaching the storage lower limit only sends a message instead of taking a defensive action." \
+                          "set QSTGLOWACN to *CRITMSG, *REGFAC, *ENDSYS, or *PWRDWNSYS using CHGSYSVAL SYSVAL(QSTGLOWACN) VALUE('*CRITMSG'). Free or add ASP storage so remaining capacity stays above 1.5 times QSTGLOWLMT. This scanner never changes system values." \
+                          "-"
+                    elif [ "$STL_GRADE" = "WARN_BAND" ]; then
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" WARN high \
+                          "$STL_OBS" \
+                          "Remaining system ASP is at most 1.5 times QSTGLOWLMT, so the partition is close to the storage line it was told to defend." \
+                          "free or add ASP storage so remaining capacity stays above 1.5 times QSTGLOWLMT. This scanner never changes system values or ASP configuration." \
+                          "-"
+                    else
+                      add resilience res_storage_low_threshold "Storage lower-limit headroom" PASS low \
+                          "$STL_OBS" \
+                          "Remaining system ASP is above 1.5 times QSTGLOWLMT and QSTGLOWACN is not *MSG, so the partition is defending the storage line it was told to defend." \
+                          "n/a" \
+                          "-"
+                    fi
+                  fi
+                  ;;
+                *)
+                  add resilience res_storage_low_threshold "Storage lower-limit headroom" NOT_ASSESSED low \
+                      "not assessed — QSTGLOWACN value unreadable" \
+                      "The QSTGLOWACN row was present, but the catalog value was not *MSG, *CRITMSG, *REGFAC, *ENDSYS, or *PWRDWNSYS, so it is not graded." \
+                      "inspect the QSTGLOWACN row in QSYS2.SYSTEM_VALUE_INFO and DSPSYSVAL SYSVAL(QSTGLOWACN)." \
+                      "-"
+                  ;;
+              esac
+            fi
+          fi
+        fi
+      fi
+    fi
+  fi
+
 # sec_bulletin_vintage — vintage of the embedded IBM i
 # security-bulletin registry row. Grades the bulletin
 # source's as_of against the scan date, never a build
@@ -7229,6 +9729,219 @@ else
                 "as_of=$BV_AS_OF age=$BV_AGE threshold=$BV_THRESHOLD" \
                 "The embedded IBM i security-bulletin reference data is within the freshness window. This check does not enumerate IBM i CVEs from a bulletin feed." \
                 "n/a"
+          fi
+        fi
+      fi
+    fi
+  fi
+fi
+
+# sec_group_currency — IBM i Security and HIPER group levels vs the
+# bundled PSP TSV. Local QSYS2.GROUP_PTF_INFO only. One finding.
+# Identify groups by description substring " Group Security" /
+# " Group Hiper". Never hardcode SF-numbers. Calls ibmi_sql only.
+# Grade numeric level only when PTF_GROUP_STATUS is INSTALLED.
+SC_TITLE="Security and HIPER group PTF currency"
+SC_FIX_NA="n/a"
+SC_FIX_APPLY="apply the current IBM i Security and HIPER group PTFs from IBM Fix Central or the PSP page, then IPL if required. This scanner never applies PTFs."
+SC_FIX_DEFS="supply a signed definitions snapshot so PTXRAY_DEFS_DIR contains ibmi-psp-group-levels.tsv, then re-run. This scanner never applies PTFs."
+SC_FIX_PROBE="re-run the scan as the scan profile and confirm QSYS2.GROUP_PTF_INFO returns PTF_GROUP_NAME, PTF_GROUP_LEVEL, and PTF_GROUP_STATUS. This scanner never applies PTFs."
+SC_FIX_OS="re-run the scan as the scan profile and confirm SYSIBMADM.ENV_SYS_INFO returns OS_VERSION and OS_RELEASE. This scanner never applies PTFs."
+SC_MEAN_PASS="The IBM i Security and HIPER group PTFs are installed at the current bundled PSP level, so published HIPER and security fixes in those groups are on this partition."
+SC_MEAN_WARN="The IBM i Security or HIPER group PTF is one bundled PSP level behind, so the latest published HIPER or security fixes in that group are not on this partition."
+SC_MEAN_FAIL="The IBM i Security or HIPER group PTF is more than one bundled PSP level behind, is not present, or is not INSTALLED (pending IPL or on order), so published HIPER or security fixes are not active on this partition."
+SC_MEAN_DEFS="The bundled PSP group-level table was not supplied, so Security and HIPER group currency cannot be graded."
+SC_MEAN_CAPTURE="The group-PTF probe did not yield a readable GROUP_PTF_INFO dump, so Security and HIPER group currency cannot be graded."
+SC_MEAN_OS="The IBM i OS-release probe did not yield a readable ENV_SYS_INFO dump, so Security and HIPER group currency cannot be graded against the release PSP rows."
+SC_MEAN_STATUS="A Security or HIPER group row is present, but PTF_GROUP_STATUS is not a determinate installed or missing state, so currency cannot be graded."
+SC_DEFS=""
+if [ -n "${PTXRAY_DEFS_DIR:-}" ]; then
+  SC_DEFS=$PTXRAY_DEFS_DIR/ibmi-psp-group-levels.tsv
+fi
+if [ -z "${PTXRAY_DEFS_DIR:-}" ] || [ ! -f "$SC_DEFS" ] || [ ! -r "$SC_DEFS" ] || [ ! -s "$SC_DEFS" ]; then
+  add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+      "not assessed — reference data missing (definitions not supplied)" \
+      "$SC_MEAN_DEFS" \
+      "$SC_FIX_DEFS"
+else
+  OS_RAW=$(ibmi_sql os_vrm "SELECT 'OS' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_VERSION,'-')),10) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(OS_RELEASE,'-')),10) FROM SYSIBMADM.ENV_SYS_INFO")
+  OS_RC=$?
+  if [ "$OS_RC" -ne 0 ]; then
+    add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+        "not assessed — OS release capture failed (rc=$OS_RC)" \
+        "$SC_MEAN_OS" \
+        "$SC_FIX_OS"
+  elif [ -z "$OS_RAW" ]; then
+    add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+        "not assessed — OS release capture empty" \
+        "$SC_MEAN_OS" \
+        "$SC_FIX_OS"
+  else
+    OS_LINE=$(printf '%s\n' "$OS_RAW" | awk -F'|' '$1=="OS"{n++; line=$0} END{if(n==1) print line}')
+    OS_VER=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$2; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    OS_REL=$(printf '%s\n' "$OS_LINE" | awk -F'|' '{ v=$3; sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); print v }')
+    case "$OS_VER" in
+      ''|*[!0-9]*) OS_VER="" ;;
+    esac
+    case "$OS_REL" in
+      ''|*[!0-9]*) OS_REL="" ;;
+    esac
+    if [ -z "$OS_LINE" ] || [ -z "$OS_VER" ] || [ -z "$OS_REL" ]; then
+      add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+          "not assessed — OS_VERSION or OS_RELEASE unreadable" \
+          "$SC_MEAN_OS" \
+          "$SC_FIX_OS"
+    else
+      SC_REL="V${OS_VER}R${OS_REL}M0"
+      GRP_RAW=$(ibmi_sql grp_ptf_info "SELECT 'GRP' CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_NAME, '-')), 7) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_DESCRIPTION, '-')), 80) CONCAT '|' CONCAT VARCHAR(COALESCE(CHAR(PTF_GROUP_LEVEL), '-'), 11) CONCAT '|' CONCAT VARCHAR(TRIM(COALESCE(PTF_GROUP_STATUS, '-')), 20) FROM QSYS2.GROUP_PTF_INFO")
+      GRP_RC=$?
+      if [ "$GRP_RC" -ne 0 ]; then
+        add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+            "not assessed — capture failed (rc=$GRP_RC)" \
+            "$SC_MEAN_CAPTURE" \
+            "$SC_FIX_PROBE"
+      else
+        SC_PARSE=$(printf '%s\n' "$GRP_RAW" | awk -F'|' -v rel="$SC_REL" -v pspfile="$SC_DEFS" '
+          function trim(s) {
+            sub(/^[ \t]+/, "", s)
+            sub(/[ \t]+$/, "", s)
+            return s
+          }
+          function rank(k) {
+            if (k == "ungradable") return 4
+            if (k == "fail") return 3
+            if (k == "missing") return 3
+            if (k == "warn") return 2
+            if (k == "current") return 1
+            return 0
+          }
+          function setkind(which, k, obs) {
+            if (which == "sec") {
+              if (rank(k) > rank(sec_k)) { sec_k = k; sec_obs = obs }
+              sec_n++
+            } else {
+              if (rank(k) > rank(hip_k)) { hip_k = k; hip_obs = obs }
+              hip_n++
+            }
+          }
+          BEGIN {
+            while ((getline line < pspfile) > 0) {
+              nf = split(line, f, "\t")
+              if (nf < 3) continue
+              r=f[1]; g=f[2]; l=f[3]
+              sub(/^[ \t]+/, "", r); sub(/[ \t]+$/, "", r)
+              sub(/^[ \t]+/, "", g); sub(/[ \t]+$/, "", g)
+              sub(/^[ \t]+/, "", l); sub(/[ \t]+$/, "", l)
+              if (r == rel && g != "" && l ~ /^[0-9]+$/) {
+                psp_lvl[g] = l + 0
+                psp_n++
+              }
+            }
+            close(pspfile)
+          }
+          $1 == "GRP" {
+            id = trim($2)
+            desc = trim($3)
+            inst = trim($4)
+            sts = trim($5)
+            is_sec = (index(desc, " Group Security") > 0)
+            is_hip = (index(desc, " Group Hiper") > 0)
+            if (index(desc, " Group HIPER") > 0) is_hip = 1
+            if (is_sec && is_hip) { junk = 1; next }
+            if (!is_sec && !is_hip) next
+            if (id == "" || id == "-") { junk = 1; next }
+            if (is_sec) which = "sec"
+            else which = "hiper"
+            if (sts == "NOT INSTALLED") {
+              setkind(which, "missing", "missing")
+              next
+            }
+            if (sts == "APPLY AT NEXT IPL" || sts == "ON ORDER") {
+              setkind(which, "missing", "inactive")
+              next
+            }
+            if (sts == "UNKNOWN" || sts == "ERROR" || sts == "SUPPORTED ONLY" || sts == "RELATED GROUP") {
+              setkind(which, "ungradable", "status:" sts)
+              next
+            }
+            if (sts != "INSTALLED") { junk = 1; next }
+            if (inst == "" || inst == "-" || inst !~ /^[0-9]+$/) { junk = 1; next }
+            if (!(id in psp_lvl)) {
+              setkind(which, "ungradable", "no-psp")
+              next
+            }
+            avail = psp_lvl[id]
+            delta = avail - (inst + 0)
+            if (delta <= 0) kind = "current"
+            else if (delta == 1) kind = "warn"
+            else kind = "fail"
+            obs = kind
+            if (kind == "warn" || kind == "fail") obs = "behind:" inst "/" avail
+            else obs = "current:" inst "/" avail
+            setkind(which, kind, obs)
+            next
+          }
+          END {
+            if (junk) { print "JUNK"; exit }
+            if (sec_n == 0) { sec_k = "missing"; sec_obs = "missing" }
+            if (hip_n == 0) { hip_k = "missing"; hip_obs = "missing" }
+            if (sec_k == "ungradable" || hip_k == "ungradable") {
+              if (index(sec_obs, "status:") == 1 || index(hip_obs, "status:") == 1) {
+                print "OK|STATUS|" sec_obs "|" hip_obs
+              } else {
+                print "OK|NOT_ASSESSED|" sec_obs "|" hip_obs
+              }
+              exit
+            }
+            fail = 0
+            warn = 0
+            if (sec_k == "fail" || sec_k == "missing") fail = 1
+            if (hip_k == "fail" || hip_k == "missing") fail = 1
+            if (sec_k == "warn") warn = 1
+            if (hip_k == "warn") warn = 1
+            if (fail) print "OK|FAIL|" sec_obs "|" hip_obs
+            else if (warn) print "OK|WARN|" sec_obs "|" hip_obs
+            else print "OK|PASS|" sec_obs "|" hip_obs
+          }')
+        if [ -z "$SC_PARSE" ] || [ "$SC_PARSE" = "JUNK" ]; then
+          add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+              "not assessed — GROUP_PTF_INFO value unreadable" \
+              "The group-PTF dump was readable, but a Security or HIPER row carried a level or status token that could not be graded." \
+              "$SC_FIX_PROBE"
+        else
+          SC_KIND=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $2 }')
+          SC_SEC=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $3 }')
+          SC_HIP=$(printf '%s\n' "$SC_PARSE" | awk -F'|' '{ print $4 }')
+          if [ "$SC_KIND" = "FAIL" ]; then
+            add patch sec_group_currency "$SC_TITLE" FAIL high \
+                "sec=$SC_SEC hiper=$SC_HIP" \
+                "$SC_MEAN_FAIL" \
+                "$SC_FIX_APPLY"
+          elif [ "$SC_KIND" = "WARN" ]; then
+            add patch sec_group_currency "$SC_TITLE" WARN med \
+                "sec=$SC_SEC hiper=$SC_HIP" \
+                "$SC_MEAN_WARN" \
+                "$SC_FIX_APPLY"
+          elif [ "$SC_KIND" = "STATUS" ]; then
+            add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+                "not assessed — PTF_GROUP_STATUS unresolved" \
+                "$SC_MEAN_STATUS" \
+                "$SC_FIX_PROBE"
+          elif [ "$SC_KIND" = "NOT_ASSESSED" ]; then
+            add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+                "not assessed — PSP has no level for a Security or HIPER group on this release" \
+                "A Security or HIPER group is present on this partition, but the bundled PSP table has no level for that group id, so currency cannot be graded." \
+                "$SC_FIX_DEFS"
+          elif [ "$SC_KIND" = "PASS" ]; then
+            add patch sec_group_currency "$SC_TITLE" PASS low \
+                "sec=$SC_SEC hiper=$SC_HIP" \
+                "$SC_MEAN_PASS" \
+                "$SC_FIX_NA"
+          else
+            add patch sec_group_currency "$SC_TITLE" NOT_ASSESSED low \
+                "not assessed — GROUP_PTF_INFO value unreadable" \
+                "The group-PTF dump was readable, but a Security or HIPER row carried a level or status token that could not be graded." \
+                "$SC_FIX_PROBE"
           fi
         fi
       fi
