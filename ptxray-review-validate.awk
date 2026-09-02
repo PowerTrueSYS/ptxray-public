@@ -1,4 +1,4 @@
-# PTxray privacy-schema 1 output validator.
+# PTxray privacy-schema 2 output validator.
 # validator-contract: pseudonymize-1
 #
 # This program is deliberately maintained apart from the discovery/transform
@@ -2577,8 +2577,19 @@ function plan_markup_signal_count(document,    lower) {
     + literal_count(lower, "<path")
 }
 
+function plan_card_present(document) {
+  return literal_count(document, "data-aixray-plan-card") != 0 \
+    || literal_count(document, "data-plan-qr-url") != 0 \
+    || literal_count(document, canonical_plan_link_url()) != 0 \
+    || literal_count(document, canonical_plan_qr_url()) != 0 \
+    || literal_count(document, canonical_plan_qr_svg()) != 0
+}
+
 function validate_plan_contract(document,    lower, card_count, priority_count) {
-  if (plan_markup_signal_count(document) == 0) return
+  # Generic <svg>/<path> is not a Plan-card signal: composed schema 2 ships
+  # a film-hero SVG without a live-card. Plan QR uniqueness still binds
+  # when the live-card markers themselves are present.
+  if (!plan_card_present(document)) return
   lower = tolower(document)
   card_count = 0
   for (priority_count = 0; priority_count <= 5; priority_count++) \
@@ -2598,14 +2609,29 @@ function validate_plan_contract(document,    lower, card_count, priority_count) 
       || literal_count(lower, "</figure>") != 1 \
       || literal_count(lower, "<figcaption") != 1 \
       || literal_count(lower, "</figcaption>") != 1 \
-      || literal_count(lower, "<svg") != 1 \
-      || literal_count(lower, "</svg>") != 1 \
+      || literal_count(lower, "<svg") < 1 \
+      || literal_count(lower, "</svg>") < 1 \
       || literal_count(lower, "<desc") != 1 \
       || literal_count(lower, "</desc>") != 1 \
       || literal_count(lower, "<rect") != 1 \
-      || literal_count(lower, "<path") != 49) \
+      || literal_count(lower, "<path") < 49) \
     violation("plan-card", \
       "Plan QR vector does not match the canonical live-card contract", "")
+}
+
+function canonical_hero_attribute(tag, name, value,    element) {
+  element = tag_name(tag)
+  if (element == "svg") {
+    if (name == "viewbox") \
+      return value == "0 0 300 340" || value == "0 0 300 300"
+    if (name == "role") return value == "img"
+    if (name == "aria-label") return value == "PTxray posture rings"
+  }
+  if (element == "path") {
+    if (name == "d") \
+      return value == "M0 90.0 A90.0 90.0 0 1 1 90.0 0"
+  }
+  return 0
 }
 
 function canonical_plan_attribute(tag, name, value,    element) {
@@ -2697,11 +2723,11 @@ function allowed_element(name) {
     || name == "h2" || name == "head" || name == "html" \
     || name == "li" || name == "meta" || name == "ol" \
     || name == "p" || name == "path" || name == "rect" \
-    || name == "section" || name == "span" || name == "strong" \
-    || name == "style" || name == "svg" || name == "table" \
-    || name == "tbody" || name == "td" || name == "th" \
-    || name == "thead" || name == "title" || name == "tr" \
-    || name == "ul"
+    || name == "script" || name == "section" || name == "span" \
+    || name == "strong" || name == "style" || name == "svg" \
+    || name == "table" || name == "tbody" || name == "td" \
+    || name == "th" || name == "thead" || name == "title" \
+    || name == "tr" || name == "ul"
 }
 
 function allowed_family(value) {
@@ -4449,6 +4475,11 @@ function handle_text(text,    family, location, depth) {
     validate_stylesheet(text, "report:presentation-css")
     return
   }
+  if (TAG_STACK[STACK_DEPTH] == "script") {
+    if (text != CANONICAL_THEME_SCRIPT) \
+      violation("report:theme-script", "theme script is not canonical", "")
+    return
+  }
   validate_strong(text, location)
   if (TAG_STACK[STACK_DEPTH] == "title") {
     if (!valid_title_text(text)) \
@@ -4582,9 +4613,10 @@ function validate_schema_attribute(name, value, location) {
 
 function validate_meta_content(tag, value, location,    meta_name) {
   meta_name = tolower(field_value(tag, "name"))
-  if (meta_name == "aixray-report-version" \
-      || meta_name == "aixray-privacy-schema") {
+  if (meta_name == "aixray-report-version") {
     if (value != "1") violation(location, "invalid schema marker value", value)
+  } else if (meta_name == "aixray-privacy-schema") {
+    if (value != "2") violation(location, "invalid schema marker value", value)
   } else if (meta_name == "aixray-report-date") {
     if (value !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) \
       violation(location, "invalid report date metadata", value)
@@ -4601,7 +4633,7 @@ function validate_meta_content(tag, value, location,    meta_name) {
   }
 }
 
-function validate_tag_attributes(tag, location,    rest, name, lower_name, quote, ending, value, decoded, plan_attribute) {
+function validate_tag_attributes(tag, location,    rest, name, lower_name, quote, ending, value, decoded, plan_attribute, hero_attribute) {
   rest = tag
   sub(/^<[\/!?]?[A-Za-z][A-Za-z0-9:_.-]*/, "", rest)
   sub(/>$/, "", rest)
@@ -4638,17 +4670,17 @@ function validate_tag_attributes(tag, location,    rest, name, lower_name, quote
       rest = substr(rest, ending + 2)
     }
     plan_attribute = canonical_plan_attribute(tag, lower_name, value)
-    if (!plan_attribute) validate_entities(value, location)
-    decoded = plan_attribute ? value : decode_html(value)
+    hero_attribute = canonical_hero_attribute(tag, lower_name, value)
+    if (!plan_attribute && !hero_attribute) validate_entities(value, location)
+    decoded = (plan_attribute || hero_attribute) ? value : decode_html(value)
     if (lower_name ~ /^on/ || lower_name == "srcdoc" \
         || lower_name == "http-equiv") \
       violation(location, "active HTML attribute is forbidden", name)
-    if (!plan_attribute && forbidden_uri(value)) \
+    if (!plan_attribute && !hero_attribute && forbidden_uri(value)) \
       violation(location, "remote or active URI is forbidden", name)
-    if (plan_attribute) {
-      # Exact Plan attributes are also bound to one exact live-card substring
-      # by validate_plan_contract; no generic URI or dynamic-field grammar is
-      # permitted here.
+    if (plan_attribute || hero_attribute) {
+      # Exact Plan attributes are bound by validate_plan_contract. Composed
+      # film-hero attributes are bound by canonical_hero_attribute.
     } else if (lower_name ~ /^data-aixray-(field|location|finding-id|copy-id|container)$/) {
       validate_schema_attribute(lower_name, decoded, location)
     } else if (lower_name == "data-aixray-identities") {
@@ -4736,7 +4768,7 @@ function validate_markup(tag,    lower, name, family, location, copy_id, contain
     violation("markup", "tag has a noncanonical lexical opening", tag)
     return
   }
-  if (lower ~ /^<script([ \t>])|^<iframe([ \t>])|^<object([ \t>])|^<embed([ \t>])|^<base([ \t>])|^<form([ \t>])/) \
+  if (lower ~ /^<iframe([ \t>])|^<object([ \t>])|^<embed([ \t>])|^<base([ \t>])|^<form([ \t>])/) \
     violation("markup", "active or embedded content is forbidden", tag_name(tag))
   if (forbidden_uri(strip_canonical_plan_resources(tag))) \
     violation("markup", "remote or active resource is forbidden", tag_name(tag))
@@ -4875,6 +4907,7 @@ BEGIN {
   load_schema_contract()
   load_structural_contract()
   load_tokens()
+  CANONICAL_THEME_SCRIPT = "(function(){var stored=null;try{stored=localStorage['ptxray-theme'];}catch(e){}})();"
 }
 
 {
@@ -4885,8 +4918,11 @@ END {
   validate_plan_contract(DOCUMENT)
   if (literal_count(DOCUMENT, "<meta name=\"aixray-report-version\" content=\"1\">") != 1) \
     violation("document", "report-version marker is missing or duplicated", "")
-  if (literal_count(DOCUMENT, "<meta name=\"aixray-privacy-schema\" content=\"1\">") != 1) \
-    violation("document", "privacy-schema 1 marker is missing or duplicated", "")
+  if (literal_count(DOCUMENT, "<meta name=\"aixray-privacy-schema\" content=\"2\">") != 1) \
+    violation("document", "privacy-schema 2 marker is missing or duplicated", "")
+  if (literal_count(DOCUMENT, \
+      "<script>" CANONICAL_THEME_SCRIPT "</script>") != 1) \
+    violation("document", "canonical theme script is missing or duplicated", "")
   if (literal_count(tolower(DOCUMENT), "<html") != 1 \
       || literal_count(tolower(DOCUMENT), "</html>") != 1 \
       || literal_count(tolower(DOCUMENT), "<body") != 1 \

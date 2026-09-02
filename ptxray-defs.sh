@@ -19,7 +19,7 @@ unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
 unset ENV BASH_ENV KSH_ENV ZDOTDIR
 umask 077
 
-PTXRAY_DEFS_VERSION="1.6.0"
+PTXRAY_DEFS_VERSION="1.7.0"
 
 PTXRAY_DEFS_TEST_BUILD=0
 PTXRAY_DEFS_CACHE='/var/ptxray/definitions'
@@ -430,12 +430,16 @@ ptxray_defs_resolve_cache() {
     return 0
   fi
   if [ -d /var/ptxray/definitions ] && [ ! -L /var/ptxray/definitions ]; then
-    PTXRAY_DEFS_CACHE=/var/ptxray/definitions
-    return 0
+    if ptxray_defs_cache_dir_identity /var/ptxray/definitions >/dev/null; then
+      PTXRAY_DEFS_CACHE=/var/ptxray/definitions
+      return 0
+    fi
   fi
   if [ -d /var/ptxray ] && [ ! -L /var/ptxray ]; then
-    PTXRAY_DEFS_CACHE=/var/ptxray/definitions
-    return 0
+    if ptxray_defs_cache_dir_identity /var/ptxray >/dev/null; then
+      PTXRAY_DEFS_CACHE=/var/ptxray/definitions
+      return 0
+    fi
   fi
   if [ ! -e /var/ptxray ]; then
     if mkdir -m 700 /var/ptxray 2>/dev/null; then

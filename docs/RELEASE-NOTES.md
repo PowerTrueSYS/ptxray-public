@@ -1,7 +1,49 @@
 # Release notes
 
 
-<!-- PTXRAY-PUBLICATION-READY:v1.6.0 -->
+<!-- PTXRAY-PUBLICATION-READY:v1.7.0 -->
+
+## v1.7.0
+
+PTxray 1.7.0 is the current published release for IBM AIX and IBM i. The
+product entry points are the composed report runners. The retired one-file
+scanner names are no longer in the release set.
+
+**What is new**
+
+- **Composed runners are the release payloads.** GitHub Release assets are
+  `aixray-scan.ksh` and `ibmi-scan.ksh`, plus `aixray-aix.sh` as a
+  byte-identical alias of the AIX runner. `ptxray-aix.sh` and `ptxray-ibmi.sh`
+  are retired. A scan that produces `report.html` still comes from the versioned
+  report bundles (`ptxray-report-aix-1.7.0.tar`, `ptxray-report-ibmi-1.7.0.tar`):
+  extract the matching bundle and run `dist/tools/aixray-scan.ksh` or
+  `dist/tools/ibmi-scan.ksh` as `README-REPORT.md` names.
+- **Report hero lock.** The film hero ships a 52px centre score and IBM's AIX
+  square / IBM i circle marks, centred over the host plate.
+- **IBM i five pillars.** The IBM i emitter scores os, firmware, security, CVE
+  and resilience on the same report design as AIX. Firmware / PTF-group /
+  Security-HIPER currency remain typed `NOT_ASSESSED` (the `SYSTOOLS` views they
+  need are outbound IBM FLRT/PSP calls the assessment boundary bans). The
+  `--allow-ibm-lookup` opt-in promised in 1.6 did not land in 1.7.
+
+**Unchanged from 1.6.0**
+
+The AIX runner requires root; the IBM i runner requires QSECOFR. Assessment
+probes remain no-egress, read-only on system configuration, and non-remediating
+(the only network component is the separate `ptxray-defs.sh`). Definitions
+download by default; `--offline` / `--definitions-bundle FILE` opt out. The
+release set is offline-signed: eleven assets — `aixray-aix.sh`,
+`aixray-scan.ksh`, `ibmi-scan.ksh`, `ptxray-defs.sh`, `ptxray-review-pack.sh`,
+`ptxray-review-validate.awk`, the two report bundles, `SHA256SUMS`, its
+detached signature, and the release public key. The authoritative release-key
+fingerprint is unchanged:
+
+```text
+sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
+```
+
+The VIOS lane remains disabled pending live VIOS acceptance and is not claimed
+by this release.
 
 ## v1.6.0
 

@@ -3,12 +3,12 @@
 # Reads one local PTxray HTML report and performs no network action.
 set -u
 
-# Must equal VERSION in src/ptxray-aix.sh.in and AIXRAY_STANDALONE_VERSION in
-# src/standalone-prelude.ksh. render-public-release.py validates every shipped
+# Must equal VERSION at repo root and PTXRAY_RUNNER_VERSION in
+# dist/tools/aixray-scan.ksh. render-public-release.py validates every shipped
 # artifact's version against the release tag; a review pack without this line
 # was silently skipped by that check and v1.0.0 nearly shipped unversioned,
 # a regression from v0.1.0 which carried it.
-AIXRAY_REVIEW_PACK_VERSION="1.6.0"
+AIXRAY_REVIEW_PACK_VERSION="1.7.0"
 
 PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin
 export PATH
@@ -231,7 +231,7 @@ usage: ./$PROGRAM --pseudonymize ptxray-<host>-<date>.html
        ./$PROGRAM ptxray-<host>-<date>.html
 
 Create a separate pseudonymized review candidate from a current PTxray native
-or compliance HTML report carrying privacy schema 1. The raw report is never
+or compliance HTML report carrying privacy schema 2. The raw report is never
 changed. Automated gates may publish a candidate only with status REVIEW REQUIRED;
 the result is NOT ANONYMIZED and must be inspected before sharing.
 
@@ -362,7 +362,7 @@ fi
 [ ! -L "$VALIDATOR_PROGRAM" ] \
   || fail "refusing symlinked independent validator"
 VALIDATOR_SOURCE_PROGRAM=$VALIDATOR_PROGRAM
-PTXRAY_REVIEW_VALIDATOR_SHA256=48c2e353a2d04a61242f90e90b46148d9eb787c110a2b362352f4b29eb7a2197
+PTXRAY_REVIEW_VALIDATOR_SHA256=@@PTXRAY_REVIEW_VALIDATOR_SHA256@@
 
 case "$INPUT" in
   */*)
@@ -392,7 +392,7 @@ case "$CURRENT_UID" in
 esac
 
 REPORT_MARKER='<meta name="aixray-report-version" content="1">'
-PRIVACY_MARKER='<meta name="aixray-privacy-schema" content="1">'
+PRIVACY_MARKER='<meta name="aixray-privacy-schema" content="2">'
 REPORT_MARKER_COUNT=$(awk -v marker="$REPORT_MARKER" '
   { text = text $0 "\n" }
   END {
@@ -410,7 +410,7 @@ if [ "$REPORT_MARKER_COUNT" != "1" ]; then
   exit 2
 fi
 if [ "$PRIVACY_MARKER_COUNT" != "1" ]; then
-  echo "$PROGRAM: unsupported input: privacy schema 1 is required; regenerate the report with a current scanner" >&2
+  echo "$PROGRAM: unsupported input: privacy schema 2 is required; regenerate the report with a current scanner" >&2
   exit 2
 fi
 
@@ -1693,7 +1693,98 @@ function is_evidence_cell(td_class, context,    lower) {
     || index(lower, "comments field") > 0
 }
 
+function is_script_open_tag(lower) {
+  return substr(lower, 1, 2) != "</" && simple_tag_name(lower) == "script"
+}
+
+function is_script_close_tag(lower) {
+  return substr(lower, 1, 2) == "</" && simple_tag_name(lower) == "script"
+}
+
+function is_composed_theme_script_open(lower) {
+  return lower == "<script>"
+}
+
+function composed_theme_script_compact(    s) {
+  if (COMPOSED_THEME_SCRIPT_COMPACT != "") return COMPOSED_THEME_SCRIPT_COMPACT
+  s = "(function(){\n"
+  s = s "  var stored=null;\n"
+  s = s "  try{stored=localStorage['ptxray-theme'];}catch(e){}\n"
+  s = s "  function sys(){\n"
+  s = s "    return matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';\n"
+  s = s "  }\n"
+  s = s "  function resolved(){\n"
+  s = s "    return (stored==='light'||stored==='dark')?stored:sys();\n"
+  s = s "  }\n"
+  s = s "  function labelFor(t){return t==='dark'?'Light':'Dark';}\n"
+  s = s "  function apply(){\n"
+  s = s "    var t=resolved();\n"
+  s = s "    document.documentElement.dataset.theme=t;\n"
+  s = s "    var b=document.querySelector('.theme-toggle');\n"
+  s = s "    if(b) b.textContent=labelFor(t);\n"
+  s = s "  }\n"
+  s = s "  apply();\n"
+  s = s "  if(stored!=='light'&&stored!=='dark'){\n"
+  s = s "    try{\n"
+  s = s "      matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(){\n"
+  s = s "        if(stored!=='light'&&stored!=='dark') apply();\n"
+  s = s "      });\n"
+  s = s "    }catch(e){}\n"
+  s = s "  }\n"
+  s = s "  function go(){var h=location.hash.slice(1);if(!h)return;var el=document.getElementById(h);if(!el)return;\n"
+  s = s "  var d=el.closest(\"details\");while(d){d.open=true;d=d.parentElement&&d.parentElement.closest(\"details\");}\n"
+  s = s "  el.scrollIntoView({block:\"start\"});}\n"
+  s = s "  function bind(){\n"
+  s = s "    var b=document.querySelector('.theme-toggle');\n"
+  s = s "    if(b){\n"
+  s = s "      b.textContent=labelFor(document.documentElement.dataset.theme||resolved());\n"
+  s = s "      b.addEventListener('click',function(){\n"
+  s = s "        var next=document.documentElement.dataset.theme==='dark'?'light':'dark';\n"
+  s = s "        document.documentElement.dataset.theme=next;\n"
+  s = s "        stored=next;\n"
+  s = s "        try{localStorage['ptxray-theme']=next;}catch(e){}\n"
+  s = s "        b.textContent=labelFor(next);\n"
+  s = s "      });\n"
+  s = s "    }\n"
+  s = s "    addEventListener(\"hashchange\",go);go();\n"
+  s = s "  }\n"
+  s = s "  if(document.readyState==='loading') addEventListener('DOMContentLoaded',bind);\n"
+  s = s "  else bind();\n"
+  s = s "})();"
+  gsub(/[[:space:]]/, "", s)
+  COMPOSED_THEME_SCRIPT_COMPACT = s
+  return s
+}
+
+function compact_script_body(text) {
+  gsub(/[[:space:]]/, "", text)
+  return text
+}
+
+function script_body_is_composed_theme(body) {
+  return compact_script_body(body) == composed_theme_script_compact()
+}
+
+function reject_unknown_script() {
+  die("unknown script content is not the composed theme script")
+}
+
+function note_script_open(active, lower) {
+  if (active) reject_unknown_script()
+  if (!is_composed_theme_script_open(lower)) \
+    die("script tag is not the composed theme form")
+}
+
+function note_script_close(active, body) {
+  if (!active) reject_unknown_script()
+  if (!script_body_is_composed_theme(body)) reject_unknown_script()
+}
+
 function discovery_text(text) {
+  if (DISCOVERY_SCRIPT) {
+    DISCOVERY_SCRIPT_BODY = DISCOVERY_SCRIPT_BODY text
+    return
+  }
   if (text == "" || DISCOVERY_STYLE) return
   if (DISCOVERY_STACK_DEPTH > 0 \
       && (DISCOVERY_STACK_FAMILY[DISCOVERY_STACK_DEPTH] == "technical" \
@@ -1704,6 +1795,10 @@ function discovery_text(text) {
 }
 
 function accumulate_authored(text) {
+  if (DISCOVERY_SCRIPT) {
+    DISCOVERY_SCRIPT_BODY = DISCOVERY_SCRIPT_BODY text
+    return
+  }
   if (text == "" || DISCOVERY_STYLE) return
   if (DISCOVERY_STACK_DEPTH > 0 \
       && DISCOVERY_STACK_FAMILY[DISCOVERY_STACK_DEPTH] == "authored")
@@ -1768,7 +1863,17 @@ function discover_line(line,    rest, opening, closing, text, tag, lower, class_
     family = tag_attribute(tag, "data-aixray-field")
     closing_tag = substr(lower, 1, 2) == "</"
     if (!closing_tag) discover_schema_finding_id(tag)
-    if (lower ~ /^<style([ >])/) DISCOVERY_STYLE = 1
+    if (is_script_open_tag(lower)) {
+      note_script_open(DISCOVERY_SCRIPT, lower)
+      DISCOVERY_SCRIPT = 1
+      DISCOVERY_SCRIPT_BODY = ""
+    } else if (is_script_close_tag(lower)) {
+      note_script_close(DISCOVERY_SCRIPT, DISCOVERY_SCRIPT_BODY)
+      DISCOVERY_SCRIPT = 0
+      DISCOVERY_SCRIPT_BODY = ""
+    } else if (DISCOVERY_SCRIPT) {
+      reject_unknown_script()
+    } else if (lower ~ /^<style([ >])/) DISCOVERY_STYLE = 1
     else if (lower ~ /^<\/style/) DISCOVERY_STYLE = 0
     else if (!DISCOVERY_STYLE && lower ~ /^<div([ >])/) {
       DISCOVERY_DIV_DEPTH++
@@ -1807,6 +1912,7 @@ function discover_line(line,    rest, opening, closing, text, tag, lower, class_
     else discovery_push_tag(tag, family)
     rest = substr(rest, closing + 1)
   }
+  if (DISCOVERY_SCRIPT) DISCOVERY_SCRIPT_BODY = DISCOVERY_SCRIPT_BODY "\n"
 }
 
 function sort_maps(    left, right, temporary) {
@@ -2051,6 +2157,10 @@ function normalize_generated_date(text,    suffix, hour, minute) {
 }
 
 function transform_visible_text(text,    transformed, family) {
+  if (TRANSFORM_SCRIPT) {
+    TRANSFORM_SCRIPT_BODY = TRANSFORM_SCRIPT_BODY text
+    return text
+  }
   if (TRANSFORM_CAPTURE_CONTEXT) \
     TRANSFORM_ROW_CONTEXT = trim(TRANSFORM_ROW_CONTEXT " " html_unescape(text))
   CURRENT_LOCATION = transform_stack_location()
@@ -2093,6 +2203,8 @@ function transform_line(line,    out, rest, opening, closing, text, tag, lower, 
     tag_location = stable_location(tag)
     tag_family = tag_attribute(tag, "data-aixray-field")
     if (tag_location != "") CURRENT_LOCATION = tag_location
+    else if (TRANSFORM_SCRIPT || is_script_open_tag(lower)) \
+      CURRENT_LOCATION = "report:theme-script"
     else if (TRANSFORM_STYLE || lower ~ /^<style([ >])/) \
       CURRENT_LOCATION = "report:print-header"
     else if (TRANSFORM_TITLE || lower ~ /^<title([ >])/) \
@@ -2105,10 +2217,28 @@ function transform_line(line,    out, rest, opening, closing, text, tag, lower, 
     tag = normalize_schema_finding_ids(tag)
     tag = neutralize_remote_resources(tag)
     lower = tolower(tag)
-    if (TRANSFORM_STYLE || lower ~ /^<style([ >])/) out = out apply_maps(tag, 1)
+    if (TRANSFORM_SCRIPT || is_script_open_tag(lower) \
+        || is_script_close_tag(lower)) out = out tag
+    else if (TRANSFORM_STYLE || lower ~ /^<style([ >])/) \
+      out = out apply_maps(tag, 1)
     else out = out apply_maps(tag, 0)
 
-    if (lower ~ /^<style([ >])/) {
+    if (is_script_open_tag(lower)) {
+      note_script_open(TRANSFORM_SCRIPT, lower)
+      TRANSFORM_SCRIPT = 1
+      TRANSFORM_SCRIPT_BODY = ""
+      TRANSFORM_LOCATION = "report:theme-script"
+    }
+    else if (is_script_close_tag(lower)) {
+      note_script_close(TRANSFORM_SCRIPT, TRANSFORM_SCRIPT_BODY)
+      TRANSFORM_SCRIPT = 0
+      TRANSFORM_SCRIPT_BODY = ""
+      TRANSFORM_LOCATION = ""
+    }
+    else if (TRANSFORM_SCRIPT) {
+      reject_unknown_script()
+    }
+    else if (lower ~ /^<style([ >])/) {
       TRANSFORM_STYLE = 1
       TRANSFORM_LOCATION = "report:print-header"
     }
@@ -2169,6 +2299,7 @@ function transform_line(line,    out, rest, opening, closing, text, tag, lower, 
     else transform_push_tag(tag, stack_location, tag_family)
     rest = substr(rest, closing + 1)
   }
+  if (TRANSFORM_SCRIPT) TRANSFORM_SCRIPT_BODY = TRANSFORM_SCRIPT_BODY "\n"
 
   if (!NOTICE_INSERTED && (position = index(out, "<body>")) > 0) {
     notice = "<div class=\"aixray-pseudonymize-notice\" role=\"note\" data-aixray-field=\"authored\" data-aixray-copy-id=\"review-disclosure-v1\" style=\"padding:12px 32px;border-bottom:2px solid #C2703D;font-family:monospace\">" \
@@ -2831,7 +2962,7 @@ function approved_report_attribute(name, value,    lower_name) {
       || value == "mailto:review@powertruesystems.com"
 }
 
-function markup_attribute_value(name, value,    safe, lower_name, raw_lower) {
+function markup_attribute_value(name, value,    safe, lower_name, raw_lower, path_index) {
   safe = html_unescape(value)
   lower_name = tolower(name)
   raw_lower = tolower(value)
@@ -2850,6 +2981,7 @@ function markup_attribute_value(name, value,    safe, lower_name, raw_lower) {
     die("redaction validation failed: unapproved Plan QR destination")
   if (lower_name == "href") {
     if (value ~ /^#finding-([0-9][0-9]*|deep-dive)$/) return ""
+    if (value ~ /^#sec-[a-z][a-z0-9]*$/) return ""
     value = safe
     sub(/^[ \t\r\n]+/, "", value)
     sub(/^[A-Za-z][A-Za-z0-9+.-]*:/, "", value)
@@ -2860,14 +2992,16 @@ function markup_attribute_value(name, value,    safe, lower_name, raw_lower) {
   if (lower_name == "xmlns") \
     die("redaction validation failed: unapproved report destination")
   if (lower_name == "d") {
-    VALID_PLAN_QR_PATH_COUNT++
-    if (VALID_PLAN_QR_COUNT != 1 \
-        || VALID_PLAN_QR_PATH_COUNT > 49 \
-        || value != canonical_plan_qr_path( \
-          PLAN_QR_ROW[VALID_PLAN_QR_PATH_COUNT], \
-          VALID_PLAN_QR_PATH_COUNT + 3)) \
-      die("redaction validation failed: Plan QR vector path does not match the canonical contract")
-    return ""
+    path_index = canonical_plan_qr_path_index(value)
+    if (path_index != 0) {
+      VALID_PLAN_QR_PATH_COUNT++
+      if (VALID_PLAN_QR_COUNT != 1 \
+          || VALID_PLAN_QR_PATH_COUNT > 49 \
+          || path_index != VALID_PLAN_QR_PATH_COUNT) \
+        die("redaction validation failed: Plan QR vector path does not match the canonical contract")
+      return ""
+    }
+    # Composed film-hero path: not a Plan QR vector. Fall through.
   }
   if (lower_name == "style") {
     gsub(/#[0-9A-Fa-f]+/, " ", safe)
@@ -2939,6 +3073,10 @@ function validate_segment(segment, host_only, td_class, context, evidence,    or
 }
 
 function validation_text(text) {
+  if (VALIDATE_SCRIPT) {
+    VALIDATE_SCRIPT_BODY = VALIDATE_SCRIPT_BODY text
+    return
+  }
   if (VALIDATE_CAPTURE_CONTEXT) \
     VALIDATE_ROW_CONTEXT = trim(VALIDATE_ROW_CONTEXT " " html_unescape(text))
   validate_segment(text, VALIDATE_STYLE, VALIDATE_TD_CLASS, \
@@ -2963,9 +3101,24 @@ function validate_line(line,    rest, opening, closing, text, tag, lower, class_
       die("redaction validation failed: malformed HTML unterminated tag fragment")
     tag = substr(rest, 1, closing)
     lower = tolower(tag)
-    validate_segment(tag, VALIDATE_STYLE || lower ~ /^<style([ >])/, "", "", 0)
-    validate_markup(tag)
-    if (lower ~ /^<style([ >])/) VALIDATE_STYLE = 1
+    if (VALIDATE_SCRIPT || is_script_open_tag(lower) \
+        || is_script_close_tag(lower)) {
+      # Script bodies are authorized only by the composed theme contract.
+    } else {
+      validate_segment(tag, VALIDATE_STYLE || lower ~ /^<style([ >])/, "", "", 0)
+      validate_markup(tag)
+    }
+    if (is_script_open_tag(lower)) {
+      note_script_open(VALIDATE_SCRIPT, lower)
+      VALIDATE_SCRIPT = 1
+      VALIDATE_SCRIPT_BODY = ""
+    } else if (is_script_close_tag(lower)) {
+      note_script_close(VALIDATE_SCRIPT, VALIDATE_SCRIPT_BODY)
+      VALIDATE_SCRIPT = 0
+      VALIDATE_SCRIPT_BODY = ""
+    } else if (VALIDATE_SCRIPT) {
+      reject_unknown_script()
+    } else if (lower ~ /^<style([ >])/) VALIDATE_STYLE = 1
     else if (lower ~ /^<\/style/) VALIDATE_STYLE = 0
     else if (!VALIDATE_STYLE && lower ~ /^<div([ >])/) {
       VALIDATE_DIV_DEPTH++
@@ -3005,6 +3158,7 @@ function validate_line(line,    rest, opening, closing, text, tag, lower, class_
     }
     rest = substr(rest, closing + 1)
   }
+  if (VALIDATE_SCRIPT) VALIDATE_SCRIPT_BODY = VALIDATE_SCRIPT_BODY "\n"
 }
 
 {
@@ -3018,6 +3172,9 @@ END {
   version_marker = "<meta name=\"aixray-report-version\" content=\"1\">"
   if (count_literal(ALL_DOCUMENT, version_marker) != 1) \
     die("expected PTxray report version marker exactly once; refusing unrecognized input")
+  privacy_marker = "<meta name=\"aixray-privacy-schema\" content=\"2\">"
+  if (count_literal(ALL_DOCUMENT, privacy_marker) != 1) \
+    die("expected PTxray privacy schema 2 marker exactly once; refusing unrecognized input")
   if (count_literal(ALL_DOCUMENT, "<body>") != 1 \
       || count_literal(ALL_DOCUMENT, "</html>") != 1) \
     die("expected one complete PTxray HTML envelope; refusing malformed input")
@@ -3042,6 +3199,8 @@ END {
   AUTHORED_ACCUMULATOR = ""
   AUTHORED_PASS = 1
   DISCOVERY_STYLE = 0
+  DISCOVERY_SCRIPT = 0
+  DISCOVERY_SCRIPT_BODY = ""
   DISCOVERY_TD_CLASS = ""
   DISCOVERY_ROW_CONTEXT = ""
   DISCOVERY_CAPTURE_CONTEXT = 0
@@ -3051,11 +3210,14 @@ END {
   for (line_number = 1; line_number <= NR; line_number++) {
     discover_line(DOCUMENT[line_number])
   }
+  if (DISCOVERY_SCRIPT) reject_unknown_script()
   AUTHORED_PASS = 0
 
   add_map(report_host, "host")
 
   DISCOVERY_STYLE = 0
+  DISCOVERY_SCRIPT = 0
+  DISCOVERY_SCRIPT_BODY = ""
   DISCOVERY_TD_CLASS = ""
   DISCOVERY_ROW_CONTEXT = ""
   DISCOVERY_CAPTURE_CONTEXT = 0
@@ -3065,12 +3227,15 @@ END {
   for (line_number = 1; line_number <= NR; line_number++) {
     discover_line(DOCUMENT[line_number])
   }
+  if (DISCOVERY_SCRIPT) reject_unknown_script()
 
   SECRET_REMOVED = 0
   GECOS_REMOVED = 0
   sort_maps()
 
   TRANSFORM_STYLE = 0
+  TRANSFORM_SCRIPT = 0
+  TRANSFORM_SCRIPT_BODY = ""
   TRANSFORM_TITLE = 0
   TRANSFORM_TD_CLASS = ""
   TRANSFORM_LOCATION = ""
@@ -3083,6 +3248,8 @@ END {
   CURRENT_LOCATION = "report:structural"
   TRANSFORM_STACK_DEPTH = 0
   VALIDATE_STYLE = 0
+  VALIDATE_SCRIPT = 0
+  VALIDATE_SCRIPT_BODY = ""
   VALIDATE_TD_CLASS = ""
   VALIDATE_EVIDENCE = 0
   VALIDATE_ROW_CONTEXT = ""
@@ -3097,6 +3264,7 @@ END {
     transformed = transform_line(DOCUMENT[line_number])
     OUTPUT_DOCUMENT[line_number] = transformed
   }
+  if (TRANSFORM_SCRIPT) reject_unknown_script()
   if (!NOTICE_INSERTED) die("redaction validation failed: output notice was not inserted")
   if (LEDGER_COUNT == 0) die("redaction validation failed: transformation ledger is empty")
 

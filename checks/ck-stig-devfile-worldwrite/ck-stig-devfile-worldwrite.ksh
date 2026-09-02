@@ -16,7 +16,9 @@ export PATH
 LC_ALL=C
 export LC_ALL
 
-AIXRAY_STANDALONE_VERSION="1.6.0"
+# Composed-path product version. Dispatch, standalone_emit, and assembled
+# doors read this assignment. It is not derived from the monolith.
+AIXRAY_STANDALONE_VERSION="1.7.0"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line

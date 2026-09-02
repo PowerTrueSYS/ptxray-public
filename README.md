@@ -313,17 +313,17 @@ Copyright © 2026 CJDM LLC, doing business as PowerTrue Systems.
 
 The product entry points are the report runners inside the versioned report bundles, with these exact commands:
 
-AIX (`ptxray-report-aix-1.6.0.tar`):
+AIX (`ptxray-report-aix-1.7.0.tar`):
 
 ```sh
 dist/tools/aixray-scan.ksh --html --json --compliance <std> --definitions-bundle F --out DIR
 ```
 
-IBM i (`ptxray-report-ibmi-1.6.0.tar`):
+IBM i (`ptxray-report-ibmi-1.7.0.tar`):
 
 ```sh
-dist/tools/ibmi-scan.ksh --html --json --compliance cis-l1|cis-l2 --out DIR --monolith ./ptxray-ibmi.sh
+dist/tools/ibmi-scan.ksh --html --json --compliance cis-l1|cis-l2 --out DIR
 ```
 
-The one-file scripts (`ptxray-aix.sh`, `ptxray-ibmi.sh`) do not produce the report. Extract the matching bundle and run the runner above.
+`aixray-scan.ksh` and `ibmi-scan.ksh` at the release top level are the same bytes as the runner inside the matching bundle, kept for the manifest; they do not run standalone outside an extracted bundle. Extract the matching bundle and run the runner above.
 <!-- ptxray-release-artifacts:end -->
