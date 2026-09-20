@@ -33,7 +33,7 @@ product.
 
 ## Published 1.8 release boundary
 
-PTxray 1.8.0 ships exactly eleven signed-release assets: eight payloads in
+PTxray 1.8.1 ships exactly eleven signed-release assets: eight payloads in
 `SHA256SUMS`, that manifest, its detached signature, and the release public key.
 The report bundles contain the product entry points and their complete tool trees.
 Top-level runner copies require the extracted bundle; retired one-file scanners

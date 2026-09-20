@@ -22,10 +22,10 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "PTxray 1.8.0 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
+  "description": "PTxray 1.8.1 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.8.0",
+  "softwareVersion": "1.8.1",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -326,7 +326,7 @@
           <p class="lede">PTxray is a free, open-source IBM AIX and IBM i health, risk, and security assessment. The separate signed-definitions downloader runs before the no-egress assessment probes. The VIOS lane remains disabled pending live acceptance. Read every inspectable ksh program before privileged execution.</p>
         </div>
         <aside class="version-card" aria-label="PTxray v1 trust summary">
-          <code>PTXRAY / 1.8.0</code>
+          <code>PTXRAY / 1.8.1</code>
           <strong>Published, signed release.</strong>
           <ul>
             <li>Open source — Apache-2.0</li>
@@ -378,9 +378,9 @@
     <section class="intro" data-release-status="published-1.8" aria-labelledby="future-title">
       <div class="wrap">
         <div class="section-head">
-          <p class="eyebrow">Published PTxray 1.8.0 release</p>
+          <p class="eyebrow">Published PTxray 1.8.1 release</p>
           <h2 id="future-title">Current signed release behavior.</h2>
-          <p>PTxray 1.8.0 is the current published release at <code>releases/latest</code>. Its AIX runner requires root, and its IBM i runner requires QSECOFR. The VIOS lane remains disabled pending live acceptance. Before assessment probes begin, the runner verifies and invokes the separate, adjacent, same-package digest-verified <code>ptxray-defs.sh</code>.</p>
+          <p>PTxray 1.8.1 is the current published release at <code>releases/latest</code>. Its AIX runner requires root, and its IBM i runner requires QSECOFR. The VIOS lane remains disabled pending live acceptance. Before assessment probes begin, the runner verifies and invokes the separate, adjacent, same-package digest-verified <code>ptxray-defs.sh</code>.</p>
           <p>Extract the signed bundle for your platform. Run <code>ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report</code> on AIX, or <code>ksh dist/tools/ibmi-scan.ksh --html --json --compliance all --out report</code> on IBM i. Create the output directory first. The top-level runner copies require the complete extracted bundle.</p>
           <p>AIX automatically captures fileset and interim-fix inventory, runs the verified IBM FLRTVC engine offline, and includes completed exposure findings in the report. IBM i runs its full platform catalog and reports unavailable evidence explicitly. Neither a completed run nor a PASS proves benchmark compliance.</p>
           <p>The separate downloader acquires signed definitions and, on AIX, the pinned IBM engine before assessment. Connected mode discloses its requests and protected cache writes; it sends no assessment data. <code>--offline</code> uses verified cached inputs. A transferred local signed bundle includes its adjacent signature; offline AIX also needs the pinned engine staged in advance.</p>
@@ -399,11 +399,11 @@
         <div class="gate-grid">
           <section class="panel" aria-labelledby="get-title">
             <h3 id="get-title">Current published download: PTxray 1.8</h3>
-            <p>Download the signed 1.8.0 release, verify its detached signature and checksums, then extract the complete bundle for your platform. See <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public/blob/master/docs/VERIFY.md">the verification guide</a>.</p>
+            <p>Download the signed 1.8.1 release, verify its detached signature and checksums, then extract the complete bundle for your platform. See <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public/blob/master/docs/VERIFY.md">the verification guide</a>.</p>
             <p class="fine">AIX requires root, native ksh93 and supported OpenSSL; connected acquisition also needs curl and unzip. IBM i requires PASE ksh and QSECOFR. VIOS assessment remains disabled.</p>
-            <p><a class="button" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-aix-1.8.0.tar">Download the AIX report bundle</a></p>
-            <p><a class="button alt" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-ibmi-1.8.0.tar">Download the IBM i report bundle</a></p>
-            <p class="fine">Version 1.8.0 · Apache-2.0. <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Read the source on GitHub</a>. Both bundles produce <code>report.html</code>, JSON findings, and structured report data. Their README files describe exact prerequisites and offline staging.</p>
+            <p><a class="button" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-aix-1.8.1.tar">Download the AIX report bundle</a></p>
+            <p><a class="button alt" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-ibmi-1.8.1.tar">Download the IBM i report bundle</a></p>
+            <p class="fine">Version 1.8.1 · Apache-2.0. <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Read the source on GitHub</a>. Both bundles produce <code>report.html</code>, JSON findings, and structured report data. Their README files describe exact prerequisites and offline staging.</p>
             <ul class="mini-proof">
               <li>No email, no gate — read before you run</li>
               <li>Read-only on system configuration</li>
@@ -455,7 +455,7 @@
         <pre aria-label="PTxray example commands"><code># First verify the release signature and bundle checksum.
 mkdir ptxray-aix
 cd ptxray-aix
-tar -xf ../ptxray-report-aix-1.8.0.tar
+tar -xf ../ptxray-report-aix-1.8.1.tar
 mkdir report
 ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report
 
@@ -470,7 +470,7 @@ ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report
   <footer>
     <div class="wrap">
       <span>PowerTrue Systems · AIX · IBM i · IBM Power</span>
-      <span>Apache-2.0 · PTxray 1.8.0 · published signed release</span>
+      <span>Apache-2.0 · PTxray 1.8.1 · published signed release</span>
     </div>
   </footer>
 

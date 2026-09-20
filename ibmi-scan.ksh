@@ -52,7 +52,7 @@ USAGE='usage: ibmi-scan [--html] [--json] [--all]'"$COMPLIANCE_USAGE"' --out DIR
   --definitions-bundle FILE    signed definitions envelope (air-gapped)
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE (air-gapped). DEFS rows come from the evaluate document. Every run assesses the currency pillar in addition to the selected standard; CIS Level 2 runs include the Level 1 controls.'
 
-PTXRAY_RUNNER_VERSION="1.8.0"
+PTXRAY_RUNNER_VERSION="1.8.1"
 
 WANT_HTML=0
 WANT_JSON=0

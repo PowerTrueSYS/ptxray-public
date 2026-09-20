@@ -4,10 +4,10 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "PTxray 1.8.0 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
+  "description": "PTxray 1.8.1 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.8.0",
+  "softwareVersion": "1.8.1",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [

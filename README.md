@@ -48,12 +48,12 @@ IBM FLRTVC and IBM's APAR feed are separately acquired vendor inputs, not redist
 
 ## Get PTxray
 
-Version: 1.8.0
+Version: 1.8.1
 
-Download the complete signed [PTxray v1.8.0 release](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.0) for your platform:
+Download the complete signed [PTxray v1.8.1 release](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.1) for your platform:
 
-- [AIX report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-aix-1.8.0.tar)
-- [IBM i report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-ibmi-1.8.0.tar)
+- [AIX report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-aix-1.8.1.tar)
+- [IBM i report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-ibmi-1.8.1.tar)
 
 Follow [the verification guide](docs/VERIFY.md) before extracting or running code with privileges. Keep the complete bundle intact: the top-level runner copies require its tool tree, helpers, libraries, and data.
 
@@ -66,7 +66,7 @@ After verifying the release:
 ```sh
 mkdir ptxray-aix
 cd ptxray-aix
-tar -xf ../ptxray-report-aix-1.8.0.tar
+tar -xf ../ptxray-report-aix-1.8.1.tar
 mkdir report
 ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report
 ```
@@ -82,12 +82,12 @@ IBM i 7.4 or 7.5 requires PASE ksh and QSECOFR as both session and effective use
 ```sh
 mkdir ptxray-ibmi
 cd ptxray-ibmi
-tar -xf ../ptxray-report-ibmi-1.8.0.tar
+tar -xf ../ptxray-report-ibmi-1.8.1.tar
 mkdir report
 ksh dist/tools/ibmi-scan.ksh --html --json --compliance all --out report
 ```
 
-The full catalog includes security, operational health, capacity, resilience, and currency checks. IBM i uses its own native evidence and PTF data; IBM FLRTVC is an AIX tool. Explicit `cis-l1` and `cis-l2` selections are available for narrower assessments. Coverage and unsupported evidence are disclosed in the report; running every available check does not establish full compliance with a benchmark.
+The full catalog includes security, operational health, capacity, resilience, and currency checks. SMTP relay and NetServer SMB protocol policies are assessed from local configuration without network probes. CVE checks use explicit IBM product mappings to distinguish affected products that are not installed. IBM i uses its own native evidence and PTF data; IBM FLRTVC is an AIX tool. Explicit `cis-l1` and `cis-l2` selections are available for narrower assessments. Coverage and unsupported evidence are disclosed in the report; running every available check does not establish full compliance with a benchmark.
 
 ## Reports and offline use
 
