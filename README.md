@@ -1,15 +1,61 @@
-# PTxray: IBM AIX and IBM i assessment
+# PTxray — understand the health and security of your IBM Power systems
 
-PTxray produces a local HTML risk report and JSON findings from read-only checks of IBM AIX and IBM i. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.
+**Free, open-source assessment for IBM AIX and IBM i.** PTxray turns local system evidence into a readable report of security risks, software and patch currency, operational health, and resilience. See what needs attention, the evidence behind each finding, and recommended next steps.
+
+It runs read-only checks and keeps the results on your host. **No configuration changes. No remediation. No assessment-data uploads or telemetry.**
+
+[Get PTxray](#get-ptxray) · [Safe, local assessment](#designed-for-safe-local-assessment) · [Open-source code](#open-source-and-inspectable) · [Product page](https://powertruesystems.com/ptxray/)
+
+## What you can learn
+
+| Question | What PTxray examines |
+| --- | --- |
+| Where are the security gaps? | Account and password policies, privileged access, service settings, file permissions, and checks aligned with applicable security benchmarks. |
+| Which software or patches need attention? | OS and software levels, known vulnerability evidence, AIX FLRTVC exposure findings, and IBM i PTF evidence. |
+| Is the system current and supported? | OS support status, firmware and patch currency against available reference data. |
+| What could affect reliability? | Storage and capacity, selected performance indicators, configuration health, and recorded errors. |
+| What needs review before a recovery event? | Available backup, redundancy, and recovery configuration evidence. |
+
+Checks and available evidence differ by platform. The report makes those boundaries visible so you can distinguish an identified problem from something that still needs manual review.
+
+## A report you can act on
+
+- **Understand the findings:** open a local HTML report with results, supporting evidence, and recommended actions.
+- **Plan the follow-up:** use the findings to inform patching, configuration reviews, maintenance, and recovery-readiness discussions. You decide which actions to take.
+- **Bring evidence to a review:** use benchmark mappings and explicit coverage disclosures to support security and audit work.
+- **Use the results in your workflow:** retain JSON findings and structured assessment data alongside the human-readable report.
+
+Results distinguish `PASS`, `FAIL`, `WARN`, `NOT_APPLICABLE`, and `NOT_ASSESSED`. Missing evidence is never silently counted as a pass. An assessment supports decisions; it does not certify compliance or prove that a system is secure or recoverable.
+
+## Designed for safe, local assessment
+
+- **Reads and reports:** assessment probes change no system configuration and perform no remediation. PTxray does not install missing packages or change authority settings.
+- **Keeps assessment local:** probes make no network calls and send no assessment data or telemetry away from the host. PTxray does not upload your report.
+- **Separates downloads from assessment:** before assessment, the separate definitions helper can download signed reference data and, on AIX, the pinned IBM FLRTVC engine. These disclosed requests send no assessment data. Use `--offline` with verified, staged inputs when the host must stay disconnected.
+- **Lets you verify what you run:** releases include signed manifests and checksums. [Verify the release](docs/VERIFY.md) and inspect the code before privileged execution.
+
+Read-only assessment still writes local reports and private temporary files; acquisition writes a protected local cache. AIX runs as root and IBM i as QSECOFR, so review the prerequisites and choose a suitable execution window. Large assessments can take tens of minutes and consume system resources. See [SECURITY.md](SECURITY.md) for the full trust model.
+
+Reports contain sensitive system details. The bundled review-copy helper rejects the current composed report format; it does not currently produce a pseudonymized copy of these reports. Review and remove sensitive details manually before sharing.
+
+## Open source and inspectable
+
+PTxray's published assessment code is **open source under [Apache-2.0](LICENSE)**. Download and run it without an email address, form, or registration. You can inspect the shell code and the commands it uses before running it.
+
+The public AIX catalog contains 585 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. The IBM i report bundle contains its own 134-check catalog. These are tool counts, not counts of findings or benchmark controls.
+
+IBM FLRTVC and IBM's APAR feed are separately acquired vendor inputs, not redistributed in the report bundles; their use remains subject to the applicable vendor terms.
+
+## Get PTxray
 
 Version: 1.8.0
 
-**Download the complete signed release:** [PTxray v1.8.0](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.0). The report bundles are the product entry points. Verify the signed manifest and bundle checksums using [docs/VERIFY.md](docs/VERIFY.md) before extracting or running code with privileges.
+Download the complete signed [PTxray v1.8.0 release](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.0) for your platform:
 
 - [AIX report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-aix-1.8.0.tar)
 - [IBM i report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.0/ptxray-report-ibmi-1.8.0.tar)
-- [Source and issue tracker](https://github.com/PowerTrueSYS/ptxray-public)
-- [Official product page](https://powertruesystems.com/ptxray/)
+
+Follow [the verification guide](docs/VERIFY.md) before extracting or running code with privileges. Keep the complete bundle intact: the top-level runner copies require its tool tree, helpers, libraries, and data.
 
 ## Run a complete AIX assessment
 
@@ -49,18 +95,12 @@ Open `report/report.html` in a browser. JSON findings are in `report/report.json
 
 Use `--offline` to consume verified cached inputs without acquisition requests. An air-gapped AIX host also needs the pinned IBM engine staged through the helper's `--flrtvc-local` mode. A local signed definitions bundle must travel with its adjacent `.sig` file. See each bundle's `README-REPORT.md` for staging commands and exact prerequisites. Missing or invalid required inputs produce an explicit refusal.
 
-The full AIX selection can take tens of minutes on a small partition, especially while scanning the filesystem for Trusted Execution and rendering detailed findings. Findings distinguish `PASS`, `FAIL`, `WARN`, `NOT_APPLICABLE`, and `NOT_ASSESSED`; unavailable evidence is never silently counted as a pass.
-
-## Inspectable components
-
-The AIX catalog contains 585 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. IBM i has a separate 134-check catalog inside its report bundle. The tool counts are not counts of findings or benchmark controls.
-
-The top-level `aixray-scan.ksh`, its compatibility name `aixray-aix.sh`, and `ibmi-scan.ksh` are copies of the bundled runners. They require the extracted tool tree and do not run as standalone files. Keep the complete bundle intact, including its definitions helper, libraries, and data.
-
-The bundled review-copy helper rejects the current composed report format because it does not yet satisfy its strict privacy contract. Do not treat a full report as pseudonymized. Review and remove sensitive host, account, address, and operational details manually before sharing. PTxray does not upload the report.
-
 ## Scope and support
 
 PTxray reports evidence and recommended actions; it does not remediate the host or prove security, compliance, or recoverability. Standards tags are alignment information, not certification. VIOS assessment remains disabled pending live acceptance. No unsupported platform coverage is implied by IBM Power branding.
 
-See [SECURITY.md](SECURITY.md) for the trust boundary and private vulnerability-reporting channel, [docs/auditing-aix.md](docs/auditing-aix.md) for the audit guide, and [LICENSE](LICENSE) for Apache-2.0 terms. No email address, form, or registration is required to download or run PTxray.
+See [SECURITY.md](SECURITY.md) for the trust boundary and private vulnerability-reporting channel, and [docs/auditing-aix.md](docs/auditing-aix.md) for the audit guide. Use [GitHub issues](https://github.com/PowerTrueSYS/ptxray-public/issues) for ordinary bug reports; do not include sensitive assessment data.
+
+## Release history
+
+For changes in each version, see the [release notes](docs/RELEASE-NOTES.md) and [GitHub releases](https://github.com/PowerTrueSYS/ptxray-public/releases).
