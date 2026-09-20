@@ -1,7 +1,8 @@
 #!/bin/sh
 # PTxray definitions downloader/verifier. This adjacent program is the only
 # PTxray assessment component that can make a network request. It retrieves
-# signed data; it never executes, sources, evaluates, or remediates anything.
+# signed data and a separately pinned IBM engine; it never executes, sources,
+# evaluates, or remediates anything.
 set -u
 PATH=/usr/bin:/bin
 export PATH
@@ -17,9 +18,10 @@ unset LDR_PRELOAD LDR_PRELOAD64
 unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
 unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
 unset ENV BASH_ENV KSH_ENV ZDOTDIR
+unset UNZIP UNZIPOPT ZIPINFO ZIPINFOOPT
 umask 077
 
-PTXRAY_DEFS_VERSION="1.7.0"
+PTXRAY_DEFS_VERSION="1.8.0"
 
 PTXRAY_DEFS_TEST_BUILD=0
 PTXRAY_DEFS_CACHE='/var/ptxray/definitions'
@@ -54,6 +56,8 @@ PTXRAY_DEFS_SOURCE_COUNT=4
 PTXRAY_DEFS_SOURCE_IDS='cisa-kev ibm-apar-csv ibmi-psp-group-levels ibm-flrt-firmware'
 PTXRAY_DEFS_SOURCE_EXTS='json csv tsv tsv'
 PTXRAY_DEFS_SOURCE_FILES='cisa-kev.json ibm-apar-csv.csv ibmi-psp-group-levels.tsv ibm-flrt-firmware.tsv'
+PTXRAY_FLRTVC_VERSION='0.8.14'
+PTXRAY_FLRTVC_SHA256='b5c97af32f576c7c653f59b6df30f23dddd8339b6c13800247d9ef16e03e15de'
 
 PTXRAY_DEFS_BUNDLE_URL='https://powertruesystems.com/ptxray/definitions/latest.ptxray-defs'
 PTXRAY_DEFS_SIGNATURE_URL='https://powertruesystems.com/ptxray/definitions/latest.ptxray-defs.sig'
@@ -63,6 +67,8 @@ PTXRAY_DEFS_SIGNATURE_BYTES=384
 PTXRAY_DEFS_MAX_PAYLOAD=33554432
 PTXRAY_DEFS_MAX_ENCODED=44739244
 PTXRAY_DEFS_MAX_AGE_DAYS=30
+PTXRAY_FLRTVC_STAGE=
+PTXRAY_FLRTVC_STAGE_ID=
 PTXRAY_DEFS_WORK=
 PTXRAY_DEFS_LOCK=
 PTXRAY_DEFS_LOCK_HELD=0
@@ -90,6 +96,10 @@ ptxray_defs_fail() {
 }
 
 ptxray_defs_cleanup() {
+  if [ -n "$PTXRAY_FLRTVC_STAGE" ] && [ -n "$PTXRAY_FLRTVC_STAGE_ID" ] \
+      && [ "$PTXRAY_FLRTVC_STAGE_ID" = "$(ptxray_defs_cache_file_identity "$PTXRAY_FLRTVC_STAGE" 2>/dev/null)" ]; then
+    rm -f "$PTXRAY_FLRTVC_STAGE" 2>/dev/null || :
+  fi
   if [ "$PTXRAY_DEFS_LOCK_HELD" -eq 1 ]; then
     case "$PTXRAY_DEFS_LOCK" in
       "$PTXRAY_DEFS_CACHE"/.publish.lock)
@@ -605,13 +615,15 @@ ptxray_defs_validate_kev() {
           if(kind!="N"||v!~/^(0|[1-9][0-9]*)$/)fail();declared=v+0
         }
       } else if(vuln[depth]){
-        allowed=" cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes cwes "
+        allowed=" cveID vendorProject product vulnerabilityName dateAdded shortDescription requiredAction dueDate knownRansomwareCampaignUse notes cwes forensicTriage "
         if(index(allowed," " k " ")==0||k=="cwes"||kind!="S")fail()
         got[depth SUBSEP k]=1
         if(k=="cveID"){
           if(!cve(v)||cves[v]++)fail();vcve[depth]=v
         } else if(k=="dateAdded"||k=="dueDate"){
           if(!realdate(v))fail()
+        } else if(k=="forensicTriage"){
+          if(v!="Yes"&&v!="No")fail()
         } else if(k!="notes"&&v=="")fail()
       } else fail()
     }
@@ -1419,8 +1431,90 @@ ptxray_defs_snapshot_current() {
   return 0
 }
 
+# The engine is deliberately outside signed data generations. Only the adjacent
+# acquisition command contacts IBM; cache/local and assessment remain offline.
+ptxray_defs_select_unzip() {
+  for PTXRAY_FLRTVC_UNZIP in /usr/bin/unzip /opt/freeware/bin/unzip /QOpenSys/pkgs/bin/unzip; do
+    PTXRAY_FLRTVC_UNZIP=$(ptxray_defs_trusted_tool "$PTXRAY_FLRTVC_UNZIP") \
+      && { printf '%s\n' "$PTXRAY_FLRTVC_UNZIP"; return 0; }
+  done
+  return 1
+}
+
+ptxray_defs_flrtvc_valid() {
+  PTXRAY_FLRTVC_CHECK_ID=$(ptxray_defs_cache_file_identity "$1") || return 1
+  PTXRAY_FLRTVC_CHECK_SIZE=$(printf '%s\n' "$PTXRAY_FLRTVC_CHECK_ID" | awk -F'|' '{print $2}')
+  [ "$PTXRAY_FLRTVC_CHECK_SIZE" -gt 0 ] && [ "$PTXRAY_FLRTVC_CHECK_SIZE" -le 1048576 ] || return 1
+  [ "$(ptxray_defs_sha256 "$1")" = "$PTXRAY_FLRTVC_SHA256" ] \
+    && [ "$PTXRAY_FLRTVC_CHECK_ID" = "$(ptxray_defs_cache_file_identity "$1")" ]
+}
+
+ptxray_defs_flrtvc() {
+  PTXRAY_FLRTVC_MODE=$1
+  PTXRAY_FLRTVC_DEST=$2
+  case "$PTXRAY_FLRTVC_DEST" in /*) ;; *) return 1;; esac
+  [ ! -L "$PTXRAY_FLRTVC_DEST" ] || return 1
+  PTXRAY_FLRTVC_DEST=$(CDPATH= cd -- "$PTXRAY_FLRTVC_DEST" 2>/dev/null && pwd -P) || return 1
+  ptxray_defs_private_ancestry_safe "$PTXRAY_FLRTVC_DEST" || return 1
+  PTXRAY_FLRTVC_DEST_ID=$(ptxray_defs_cache_dir_identity "$PTXRAY_FLRTVC_DEST") || return 1
+  [ ! -e "$PTXRAY_FLRTVC_DEST/flrtvc.ksh" ] && [ ! -L "$PTXRAY_FLRTVC_DEST/flrtvc.ksh" ] || return 1
+  PTXRAY_DEFS_OPENSSL=$(ptxray_defs_select_openssl) || return 1
+  ptxray_defs_make_work || return 1
+  PTXRAY_FLRTVC_CACHED=$PTXRAY_DEFS_CACHE/flrtvc-$PTXRAY_FLRTVC_SHA256.ksh
+  case "$PTXRAY_FLRTVC_MODE" in
+    cache)
+      ptxray_defs_flrtvc_valid "$PTXRAY_FLRTVC_CACHED" || return 1
+      ptxray_defs_copy_bounded "$PTXRAY_FLRTVC_CACHED" "$PTXRAY_DEFS_WORK/flrtvc.ksh" 1048576 || return 1
+      ;;
+    local)
+      ptxray_defs_copy_bounded "$3" "$PTXRAY_DEFS_WORK/flrtvc.ksh" 1048576 || return 1
+      ;;
+    update)
+      PTXRAY_FLRTVC_UNZIP=$(ptxray_defs_select_unzip) \
+        || { ptxray_defs_error 'FLRTVC update requires a trusted fixed-path unzip; use --flrtvc-local with an extracted engine for air-gapped acquisition'; return 1; }
+      PTXRAY_DEFS_CURL=$(ptxray_defs_select_curl) || return 1
+      ptxray_defs_fetch_one "https://esupport.ibm.com/customercare/sas/f/flrt3/FLRTVC-$PTXRAY_FLRTVC_VERSION.zip" \
+        "$PTXRAY_DEFS_WORK/flrtvc.zip" 2097152 || return 1
+      PTXRAY_FLRTVC_ZIP_SIZE=$(wc -c <"$PTXRAY_DEFS_WORK/flrtvc.zip" | tr -d ' ')
+      [ "$PTXRAY_FLRTVC_ZIP_SIZE" -gt 0 ] && [ "$PTXRAY_FLRTVC_ZIP_SIZE" -le 2097152 ] || return 1
+      # Stream exactly this member, never extract paths. A file-size cap bounds
+      # decompression even for a malicious ZIP; CRC and hash must both pass.
+      (ulimit -f 2048 2>/dev/null || exit 125
+       ulimit -t 30 2>/dev/null || exit 125
+       exec "$PTXRAY_FLRTVC_UNZIP" -p "$PTXRAY_DEFS_WORK/flrtvc.zip" flrtvc.ksh
+      ) </dev/null >"$PTXRAY_DEFS_WORK/flrtvc.ksh" 2>/dev/null || return 1
+      ;;
+    *) return 1;;
+  esac
+  chmod 600 "$PTXRAY_DEFS_WORK/flrtvc.ksh" || return 1
+  ptxray_defs_flrtvc_valid "$PTXRAY_DEFS_WORK/flrtvc.ksh" || return 1
+  if [ "$PTXRAY_FLRTVC_MODE" != cache ]; then
+    if [ -e "$PTXRAY_FLRTVC_CACHED" ] || [ -L "$PTXRAY_FLRTVC_CACHED" ]; then
+      ptxray_defs_flrtvc_valid "$PTXRAY_FLRTVC_CACHED" || return 1
+    else
+      # Exclusive link publishes complete verified bytes without overwriting.
+      ln "$PTXRAY_DEFS_WORK/flrtvc.ksh" "$PTXRAY_FLRTVC_CACHED" || return 1
+      rm -f "$PTXRAY_DEFS_WORK/flrtvc.ksh" || return 1
+      ptxray_defs_flrtvc_valid "$PTXRAY_FLRTVC_CACHED" || return 1
+      ptxray_defs_copy_bounded "$PTXRAY_FLRTVC_CACHED" "$PTXRAY_DEFS_WORK/flrtvc.ksh" 1048576 || return 1
+    fi
+  fi
+  [ "$PTXRAY_FLRTVC_DEST_ID" = "$(ptxray_defs_cache_dir_identity "$PTXRAY_FLRTVC_DEST")" ] || return 1
+  # Reserve the absent output exclusively, then validate the actual staged copy.
+  PTXRAY_FLRTVC_STAGE=$PTXRAY_FLRTVC_DEST/flrtvc.ksh
+  (set -C; : >"$PTXRAY_FLRTVC_STAGE") 2>/dev/null || return 1
+  PTXRAY_FLRTVC_STAGE_ID=$(ptxray_defs_cache_file_identity "$PTXRAY_FLRTVC_STAGE") || return 1
+  ptxray_defs_copy_bounded "$PTXRAY_DEFS_WORK/flrtvc.ksh" "$PTXRAY_FLRTVC_STAGE" 1048576 || return 1
+  PTXRAY_FLRTVC_STAGE_ID=$(ptxray_defs_cache_file_identity "$PTXRAY_FLRTVC_STAGE") || return 1
+  ptxray_defs_flrtvc_valid "$PTXRAY_FLRTVC_STAGE" || return 1
+  [ "$PTXRAY_FLRTVC_DEST_ID" = "$(ptxray_defs_cache_dir_identity "$PTXRAY_FLRTVC_DEST")" ] || return 1
+  PTXRAY_FLRTVC_STAGE=
+  printf 'PTXRAY-FLRTVC|1|%s|version=%s|sha256=%s\n' \
+    "$PTXRAY_FLRTVC_MODE" "$PTXRAY_FLRTVC_VERSION" "$PTXRAY_FLRTVC_SHA256"
+}
+
 usage() {
-  echo "usage: $0 --update|--cache|--local BUNDLE|--recover-local BUNDLE|--recover-lock|--status|--payload GENERATION SOURCE|--snapshot GENERATION DIRECTORY" >&2
+  echo "usage: $0 --update|--cache|--local BUNDLE|--recover-local BUNDLE|--recover-lock|--status|--payload GENERATION SOURCE|--snapshot GENERATION DIRECTORY|--flrtvc-update DIRECTORY|--flrtvc-cache DIRECTORY|--flrtvc-local ENGINE DIRECTORY" >&2
   exit 2
 }
 
@@ -1436,6 +1530,8 @@ LOCAL_BUNDLE=
 PAYLOAD_GENERATION=
 PAYLOAD_SOURCE=
 case "$MODE" in
+  --flrtvc-update|--flrtvc-cache) [ "$#" -eq 1 ] || usage; PAYLOAD_SOURCE=$1;;
+  --flrtvc-local) [ "$#" -eq 2 ] || usage; LOCAL_BUNDLE=$1; PAYLOAD_SOURCE=$2;;
   --update|--cache|--recover-lock|--status) [ "$#" -eq 0 ] || usage;;
   --local|--recover-local) [ "$#" -eq 1 ] || usage; LOCAL_BUNDLE=$1;;
   --payload)
@@ -1461,6 +1557,10 @@ ptxray_defs_require_identity \
 ptxray_defs_resolve_cache || exit 3
 
 case "$MODE" in
+  --flrtvc-update|--flrtvc-cache|--flrtvc-local)
+    ptxray_defs_flrtvc "${MODE#--flrtvc-}" "$PAYLOAD_SOURCE" "$LOCAL_BUNDLE" \
+      || { ptxray_defs_error 'pinned FLRTVC acquisition failed; no engine staged successfully'; exit 3; }
+    ;;
   --status)
     if [ -e "$PTXRAY_DEFS_CACHE/current" ] \
         && ptxray_defs_cache_file_identity "$PTXRAY_DEFS_CACHE/current" >/dev/null; then

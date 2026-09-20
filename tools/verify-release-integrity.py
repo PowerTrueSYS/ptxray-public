@@ -805,8 +805,78 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def validate_composed(args: argparse.Namespace) -> int:
+    """Keep the legacy CLI while applying the composed eight-payload contract."""
+    import importlib.util
+    import tempfile
+    spec = importlib.util.spec_from_file_location("composed_proof", Path(__file__).with_name("verify-composed-release.py"))
+    proof = importlib.util.module_from_spec(spec)
+    saved_bytecode_policy = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(proof)
+    finally:
+        sys.dont_write_bytecode = saved_bytecode_policy
+    try:
+        root = args.repo_root
+        proof.require_regular_nonsymlink(root / "catalog.json", "catalog")
+        catalog = proof.load_json(root / "catalog.json", "catalog")
+        if catalog.get("tool_version") != args.tag[1:]:
+            raise proof.ProofError("catalog version differs from release tag")
+        checks = catalog.get("checks", [])
+        if not checks or type(catalog.get("check_count")) is not int or catalog.get("check_count") != len(checks):
+            raise proof.ProofError("catalog check count mismatch")
+        seen = set()
+        for entry in checks:
+            relative = entry.get("artifact", "")
+            if relative != f"checks/{entry.get('id')}/{entry.get('id')}.ksh" or relative in seen or ".." in PurePosixPath(relative).parts:
+                raise proof.ProofError("invalid or duplicate catalog artifact")
+            seen.add(relative)
+            path = root / relative
+            component = path
+            while component != root:
+                if component.is_symlink():
+                    raise proof.ProofError("symlink in catalog artifact path")
+                component = component.parent
+            if proof.sha256_release_file(path, relative) != entry.get("sha256"):
+                raise proof.ProofError(f"catalog digest mismatch: {relative}")
+            if proof.payload_version(path, "AIXRAY_STANDALONE_VERSION", allow_unquoted=False) != args.tag[1:]:
+                raise proof.ProofError(f"catalog artifact version mismatch: {relative}")
+        actual = {p.relative_to(root).as_posix() for p in (root / "checks").glob("*/*.ksh")}
+        if actual != seen:
+            raise proof.ProofError("catalog does not exactly cover public checks")
+        for field, relative in (("assembled_scanner", "aixray-scan.ksh"), ("review_pack", "ptxray-review-pack.sh"), ("review_validator", "ptxray-review-validate.awk")):
+            metadata = catalog.get(field, {})
+            if metadata.get("artifact") != relative:
+                raise proof.ProofError(f"catalog {field} artifact mismatch")
+            proof.require_regular_nonsymlink(root / relative, relative)
+            if metadata.get("sha256") != proof.sha256_release_file(root / relative, relative):
+                raise proof.ProofError(f"catalog {field} digest mismatch")
+        # Tree-only validation gets an exact asset directory; no root checkout
+        # extras are mistaken for upload assets. Source paths are checked before copy.
+        with tempfile.TemporaryDirectory(prefix="ptxray-release-integrity-") as temp:
+            assets = args.assets_dir
+            if assets is None:
+                assets = Path(temp)
+                for name in proof.release_asset_names_for_version(args.tag[1:]):
+                    proof.require_regular_nonsymlink(root / name, name)
+                    shutil.copyfile(root / name, assets / name)
+            count = proof.validate_release_manifest_mode(argparse.Namespace(
+                tag=args.tag, tagged_tree=root, release_assets=assets,
+                release_manifest=root / "SHA256SUMS", unsigned_preparation=False,
+            ))
+        print(f"release-integrity: PASS: {args.tag} ({count} signed composed payloads)")
+        return 0
+    except (proof.ProofError, OSError, ValueError, KeyError) as exc:
+        print(f"release-integrity: FAIL: {exc}", file=sys.stderr)
+        return 1
+
+
 def main() -> int:
     args = parse_args()
+    match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", args.tag)
+    if match and tuple(map(int, match.groups())) >= (1, 7, 0):
+        return validate_composed(args)
     validator = Validator(
         tag=args.tag,
         root=args.repo_root,

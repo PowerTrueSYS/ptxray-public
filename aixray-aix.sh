@@ -1,6 +1,16 @@
 #!/bin/ksh
 # Operator one-shot: exec dest doors. Do not inline their bodies.
 set -u
+PATH=/usr/bin:/bin:/etc:/usr/sbin:/sbin
+export PATH
+unset ENV BASH_ENV CDPATH
+unset OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+unset OPENSSL_TRACE OPENSSL_MALLOC_FD OPENSSL_MALLOC_FAILURES
+unset OPENSSL_MALLOC_SEED CTLOG_FILE RANDFILE
+unset LIBPATH LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT SHLIB_PATH
+unset LDR_PRELOAD LDR_PRELOAD64
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
 LC_ALL=C
 export LC_ALL
 
@@ -34,15 +44,19 @@ if [ -n "$USAGE_GROUPS" ]; then
 else
   COMPLIANCE_USAGE=
 fi
+# network-lint: allow-next=8 -- usage text documents dependencies of separate connected acquisition
 USAGE='usage: aixray-scan [--html] [--pdf] [--tty] [--json]'"$COMPLIANCE_USAGE"' [--out DIR] [--no-menu] [--flrtvc-report FILE] [--offline | --definitions-bundle FILE] [--currency-status] [--flrt-export DIR]
   --out DIR                   writes reports and scan.ptx
-  --flrtvc-report FILE        feeds the report cve pillar as the emitter --exposure
+  --flrtvc-report FILE         uses a completed compact report instead of running IBM FLRTVC
   --offline                   cache-only air-gapped run (/var/ptxray/definitions)
   --definitions-bundle FILE   feeds the currency producer and the html defs provenance
+Assessment collects fileset and interim-fix inventory and runs IBM FLRTVC offline.
+The adjacent downloader acquires signed definitions and the pinned IBM engine before assessment.
+IBM FLRTVC requires native ksh93 and trusted OpenSSL; initial connected engine acquisition also requires curl and unzip.
 Every run assesses the operational pillars (OS/firmware currency, known vulnerabilities, resilience) in addition to the selected standard.
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE to point at definitions you copied in (air-gapped machines).'
 
-PTXRAY_RUNNER_VERSION="1.7.0"
+PTXRAY_RUNNER_VERSION="1.8.0"
 
 WANT_HTML=0
 WANT_PDF=0
@@ -53,6 +67,7 @@ NO_MENU=0
 COMPLIANCE=
 OUT_DIR=
 FLRTVC=
+FLRTVC_CLEAN=0
 BUNDLE=
 FLRT_DIR=
 DEFINITIONS_OFFLINE=0
@@ -283,7 +298,7 @@ fi
 # With --html the bundle is an input to the report, not a product of its own:
 # its status is rendered into the provenance stamp and the standalone
 # acquisition block is not produced. Only the no-report path publishes it.
-if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_HTML" -eq 0 ] && [ -z "$OUT_DIR" ]; then
+if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_ASSESS" -eq 0 ] && [ -z "$OUT_DIR" ]; then
   N_STDOUT=$((N_STDOUT + 1))
 fi
 if [ "$N_STDOUT" -gt 1 ]; then
@@ -294,7 +309,7 @@ fi
 # Scored PTXDOC (Blueprint feed) when --out is set on an assessment that
 # has a definitions bundle. HTML already produces it; --json --out must too.
 WANT_PTXDOC=0
-if [ -n "$OUT_DIR" ] && [ "$WANT_ASSESS" -eq 1 ] && [ "$WANT_DEFS" -eq 1 ]; then
+if [ -n "$OUT_DIR" ] && [ "$WANT_ASSESS" -eq 1 ]; then
   WANT_PTXDOC=1
 fi
 
@@ -369,38 +384,26 @@ function require_render_door {
 }
 
 function resolve_ptxray_defs {
-  # Beside the runner, then beside the monolith, then on PATH.
-  typeset d p
-  if [ -f "$HERE/ptxray-defs.sh" ]; then
-    printf '%s\n' "$HERE/ptxray-defs.sh"
-    return 0
-  fi
-  if [ -f "$HERE/../ptxray-defs.sh" ]; then
-    printf '%s\n' "$HERE/../ptxray-defs.sh"
-    return 0
-  fi
-  for d in "$HERE" "$HERE/.." "$HERE/../.."; do
-    if [ -f "$d/ptxray-aix.sh" ] && [ -f "$d/ptxray-defs.sh" ]; then
-      printf '%s\n' "$d/ptxray-defs.sh"
-      return 0
-    fi
-  done
-  p=$(command -v ptxray-defs.sh 2>/dev/null) || p=
-  if [ -n "$p" ] && [ -f "$p" ]; then
-    printf '%s\n' "$p"
-    return 0
-  fi
-  oIFS=$IFS
-  IFS=:
-  for d in $PATH; do
-    IFS=$oIFS
-    if [ -n "$d" ] && [ -f "$d/ptxray-defs.sh" ]; then
-      printf '%s\n' "$d/ptxray-defs.sh"
-      return 0
-    fi
-  done
-  IFS=$oIFS
-  return 1
+  # Only the source checkout or extracted same-release bundle supplies code.
+  typeset runtime pin candidate
+  case "$HERE" in
+    */tools.d/runner/scan)
+      runtime=$HERE/../../lib/flrtvc-runtime.ksh
+      pin=$HERE/../../../dist/data/definitions-downloader.sha256
+      candidate=$HERE/../../../ptxray-defs.sh
+      ;;
+    *)
+      runtime=$HERE/../lib/flrtvc-runtime.ksh
+      pin=$HERE/../data/definitions-downloader.sha256
+      candidate=$HERE/../../ptxray-defs.sh
+      ;;
+  esac
+  [ -f "$runtime" ] && [ ! -L "$runtime" ] || return 1
+  . "$runtime" || return 1
+  fv_stage_downloader "$candidate" "$pin" "$WORKDIR" || {
+    echo 'aixray-scan: same-release definitions downloader or digest pin is unsafe; helper not executed' >&2
+    return 1
+  }
 }
 
 function take_bundle {
@@ -556,9 +559,6 @@ function consume_verified_generation {
     cand=$(defs_snapshot_bundle "$defs_sh" "$gen") || cand=
   fi
   if [ -z "$cand" ]; then
-    cand=$(defs_noncache_path "$status_file") || cand=
-  fi
-  if [ -z "$cand" ]; then
     return 2
   fi
   take_bundle "$cand" "$origin"
@@ -571,14 +571,6 @@ function acquire_definitions {
   # --offline: ptxray-defs.sh --cache. Empty or unverified cache is a typed
   # refusal naming --definitions-bundle. --definitions-bundle FILE: that file.
   typeset defs_sh rc
-  if [ -n "$BUNDLE" ]; then
-    DEFS_SOURCE=bundled
-    WANT_DEFS=1
-    if [ -n "$OUT_DIR" ] && [ "$WANT_ASSESS" -eq 1 ]; then
-      WANT_PTXDOC=1
-    fi
-    return 0
-  fi
   if ! defs_sh=$(resolve_ptxray_defs); then
     if [ "$DEFINITIONS_OFFLINE" -eq 1 ]; then
       echo "aixray-scan: --offline: ptxray-defs.sh not found; supply --definitions-bundle FILE" >&2
@@ -587,6 +579,20 @@ function acquire_definitions {
     echo "render: --html needs --definitions-bundle FILE (the report stamps definition provenance); PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE to point at definitions you copied in (air-gapped machines)." >&2
     echo "aixray-scan: ptxray-defs.sh not found; use --definitions-bundle FILE or --offline" >&2
     exit 4
+  fi
+  if [ -n "$BUNDLE" ]; then
+    invoke_ptxray_defs "$defs_sh" "$WORKDIR/defs-status.out" "$WORKDIR/defs-status.err" --local "$BUNDLE"
+    rc=$?
+    if [ "$rc" -eq 0 ]; then
+      consume_verified_generation "$defs_sh" "$WORKDIR/defs-status.out" local
+      rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
+      cat "$WORKDIR/defs-status.err" >&2
+      echo "aixray-scan: local signed definitions could not be verified and snapshotted" >&2
+      exit 4
+    fi
+    return 0
   fi
   if [ "$DEFINITIONS_OFFLINE" -eq 1 ]; then
     invoke_ptxray_defs "$defs_sh" "$WORKDIR/defs-status.out" "$WORKDIR/defs-status.err" --cache
@@ -686,18 +692,90 @@ function definitions_selector_menu {
   esac
 }
 
-# --- menu (zero-arg, stdin+stdout TTY): definitions selector, then compose ---
+# Interactive scans enter the same complete assessment pipeline as CLI scans.
 if [ "$MENU_MODE" -eq 1 ]; then
   definitions_selector_menu
-  COMPOSE=$(resolve_door compose.ksh ../../compose/aixray/run.ksh ../compose/aixray.ksh)
-  require_door "$COMPOSE"
-  ksh "$COMPOSE"
-  rc=$?
-  exit "$rc"
+  [ -z "$BUNDLE" ] || DEFINITIONS_BUNDLE_SEEN=1
+  printf 'Assessment standard (%s) [all]: ' "$USAGE_GROUPS" >&2
+  IFS= read -r COMPLIANCE || exit 2
+  [ -n "$COMPLIANCE" ] || COMPLIANCE=all
+  case "|$USAGE_GROUPS|" in
+    *"|$COMPLIANCE|"*) ;;
+    *) echo "aixray-scan: unknown assessment standard" >&2; exit 2 ;;
+  esac
+  DEFAULT_OUT=./ptxray-report-$(date +%Y%m%d-%H%M%S)-$$
+  printf 'Report directory [%s]: ' "$DEFAULT_OUT" >&2
+  IFS= read -r OUT_DIR || exit 2
+  [ -n "$OUT_DIR" ] || OUT_DIR=$DEFAULT_OUT
+  case "$OUT_DIR" in -*) OUT_DIR=./$OUT_DIR ;; esac
+  umask 077
+  mkdir -p "$OUT_DIR" || exit 2
+  WANT_ASSESS=1
+  WANT_HTML=1
+  WANT_PDF=1
+  WANT_JSON=1
+  WANT_PTXDOC=1
 fi
+
+function acquire_flrtvc {
+  typeset defs_sh mode rc
+  [ -z "$FLRTVC" ] || return 0
+  defs_sh=$(resolve_ptxray_defs) || return 4
+  mode=--flrtvc-update
+  if [ "$DEFINITIONS_OFFLINE" -eq 1 ] || [ "$DEFINITIONS_BUNDLE_SEEN" -eq 1 ]; then
+    mode=--flrtvc-cache
+  fi
+  mkdir "$WORKDIR/engine" || return 1
+  invoke_ptxray_defs "$defs_sh" "$WORKDIR/engine-status.out" "$WORKDIR/engine-status.err" "$mode" "$WORKDIR/engine"
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ ! -s "$WORKDIR/engine/flrtvc.ksh" ]; then
+    cat "$WORKDIR/engine-status.err" >&2
+    echo "aixray-scan: verified IBM FLRTVC engine unavailable; report not produced" >&2
+    echo "aixray-scan: for offline use, stage the pinned engine with ptxray-defs.sh --flrtvc-local ENGINE PRIVATE_DIRECTORY first" >&2
+    return 4
+  fi
+}
+
+function run_flrtvc {
+  typeset capture lslpp emgr rc
+  if [ -n "$FLRTVC" ]; then
+    cp "$FLRTVC" "$WORKDIR/flrtvc-report.txt" || return 1
+    FLRTVC=$WORKDIR/flrtvc-report.txt
+    ksh "$FLRTVC_RUN" --validate-report "$FLRTVC" || return 4
+    return 0
+  fi
+  capture=$WORKDIR/flrt-input
+  mkdir "$capture" || return 1
+  ksh "$FLRT" --out "$capture" >"$WORKDIR/flrt-export.out" || return 4
+  set -- "$capture"/*.lslpp.txt
+  [ "$#" -eq 1 ] && [ -f "$1" ] || return 4
+  lslpp=$1
+  set -- "$capture"/*.emgr.txt
+  [ "$#" -eq 1 ] && [ -f "$1" ] || return 4
+  emgr=$1
+  ksh "$FLRTVC_RUN" --engine "$WORKDIR/engine/flrtvc.ksh" \
+    --apar-csv "$WORKDIR/defs-snap/ibm-apar-csv.csv" \
+    --lslpp "$lslpp" --emgr "$emgr" --provenance-out "$WORKDIR/flrtvc-producer.tsv" >"$WORKDIR/flrtvc-report.txt"
+  rc=$?
+  if [ "$rc" -ne 0 ] || [ ! -s "$WORKDIR/flrtvc-report.txt" ]; then
+    echo "aixray-scan: IBM FLRTVC did not complete; report not produced" >&2
+    return 4
+  fi
+  FLRTVC=$WORKDIR/flrtvc-report.txt
+}
 
 # --- resolve every selected mode's doors before any exec ---
 if [ "$WANT_ASSESS" -eq 1 ]; then
+  FLRTVC_RUN=$(resolve_door flrtvc-run.ksh ../../flrtvc-run/run.ksh)
+  FLRT=$(resolve_door flrt-export.ksh ../../flrt-export/run.ksh)
+  CVE_TABLE_PARSE=$(resolve_door cve-table-parse.ksh ../../cve-table/parse/run.ksh)
+  require_door "$FLRTVC_RUN"
+  require_door "$FLRT"
+  require_door "$CVE_TABLE_PARSE"
+  CUR_PRODUCER=$(resolve_door currency-producer.ksh ../../currency/producer/run.ksh)
+  CUR_EVAL=$(resolve_door currency-evaluate.ksh ../../currency/evaluate/run.ksh)
+  require_door "$CUR_PRODUCER"
+  require_door "$CUR_EVAL"
   COMPOSE=$(resolve_door compose.ksh ../../compose/aixray/run.ksh ../compose/aixray.ksh)
   FACT_PROBE=$(resolve_door fact-probe.ksh ../../probe/facts/run.ksh)
   FACT_IDENTITY=$(resolve_door fact-identity.ksh ../../facts/identity/run.ksh)
@@ -756,6 +834,8 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
     # is a typed refusal, not a silent empty provenance stamp.
     DEF_EVAL_FOR_HTML=$(resolve_door definitions-evaluate.ksh ../../definitions/evaluate/run.ksh)
     require_door "$DEF_EVAL_FOR_HTML"
+    DEF_MERGE_CURRENCY=$(resolve_door definitions-merge-currency.ksh ../../definitions/merge-currency/run.ksh)
+    require_door "$DEF_MERGE_CURRENCY"
     # The report renders currency controls, so the producer + evaluate pair is
     # resolved for this lane too; the pair itself runs once, below, whether or
     # not the standalone --currency-status lane is selected.
@@ -791,7 +871,7 @@ if [ "$WANT_CURRENCY" -eq 1 ]; then
   require_door "$CUR_TEXT"
   require_door "$CUR_HTML"
 fi
-if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_HTML" -eq 0 ]; then
+if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_ASSESS" -eq 0 ]; then
   DEF_PARSE=$(resolve_door definitions-parse.ksh ../../definitions/parse/run.ksh)
   DEF_EVAL=$(resolve_door definitions-evaluate.ksh ../../definitions/evaluate/run.ksh)
   DEF_HTML=$(resolve_door definitions-acquisition-html.ksh ../../definitions/acquisition-html/run.ksh)
@@ -843,8 +923,18 @@ fi
 
 # HTML (and scored PTXDOC) need a definitions bundle. Default: download.
 # --offline: cache only. --definitions-bundle FILE: that file, no network.
-if [ "$WANT_HTML" -eq 1 ] || [ "$WANT_PTXDOC" -eq 1 ]; then
+if [ "$WANT_ASSESS" -eq 1 ]; then
   acquire_definitions
+  acquire_flrtvc || exit $?
+  run_flrtvc || exit $?
+  ksh "$CVE_TABLE_PARSE" --highest-cvss --flrtvc-report "$FLRTVC" >"$WORKDIR/exposure.tsv" || exit $?
+  if [ ! -s "$WORKDIR/exposure.tsv" ]; then
+    FLRTVC_CLEAN=1
+    echo '# clean FLRTVC report: no exposure rows' >"$WORKDIR/exposure.tsv"
+  fi
+  if [ -n "$OUT_DIR" ]; then
+    cp "$FLRTVC" "$OUT_DIR/flrtvc-report.txt" || exit 1
+  fi
 elif [ "$DEFINITIONS_OFFLINE" -eq 1 ] && [ "$WANT_CURRENCY" -eq 1 ]; then
   acquire_definitions
 fi
@@ -854,7 +944,7 @@ fi
 # evaluated currency state, so it is produced exactly once and shared. A
 # failing producer is a scan failure named on stderr, never a silent empty
 # file handed to the emitter.
-if [ "$WANT_HTML" -eq 1 ] || [ "$WANT_CURRENCY" -eq 1 ] || [ "$WANT_PTXDOC" -eq 1 ]; then
+if [ "$WANT_ASSESS" -eq 1 ] || [ "$WANT_CURRENCY" -eq 1 ]; then
   REGISTRY=$(resolve_data ../data/source-registry.json ../../../data/source-registry.json)
   if [ -n "$BUNDLE" ]; then
     ksh "$CUR_PRODUCER" --registry "$REGISTRY" --definitions-bundle "$BUNDLE" --out "$WORKDIR/producers.tsv"
@@ -866,10 +956,35 @@ if [ "$WANT_HTML" -eq 1 ] || [ "$WANT_CURRENCY" -eq 1 ] || [ "$WANT_PTXDOC" -eq 
     exit "$rc"
   fi
 
+  if [ -s "$WORKDIR/flrtvc-producer.tsv" ]; then
+    awk -F '\t' -v sidecar="$WORKDIR/flrtvc-producer.tsv" '
+      BEGIN {
+        if ((getline row < sidecar) != 1 || split(row, f, "\t") != 10 ||
+            f[1] != "ibm-flrtvc" || f[2] != "true" ||
+            f[9] != "verified" || f[10] != "verified") exit 1
+        if ((getline extra < sidecar) != 0) exit 1
+        close(sidecar)
+      }
+      $1 == "ibm-flrtvc" { print row; found++; next }
+      { print }
+      END { if (found != 1) exit 1 }
+    ' "$WORKDIR/producers.tsv" >"$WORKDIR/producers-merged.tsv" || exit 4
+    mv "$WORKDIR/producers-merged.tsv" "$WORKDIR/producers.tsv" || exit 1
+  fi
+
   ksh "$CUR_EVAL" --in "$WORKDIR/producers.tsv" --out "$WORKDIR/state.tsv"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     exit "$rc"
+  fi
+fi
+
+# A zero-row report can establish absence only for current advisory data.
+# Compare its own vintage as well: a new bundle cannot freshen an old import.
+if [ "$FLRTVC_CLEAN" -eq 1 ]; then
+  if ! ksh "$FLRTVC_RUN" --validate-clean "$FLRTVC" --currency-state "$WORKDIR/state.tsv"; then
+    echo "aixray-scan: current matching APAR data is required for a clean conclusion; report not produced" >&2
+    exit 4
   fi
 fi
 
@@ -973,6 +1088,11 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
     if [ "$rc" -ne 0 ]; then
       exit "$rc"
     fi
+    if [ -s "$WORKDIR/flrtvc-producer.tsv" ]; then
+      ksh "$DEF_MERGE_CURRENCY" --defs "$WORKDIR/status.json" --state "$WORKDIR/state.tsv" \
+        >"$WORKDIR/status-merged.json" || exit $?
+      mv "$WORKDIR/status-merged.json" "$WORKDIR/status.json" || exit 1
+    fi
     stamp_defs_status "$WORKDIR/status.json" "$DEFS_SOURCE"
 
     # Currency state came from the single producer+evaluate run above; it is
@@ -1001,19 +1121,6 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
       # A live FLRTVC report feeds the emitter's cve pillar as --exposure.
       # Without one the emitter emits its typed NOT_ASSESSED; no empty
       # exposure file is ever created.
-      ksh "$CVE_TABLE_PARSE" --flrtvc-report "$FLRTVC" >"$WORKDIR/exposure.tsv"
-      rc=$?
-      if [ "$rc" -ne 0 ]; then
-        exit "$rc"
-      fi
-      # A clean report (header + "No vulnerabilities" only) parses to zero
-      # bytes. The emitter reads an empty exposure file as a broken pipeline
-      # (NOT_ASSESSED) and a non-empty file with no data rows as determinate
-      # absence (PASS); stamp the successful no-row parse so it can never be
-      # mistaken for a pipeline that produced nothing.
-      if [ ! -s "$WORKDIR/exposure.tsv" ]; then
-        echo '# clean FLRTVC report: no exposure rows' > "$WORKDIR/exposure.tsv"
-      fi
       ksh "$RENDER_EMITTER" \
         --envelope "$EMIT_ENVELOPE" \
         --facts "$DEST" \
@@ -1095,9 +1202,9 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
 
   if [ "$WANT_JSON" -eq 1 ]; then
     if [ -n "$OUT_DIR" ]; then
-      ksh "$REPORT_JSON" --in "$WORKDIR/envelope.json" --out "$OUT_DIR/report.json"
+      ksh "$REPORT_JSON" --in "$WORKDIR/envelope.json" --exposure "$WORKDIR/exposure.tsv" --out "$OUT_DIR/report.json"
     else
-      ksh "$REPORT_JSON" --in "$WORKDIR/envelope.json"
+      ksh "$REPORT_JSON" --in "$WORKDIR/envelope.json" --exposure "$WORKDIR/exposure.tsv"
     fi
     rc=$?
     if [ "$rc" -ne 0 ]; then
@@ -1107,11 +1214,14 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
 fi
 
 if [ "$WANT_CVE" -eq 1 ]; then
-  if [ -n "$OUT_DIR" ]; then
-    ksh "$CVE_TABLE" --flrtvc-report "$FLRTVC" --out "$OUT_DIR/cve-table.html"
-  else
-    ksh "$CVE_TABLE" --flrtvc-report "$FLRTVC"
+  set -- --flrtvc-report "$FLRTVC"
+  if [ "$WANT_ASSESS" -eq 1 ]; then
+    set -- "$@" --highest-cvss
   fi
+  if [ -n "$OUT_DIR" ]; then
+    set -- "$@" --out "$OUT_DIR/cve-table.html"
+  fi
+  ksh "$CVE_TABLE" "$@"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     exit "$rc"
@@ -1166,7 +1276,7 @@ if [ "$WANT_CURRENCY" -eq 1 ]; then
   fi
 fi
 
-if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_HTML" -eq 0 ]; then
+if [ "$WANT_DEFS" -eq 1 ] && [ "$WANT_ASSESS" -eq 0 ]; then
   ksh "$DEF_PARSE" --bundle "$BUNDLE" --out "$WORKDIR/parsed.json"
   rc=$?
   if [ "$rc" -ne 0 ]; then

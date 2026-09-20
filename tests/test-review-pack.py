@@ -13,13 +13,11 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCANNER = ROOT / "ptxray-aix.sh"
 REVIEW_HELPER = ROOT / "ptxray-review-pack.sh"
 REVIEW_VALIDATOR = ROOT / "ptxray-review-validate.awk"
-FIXTURE_ROOT = os.environ.get("AIXRAY_FIXTURE_ROOT")
-FIXTURE = Path(FIXTURE_ROOT) if FIXTURE_ROOT else None
 REVIEW_FIXTURES = ROOT / "tests" / "fixtures" / "review-pack"
 FROZEN = "2026-07-01"
+THEME_SCRIPT = "<script>\n" + (REVIEW_FIXTURES / "theme-script.js").read_text() + "</script>"
 MAP_WARNING = (
     "# DO NOT SEND THIS FILE — local decode key"
 )
@@ -40,10 +38,11 @@ def profile_report() -> str:
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="aixray-report-version" content="1">
-<meta name="aixray-privacy-schema" content="1">
+<meta name="aixray-privacy-schema" content="2">
 <meta name="aixray-report-date" content="2026-07-20">
 <meta name="aixray-report-host" content="prod-aix01">
 <title>PTxray — prod-aix01</title>
+{THEME_SCRIPT}
 <style>@page{{@top-left{{content:"PTxray · prod-aix01"}}@top-right{{content:"2026-07-20"}}}}</style>
 </head><body>
 <div class="meta" data-aixray-field="observed" data-aixray-location="report:host"><b>Host:</b> prod-aix01; hostname=prod-aix01; Node name: node-west-02; LPAR name: finance-lpar-7</div>
@@ -120,7 +119,9 @@ class ReviewPackTests(unittest.TestCase):
     def copy_review_fixture(self, directory: Path, name: str) -> Path:
         source = REVIEW_FIXTURES / name
         report = directory / name
-        report.write_bytes(source.read_bytes())
+        content = source.read_text()
+        content = content.replace("</head>", THEME_SCRIPT + "</head>", 1)
+        report.write_text(content)
         return report
 
     def read_failure_manifest(self, directory: Path) -> str:
@@ -153,6 +154,17 @@ class ReviewPackTests(unittest.TestCase):
             self.assertNotIn(token, mappings)
             mappings[token] = value
         return mappings
+
+    def test_current_composed_schema1_report_is_explicitly_refused(self):
+        with tempfile.TemporaryDirectory(prefix="ptxray-schema1-refusal-") as temp:
+            directory = Path(temp)
+            report = self.write_profile(directory)
+            report.write_text(report.read_text().replace('name="aixray-privacy-schema" content="2"', 'name="aixray-privacy-schema" content="1"'))
+            result, html, mapping = self.run_review(report)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("privacy schema 2 is required", result.stderr)
+            self.assertIsNone(html)
+            self.assertIsNone(mapping)
 
     def test_full_profile_redacts_identifiers_and_untyped_diagnostics(
         self,
@@ -566,68 +578,29 @@ class ReviewPackTests(unittest.TestCase):
                 )
                 self.assertEqual([report], sorted(directory.iterdir()))
 
-    @unittest.skipUnless(
-        os.environ.get("AIXRAY_FIXTURE_ROOT"),
-        "set AIXRAY_FIXTURE_ROOT to run scanner fixture test",
-    )
-    def test_current_scanner_fixture_is_redacted_under_real_ksh(self) -> None:
-        assert FIXTURE is not None
-        self.assertTrue(FIXTURE.is_dir(), f"fixture is missing: {FIXTURE}")
-        with tempfile.TemporaryDirectory(prefix="aixray-review-rendered-") as temp:
+    def test_current_bundled_report_is_refused_without_output(self):
+        import json
+        import tarfile
+        version = json.loads((ROOT / "catalog.json").read_text())["tool_version"]
+        with tempfile.TemporaryDirectory(prefix="ptxray-composed-review-") as temp:
             directory = Path(temp)
-            env = os.environ.copy()
-            env["AIXRAY_FIXTURES"] = f"{FIXTURE}/"
-            env["AIXRAY_TODAY"] = FROZEN
-            rendered = subprocess.run(
-                ["ksh", str(SCANNER), "--html"],
-                cwd=directory,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=False,
-            )
+            with tarfile.open(ROOT / f"ptxray-report-aix-{version}.tar") as archive:
+                source = archive.extractfile("dist/render/render-shell/run.ksh").read()
+            renderer = directory / "render-shell.ksh"
+            renderer.write_bytes(source)
+            fixture = "#PTXDOC 1.0.0\nBEGIN\tSCAN\nscan.host\ttest.example.invalid\nscan.platform\taix\nscan.started_utc\t2026-07-01T00:00:00Z\nEND\tSCAN\n"
+            rendered = subprocess.run(["ksh", str(renderer)], input=fixture, capture_output=True, text=True)
             self.assertEqual(0, rendered.returncode, rendered.stderr)
-            report = directory / "aixray-lab-host-01-2026-07-01.html"
-            report.write_text(rendered.stdout, encoding="utf-8")
-
+            self.assertIn('name="aixray-privacy-schema" content="1"', rendered.stdout)
+            report = directory / "report.html"
+            report.write_text(rendered.stdout)
+            original = report.read_bytes()
             result, review_path, map_path = self.run_review(report)
-
-            self.assertEqual(0, result.returncode, result.stderr)
-            self.assertIsNotNone(review_path)
-            self.assertIsNotNone(map_path)
-            if review_path is None or map_path is None:
-                return
-            source = report.read_text(encoding="utf-8")
-            review = review_path.read_text(encoding="utf-8")
-            self.assertIn("lab-host-01", source)
-            self.assertNotIn("lab-host-01", review)
-            self.assertIn("host-A", review)
-            for keep in (
-                "7300-04-00-2546",
-                FROZEN,
-                "VL950_168",
-                "NOT_ASSESSED",
-                "mksysb_age",
-                "FAIL",
-                "WARN",
-                "PASS",
-                "65%",
-                "57",
-            ):
-                with self.subTest(keep=keep):
-                    self.assertIn(keep, source)
-                    self.assertEqual(source.count(keep), review.count(keep))
-            # Strict top-risk evidence removal can remove incidental copies of
-            # these short digit substrings. Exact diagnostic KEEP preservation
-            # is covered by KEEP_FRAGMENT and the rich fixture above.
-            for short_keep in ("21", "9"):
-                with self.subTest(short_keep=short_keep):
-                    self.assertIn(short_keep, source)
-                    self.assertIn(short_keep, review)
-            self.assertIn(":root", review)
-            self.assertIn("rootvg", review)
-            self.assertIn("review@powertruesystems.com", review)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("privacy schema 2 is required", result.stderr)
+            self.assertIsNone(review_path)
+            self.assertIsNone(map_path)
+            self.assertEqual(original, report.read_bytes())
 
 
 if __name__ == "__main__":
