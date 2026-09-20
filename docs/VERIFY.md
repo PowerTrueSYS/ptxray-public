@@ -1,4 +1,4 @@
-# Verify PTxray 1.8.0 before privileged execution
+# Verify PTxray 1.8.1 before privileged execution
 
 The product is the complete report bundle for your platform. A top-level runner alone lacks its tool tree. Verify the exact signed release before extracting the bundle or executing any of its programs. The commands below run on an administration workstation with Git, GitHub CLI, Python 3 and OpenSSL; they are not assessment-host runtime requirements.
 
@@ -13,10 +13,10 @@ sha256:c2fa7dc69be3dead5e196eca6a9c48ece42a7105eb9f56ab9f620bd0c6c617bd
 Download the tagged source and release assets into new directories:
 
 ```sh
-git clone --depth 1 --branch v1.8.0 https://github.com/PowerTrueSYS/ptxray-public.git ptxray-1.8.0
-mkdir ptxray-1.8.0-assets
-gh release download v1.8.0 --repo PowerTrueSYS/ptxray-public --dir ptxray-1.8.0-assets
-cd ptxray-1.8.0-assets
+git clone --depth 1 --branch v1.8.1 https://github.com/PowerTrueSYS/ptxray-public.git ptxray-1.8.1
+mkdir ptxray-1.8.1-assets
+gh release download v1.8.1 --repo PowerTrueSYS/ptxray-public --dir ptxray-1.8.1-assets
+cd ptxray-1.8.1-assets
 openssl pkey -pubin -in POWERTRUE-RELEASE-PUBLIC.pem -outform DER | openssl dgst -sha256
 ```
 
@@ -37,18 +37,18 @@ sha256sum -c SHA256SUMS
 Require every entry to pass. The following additional repository verifier cross-checks the tagged tree, separate catalog, and downloaded assets. Its source is obtained through GitHub; it is not itself authenticated by the payload manifest:
 
 ```sh
-cd ../ptxray-1.8.0
-python3 tools/verify-release-integrity.py --tag v1.8.0 --repo-root "$PWD" --assets-dir "$PWD/../ptxray-1.8.0-assets"
+cd ../ptxray-1.8.1
+python3 tools/verify-release-integrity.py --tag v1.8.1 --repo-root "$PWD" --assets-dir "$PWD/../ptxray-1.8.1-assets"
 ```
 
 Inspect that verifier before executing it. It checks the trusted signature, exact manifest/tree/asset hashes, version declarations, runner alias identity, catalog identity, and required bundle contents. It rejects missing or tampered payloads and unsafe archive members. A successful verifier does not establish that the program is free of defects; inspect the code and its declared command surface too.
 
 ## Exact release assets
 
-The v1.8.0 release has eleven assets:
+The v1.8.1 release has eleven assets:
 
-- `ptxray-report-aix-1.8.0.tar`
-- `ptxray-report-ibmi-1.8.0.tar`
+- `ptxray-report-aix-1.8.1.tar`
+- `ptxray-report-ibmi-1.8.1.tar`
 - `aixray-scan.ksh`
 - `aixray-aix.sh` (byte-identical compatibility name for the AIX runner)
 - `ibmi-scan.ksh`

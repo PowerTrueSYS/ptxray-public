@@ -1,6 +1,6 @@
 # Security and trust model
 
-PTxray 1.8.0 is an inspectable assessment for AIX and IBM i. The product entry points are the runners inside the complete signed report bundles. AIX requires root; IBM i requires QSECOFR as session and effective user. VIOS assessment is disabled pending live acceptance.
+PTxray 1.8.1 is an inspectable assessment for AIX and IBM i. The product entry points are the runners inside the complete signed report bundles. AIX requires root; IBM i requires QSECOFR as session and effective user. VIOS assessment is disabled pending live acceptance.
 
 ## Assessment boundary
 

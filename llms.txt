@@ -4,13 +4,13 @@
 
 Canonical page: https://powertruesystems.com/ptxray/
 Source repository: https://github.com/PowerTrueSYS/ptxray-public
-Published version: 1.8.0
-Release: https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.0
+Published version: 1.8.1
+Release: https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.1
 License: Apache-2.0
 
 ## Acquisition and execution
 
-Download and verify the complete signed release. Extract ptxray-report-aix-1.8.0.tar or ptxray-report-ibmi-1.8.0.tar. The bundled runners are the product entry points; top-level runner copies need the full extracted tool tree.
+Download and verify the complete signed release. Extract ptxray-report-aix-1.8.1.tar or ptxray-report-ibmi-1.8.1.tar. The bundled runners are the product entry points; top-level runner copies need the full extracted tool tree.
 
 AIX: create report/, then run ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report. Requires root, native ksh93, supported OpenSSL, and curl/unzip for connected acquisition. IBM FLRTVC runs offline on fresh fileset/interim-fix inventory after separate acquisition. The complete IBM report and exposure rows are preserved.
 

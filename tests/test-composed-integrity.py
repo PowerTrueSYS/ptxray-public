@@ -15,7 +15,7 @@ class ComposedBundleTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.path = Path(self.tmp.name) / "ptxray-report-aix-1.8.0.tar"
+        self.path = Path(self.tmp.name) / "ptxray-report-aix-1.8.1.tar"
         self.members = {
             "README-REPORT.md": b"Run dist/tools/aixray-scan.ksh",
             "dist/tools/aixray-scan.ksh": b"#!/bin/ksh\nexit 0\n",

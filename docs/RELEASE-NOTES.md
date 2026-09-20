@@ -1,6 +1,17 @@
 # Release notes
 
-<!-- PTXRAY-PUBLICATION-READY:v1.8.0 -->
+<!-- PTXRAY-PUBLICATION-READY:v1.8.1 -->
+
+## v1.8.1
+
+This release closes three IBM i evidence gaps while preserving local, read-only assessment.
+
+- **SMB protocol policy:** reads current and pending NetServer flags on IBM i 7.4 and 7.5 using IBM's documented local query. Reports SMB1 permitted by configuration as a finding. Its temporary report is held locally and removed using its exact spool identity; cleanup failures are disclosed.
+- **SMTP relay policy:** reads current relay and authentication settings through IBM's prompt-override retrieval API. Recognizes authentication overrides without opening an SMTP connection or executing a configuration change.
+- **CVE applicability:** uses explicit product-to-PTF mappings from IBM bulletins and a complete local software-product inventory. A vulnerability tied to an absent product is counted as not applicable, separately from installed fixes. Missing, damaged, or incomplete inventory cannot establish absence.
+
+The complete report bundles retain HTML, JSON, structured assessment output, and IBM i Blueprint output. Missing or ambiguous evidence still produces an explicit refusal; manual benchmark coverage remains disclosed. AIX retains offline IBM FLRTVC assessment and complete exposure reporting.
+
 
 ## v1.8.0
 

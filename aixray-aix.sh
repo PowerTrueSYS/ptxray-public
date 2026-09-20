@@ -56,7 +56,7 @@ IBM FLRTVC requires native ksh93 and trusted OpenSSL; initial connected engine a
 Every run assesses the operational pillars (OS/firmware currency, known vulnerabilities, resilience) in addition to the selected standard.
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE to point at definitions you copied in (air-gapped machines).'
 
-PTXRAY_RUNNER_VERSION="1.8.0"
+PTXRAY_RUNNER_VERSION="1.8.1"
 
 WANT_HTML=0
 WANT_PDF=0

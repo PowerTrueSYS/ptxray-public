@@ -11,8 +11,8 @@ import tempfile
 import unittest
 ROOT = Path(__file__).resolve().parents[1]
 GATE = ROOT/'tools/verify-release-integrity.py'
-VERSION = '1.8.0'
-PAYLOADS = ('aixray-aix.sh','aixray-scan.ksh','ibmi-scan.ksh','ptxray-defs.sh','ptxray-review-pack.sh','ptxray-review-validate.awk','ptxray-report-aix-1.8.0.tar','ptxray-report-ibmi-1.8.0.tar')
+VERSION = '1.8.1'
+PAYLOADS = ('aixray-aix.sh','aixray-scan.ksh','ibmi-scan.ksh','ptxray-defs.sh','ptxray-review-pack.sh','ptxray-review-validate.awk','ptxray-report-aix-1.8.1.tar','ptxray-report-ibmi-1.8.1.tar')
 def sha(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 class ComposedReleaseIntegrityTests(unittest.TestCase):
     @classmethod
