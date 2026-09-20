@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.7.0"
+AIXRAY_STANDALONE_VERSION="1.8.0"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -759,12 +759,12 @@ set -A CR_LABEL 'IBM AIX lifecycle reference data' 'IBM security advisory seed' 
 set -A CR_CLASS 'advisory' 'advisory' 'cve' 'apar' 'advisory' 'flrt' 'flrt' 'benchmark' 'benchmark'
 set -A CR_REQUIRED '1' '1' '1' '1' '1' '1' '1' '1' '1'
 set -A CR_LOADED '1' '1' '0' '0' '0' '0' '0' '1' '1'
-set -A CR_VERSION 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
+set -A CR_VERSION 'sha256:66fcac3f58dd3fab703b73d8a660efaa28b97e17c700a238079368d880142daa' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'v1.2.0' 'V3R3'
 set -A CR_VERSION_BASIS 'content-sha256' 'content-sha256' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'publisher-version' 'publisher-version'
-set -A CR_AS_OF '2026-08-15' '2026-08-18' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
+set -A CR_AS_OF '2026-09-19' '2026-09-19' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' '2026-08-18' '2026-06-15'
 set -A CR_AS_OF_BASIS 'curator-verified' 'curator-review' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'curator-verified' 'publisher-benchmark-date'
-set -A CR_SHA256 'sha256:60fd717d0f4cd79875654d7be134baf47453b36f4ace74f529394570dd4bd770' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:e4109ceb3a15beddbf1e84e29e593cd18cc260e9be1789429554b9d66e2cfeb9'
-set -A CR_LOCATOR 'https://www.ibm.com/support/pages/aix-standard-edition720 (no announced AIX 7.2 EOS shown; supported state is a curator inference from that absence); https://www.ibm.com/support/pages/aix-support-lifecycle-information (AIX 7.2 TL5 EoFS: To be determined)' 'embedded SEC_APARS table' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'https://public.dhe.ibm.com/services/us/igsc/PSP/xmldoc.xml' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'https://esupport.ibm.com/customercare/flrt/report?format=json&plat=power&ucode=ptxray' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
+set -A CR_SHA256 'sha256:66fcac3f58dd3fab703b73d8a660efaa28b97e17c700a238079368d880142daa' 'sha256:ab3c95ca7fdc47ad68978930afcfd70d42eed0ea9580926ab44a0a775b30caed' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'sha256:3645a841eb8f05078a8c0a043f62ed200bd7483a578c615ea652c7f15f68bd3b' 'sha256:18c5220f95a0476c4e946c541a2a746a38beedaf0f10f2764a4308381b20e38c'
+set -A CR_LOCATOR 'https://www.ibm.com/support/pages/aix-support-lifecycle-information; https://www.ibm.com/support/pages/aix-standard-edition720 (7.2 EOS unannounced, TL5 TBD; SUPPORTED is curator inference); exact hardware lifecycle nodes cited in tools.d/checks/ck-hw-gen/run.ksh' 'https://esupport.ibm.com/customercare/flrt/doc?page=aparCSV (0.8.14, 2026.09.16; curator reviewed all 11 seed APAR/TL/CVE or HIPER mappings; feed sha256 c0360f3bf528daaf73bbdaf244b6cf20b8ad3d9d0e824b7d2cf96bf551b0d134)' 'operator-supplied local CISA KEV JSON' 'operator-supplied local apar.csv or provenanced FLRTVC report' 'https://public.dhe.ibm.com/services/us/igsc/PSP/xmldoc.xml' 'operator-supplied pinned flrtvc.ksh or provenanced report' 'https://esupport.ibm.com/customercare/flrt/report?format=json&plat=power&ucode=ptxray' 'embedded numeric-only CIS L1 crosswalk' 'embedded R_FILEPERM/R_SECATTR/R_NETTUNE/R_SVCOFF tables'
 set -A CR_THRESHOLD '30' '30' '30' '30' '30' '30' '30' '180' '180'
 set -A CR_INTEGRITY 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
 set -A CR_PROVENANCE 'verified' 'verified' 'unknown' 'unknown' 'unknown' 'unknown' 'unknown' 'verified' 'verified'
@@ -782,7 +782,7 @@ UC_UPGTEXT=""
 
 EOS_OS="
 7100|2023-04-30
-7200|2026-04-30
+7200|SUPPORTED
 7300|SUPPORTED
 "
 LATEST_TL="
@@ -795,7 +795,7 @@ TL_SUPPORT="
 7300-02|2026-11-30
 7300-01|2025-12-31
 7300-00|2024-12-31
-7200-05|2026-04-30
+7200-05|SUPPORTED
 "
 UPGRADE_PATH="
 7100|migration install to AIX 7.3 (nimadm or mksysb migrate); 7.1 cannot update_all across releases; check IBM FLRT for firmware/VIOS prerequisites first

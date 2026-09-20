@@ -2,6 +2,16 @@
 # Operator one-shot: compose IBM i doors and exec dest render doors.
 # Do not inline their bodies. ksh88 / PASE. ksh and POSIX awk only.
 set -u
+PATH=/QOpenSys/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/QOpenSys/pkgs/bin
+export PATH
+unset ENV BASH_ENV CDPATH
+unset OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+unset OPENSSL_TRACE OPENSSL_MALLOC_FD OPENSSL_MALLOC_FAILURES
+unset OPENSSL_MALLOC_SEED CTLOG_FILE RANDFILE
+unset LIBPATH LD_LIBRARY_PATH LD_PRELOAD LD_AUDIT SHLIB_PATH
+unset LDR_PRELOAD LDR_PRELOAD64
+unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+unset DYLD_FRAMEWORK_PATH DYLD_FALLBACK_FRAMEWORK_PATH
 LC_ALL=C
 export LC_ALL
 
@@ -31,17 +41,18 @@ fi
 # No resolver → no fabricated group list. Omit --compliance alts from
 # fallback usage; a supplied value is still rejected at parse (fail closed).
 if [ -n "$USAGE_GROUPS" ]; then
-  COMPLIANCE_USAGE=' --compliance '"$USAGE_GROUPS"
+  COMPLIANCE_USAGE=' [--compliance '"$USAGE_GROUPS"']'
 else
   COMPLIANCE_USAGE=
 fi
-USAGE='usage: ibmi-scan [--html] [--json]'"$COMPLIANCE_USAGE"' --out DIR [--offline | --definitions-bundle FILE]
+USAGE='usage: ibmi-scan [--html] [--json] [--all]'"$COMPLIANCE_USAGE"' --out DIR [--offline | --definitions-bundle FILE]
+  --all                        complete IBM i catalog (default); includes Level 1, Level 2, and operations
   --out DIR                    writes report.html, report.json, scan.ptx, ptxray-ibmi.json, facts, producers.tsv
   --offline                    cache-only air-gapped run (/var/ptxray/definitions)
   --definitions-bundle FILE    signed definitions envelope (air-gapped)
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE (air-gapped). DEFS rows come from the evaluate document. Every run assesses the currency pillar in addition to the selected standard; CIS Level 2 runs include the Level 1 controls.'
 
-PTXRAY_RUNNER_VERSION="1.7.0"
+PTXRAY_RUNNER_VERSION="1.8.0"
 
 WANT_HTML=0
 WANT_JSON=0
@@ -53,14 +64,27 @@ DEFS_OFFLINE_SEEN=0
 DEFS_BUNDLE_SEEN=0
 BUNDLE=
 DEFS_SOURCE=
+MENU_MODE=0
 
 if [ $# -eq 0 ]; then
-  echo "ibmi-scan: $USAGE" >&2
-  exit 2
+  if [ -t 0 ] && [ -t 1 ]; then
+    MENU_MODE=1
+  else
+    echo "ibmi-scan: $USAGE" >&2
+    exit 2
+  fi
 fi
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --all)
+      if [ -n "$COMPLIANCE" ]; then
+        echo "ibmi-scan: choose either --all or --compliance" >&2
+        exit 2
+      fi
+      COMPLIANCE=all
+      shift
+      ;;
     --html)
       if [ "$WANT_HTML" -eq 1 ]; then
         echo "ibmi-scan: $USAGE" >&2
@@ -134,12 +158,49 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ "$MENU_MODE" -eq 1 ]; then
+  printf '%s\n' \
+    'PTxray downloads signed definitions before assessment. The assessment itself uses local evidence.' \
+    '  1. Update signed definitions now (default)' \
+    '  2. Use the last valid signed cache' \
+    '  3. Use a local signed definitions bundle' >&2
+  printf 'Definitions [1]: ' >&2
+  IFS= read -r MENU_ANSWER || exit 2
+  case "${MENU_ANSWER:-1}" in
+    1) ;;
+    2) DEFS_OFFLINE=1 ;;
+    3)
+      printf 'Local signed bundle path: ' >&2
+      IFS= read -r DEFS_BUNDLE || exit 2
+      [ -n "$DEFS_BUNDLE" ] || exit 2
+      ;;
+    *) echo 'ibmi-scan: choose 1, 2, or 3' >&2; exit 2 ;;
+  esac
+  printf 'Assessment standard (%s) [all]: ' "$USAGE_GROUPS" >&2
+  IFS= read -r COMPLIANCE || exit 2
+  [ -n "$COMPLIANCE" ] || COMPLIANCE=all
+  case "|$USAGE_GROUPS|" in
+    *"|$COMPLIANCE|"*) ;;
+    *) echo 'ibmi-scan: unknown assessment standard' >&2; exit 2 ;;
+  esac
+  DEFAULT_OUT=./ptxray-ibmi-report-$(date +%Y%m%d-%H%M%S)-$$
+  printf 'Report directory [%s]: ' "$DEFAULT_OUT" >&2
+  IFS= read -r OUT_DIR || exit 2
+  [ -n "$OUT_DIR" ] || OUT_DIR=$DEFAULT_OUT
+  case "$OUT_DIR" in -*) OUT_DIR=./$OUT_DIR ;; esac
+  umask 077
+  mkdir -p "$OUT_DIR" || exit 2
+  WANT_HTML=1
+  WANT_JSON=1
+fi
+
 if [ "$DEFS_OFFLINE" -eq 1 ] && [ -n "$DEFS_BUNDLE" ]; then
   echo 'ibmi-scan: --offline conflicts with --definitions-bundle' >&2
   exit 2
 fi
 
-if [ -z "$COMPLIANCE" ] || [ -z "$OUT_DIR" ]; then
+[ -n "$COMPLIANCE" ] || COMPLIANCE=all
+if [ -z "$OUT_DIR" ]; then
   echo "ibmi-scan: $USAGE" >&2
   exit 2
 fi
@@ -221,42 +282,26 @@ function refuse {
 }
 
 function resolve_ptxray_defs {
-  # Beside the runner, then beside the IBM i (or AIX) monolith, then on PATH.
-  typeset d p oIFS
-  if [ -f "$HERE/ptxray-defs.sh" ]; then
-    printf '%s\n' "$HERE/ptxray-defs.sh"
-    return 0
-  fi
-  if [ -f "$HERE/../ptxray-defs.sh" ]; then
-    printf '%s\n' "$HERE/../ptxray-defs.sh"
-    return 0
-  fi
-  for d in "$HERE" "$HERE/.." "$HERE/../.."; do
-    if [ -f "$d/ptxray-ibmi.sh" ] && [ -f "$d/ptxray-defs.sh" ]; then
-      printf '%s\n' "$d/ptxray-defs.sh"
-      return 0
-    fi
-    if [ -f "$d/ptxray-aix.sh" ] && [ -f "$d/ptxray-defs.sh" ]; then
-      printf '%s\n' "$d/ptxray-defs.sh"
-      return 0
-    fi
-  done
-  p=$(command -v ptxray-defs.sh 2>/dev/null) || p=
-  if [ -n "$p" ] && [ -f "$p" ]; then
-    printf '%s\n' "$p"
-    return 0
-  fi
-  oIFS=$IFS
-  IFS=:
-  for d in $PATH; do
-    IFS=$oIFS
-    if [ -n "$d" ] && [ -f "$d/ptxray-defs.sh" ]; then
-      printf '%s\n' "$d/ptxray-defs.sh"
-      return 0
-    fi
-  done
-  IFS=$oIFS
-  return 1
+  # Only the source checkout or extracted same-release bundle supplies code.
+  typeset runtime pin candidate
+  case "$HERE" in
+    */tools.d/ibmi/scan)
+      runtime=$HERE/../../lib/flrtvc-runtime.ksh
+      pin=$HERE/../../../dist/data/definitions-downloader.sha256
+      candidate=$HERE/../../../ptxray-defs.sh
+      ;;
+    *)
+      runtime=$HERE/../lib/flrtvc-runtime.ksh
+      pin=$HERE/../data/definitions-downloader.sha256
+      candidate=$HERE/../../ptxray-defs.sh
+      ;;
+  esac
+  [ -f "$runtime" ] && [ ! -L "$runtime" ] || return 1
+  . "$runtime" || return 1
+  fv_stage_downloader "$candidate" "$pin" "$WORKDIR" || {
+    echo 'ibmi-scan: same-release definitions downloader or digest pin is unsafe; helper not executed' >&2
+    return 1
+  }
 }
 
 function take_bundle {
@@ -708,7 +753,7 @@ function jesc(s) {
 }
 BEGIN {
   printf "{\n  \"partition_name\": \"%s\",\n  \"frame_serial\": \"%s\",\n  \"machine_type\": \"%s\",\n  \"platform\": \"ibmi\"\n}\n", \
-    jesc(host), jesc(serial), jesc(model)
+    jesc(host), jesc(serial), jesc(model) # network-lint: allow -- awk host variable, not a DNS client invocation
 }
 ' > "$OUT_DIR/fact-identity.json" || refuse "cannot write $OUT_DIR/fact-identity.json"
 

@@ -4,10 +4,10 @@
   "@id": "https://powertruesystems.com/ptxray/#software",
   "name": "PTxray",
   "alternateName": "PTxray AIX and IBM i posture assessment",
-  "description": "The PTxray 1.6.0 published release for IBM AIX and IBM i. Its separate signed-definitions downloader can make disclosed HTTPS requests and write a protected local cache before assessment; assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host. The VIOS lane remains disabled pending live acceptance.",
+  "description": "PTxray 1.8.0 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.6.0",
+  "softwareVersion": "1.8.0",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -16,8 +16,8 @@
     "IBM i 7.4",
     "IBM i 7.5"
   ],
-  "programmingLanguage": "KornShell (ksh88-compatible AIX /bin/sh; IBM i PASE ksh)",
-  "softwareRequirements": "IBM AIX 7.2 or 7.3 with AIX /bin/sh; AIX requires root. IBM i 7.4 or 7.5 uses PASE ksh and IBM i requires QSECOFR as both session and system user. The VIOS lane is disabled pending live acceptance. Keep the same-release digest-bound ptxray-defs.sh adjacent to the runner. Assessment probes require no network access; connected definitions updates require fixed-path curl and OpenSSL.",
+  "programmingLanguage": "KornShell; AIX FLRTVC requires native ksh93; IBM i uses PASE ksh",
+  "softwareRequirements": "AIX 7.2 or 7.3 with root, native ksh93 and supported OpenSSL; connected acquisition also needs curl and unzip. IBM i 7.4 or 7.5 requires PASE ksh and QSECOFR as session and effective user; see the bundle README for SQL services and tools. Extract the complete signed report bundle. VIOS assessment is disabled.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",
@@ -26,20 +26,15 @@
     "url": "https://powertruesystems.com"
   },
   "featureList": [
-    "Assessment changes no system configuration and performs no remediation",
-    "Assessment execution makes no network calls and sends no assessment data or telemetry away from the host",
-    "PTxray 1.6 AIX requires root; IBM i requires QSECOFR; VIOS is not yet enabled",
-    "The runner verifies and invokes the separate adjacent same-release digest-bound ptxray-defs.sh before assessment",
-    "Connected mode attempts to download current signed definitions by default; --offline uses signed cache; --definitions-bundle imports a local signed bundle and adjacent signature",
-    "Old or stale definitions produce an explicit age warning",
-    "Air-gapped assessment execution is supported with a valid signed cache or local signed bundle",
-    "HTML and JSON reports",
-    "Supported compliance-oriented views",
-    "Explicit NOT_ASSESSED status for unavailable evidence",
-    "DISA STIG for IBM AIX 7.x coverage is partial: 66 distinct rule V-IDs receive an engine verdict; this count is not a single-release coverage fraction; V-215399 covers only the clean_partial_conns tunable, not its package-commit condition; deferred V-215429 is not counted",
-    "260 CIS L1-aligned checks across NFS exports, password hashing, file ownership and permissions, and network tunables, plus login policy, auditing, cron and at, home directories, system accounts and the r-command services, resolving to 209 distinct Level 1 control numbers of the 212 in CIS IBM AIX 7 Benchmark v1.2.0; 5.1.4, 5.1.5 and 7.1 are not claimed; alignment only",
-    "IBM i edition (ptxray-ibmi.sh) is graded against the CIS IBM i V7R4M0 / V7R5M0 Benchmark v2.1.0 on IBM i 7.4 and 7.5: 76 of 89 CIS Level 1 controls receive an automated verdict on 7.5, and 73 of 88 on 7.4. Uncovered Level 1 controls are CIS-manual or not-yet-implemented and are disclosed rather than silently dropped (registry as_of 2026-08-19). There is no DISA STIG for IBM i",
-    "585 standalone check tools with machine-readable manifests"
+    "Read-only assessment without network calls, remediation, or assessment-data upload",
+    "Complete AIX and IBM i report bundles with HTML and JSON outputs",
+    "Automatic offline IBM FLRTVC execution on AIX after separate verified engine and definition acquisition",
+    "Full IBM i catalog selection with explicit CIS L1 and L2 subsets",
+    "Protected same-package definitions helper verified against its SHA-256 pin before execution",
+    "Offline assessments use verified cached or locally transferred signed inputs",
+    "Unavailable evidence remains NOT_ASSESSED; stale data cannot support a clean vulnerability conclusion",
+    "Platform-specific standards alignment and disclosed coverage, not compliance certification",
+    "585 standalone check tools with machine-readable command manifests"
   ],
   "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [

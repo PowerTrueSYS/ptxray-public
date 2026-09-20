@@ -3077,6 +3077,7 @@ function load_finding_label_contract() {
   FINDING_LABEL["root_su_restrict"] = "Restrict su to root"
   FINDING_LABEL["rootvg_mirror"] = "rootvg redundancy"
   FINDING_LABEL["rootvg_quorum"] = "rootvg quorum"
+  FINDING_LABEL["savevg_datavg"] = "savevg evidence (datavg)"
   FINDING_LABEL["sea_failover"] = "SEA failover posture"
   FINDING_LABEL["sec_apars"] = "Tracked security APARs"
   FINDING_LABEL["secure_by_default"] = "Secure by Default installation"
@@ -3110,10 +3111,209 @@ function load_finding_label_contract() {
   FINDING_LABEL["ssl_ssh"] = "OpenSSH / OpenSSL levels"
   FINDING_LABEL["ssp_cluster"] = "Shared Storage Pool cluster"
   FINDING_LABEL["stale_privileged_accounts"] = "Stale privileged accounts"
+  FINDING_LABEL["stig_able_control_ability_remote"] = "Remote login control for users"
+  FINDING_LABEL["stig_accounts_assigned_unique_user"] = "All accounts have unique User Identification Numbers"
+  FINDING_LABEL["stig_aixmibd_daemon_disabled"] = "aixmibd SNMP MIB sub-agent disabled"
+  FINDING_LABEL["stig_audio_dev_group"] = "Audio device group ownership"
+  FINDING_LABEL["stig_audit_bin_stanza"] = "Audit bin storage action"
+  FINDING_LABEL["stig_audit_boot"] = "AIX must start audit at boot."
+  FINDING_LABEL["stig_audit_capacity"] = "Audit trail storage capacity"
+  FINDING_LABEL["stig_audit_config_perms"] = "The AIX audit configuration files must be owned by root"
+  FINDING_LABEL["stig_audit_config_perms_audit_configuration"] = "The AIX audit configuration files must be group-owned by audit."
+  FINDING_LABEL["stig_audit_config_perms_audit_configuration_files_set"] = "The AIX audit configuration files must be set to 640 or less permissive"
+  FINDING_LABEL["stig_audit_freespace"] = "Audit filesystem freespace reserve"
+  FINDING_LABEL["stig_audit_log_perms"] = "Audit logs on the AIX system must be owned by root."
+  FINDING_LABEL["stig_audit_log_perms_audit_logs"] = "Audit log group ownership"
+  FINDING_LABEL["stig_audit_log_perms_audit_logs_set_660"] = "Audit logs on the AIX system must be set to 660 or less permissive."
+  FINDING_LABEL["stig_audit_objects"] = "Audit record generation"
+  FINDING_LABEL["stig_audit_records"] = "Audit records content"
+  FINDING_LABEL["stig_audit_records_002005"] = "auditpr -helRtcp displays the status (result) column for every audit record in the configured trail"
+  FINDING_LABEL["stig_audit_records_002006"] = "AIX must produce audit records containing the full-text recording of privileged commands."
+  FINDING_LABEL["stig_audit_records_produce_audit"] = "AIX audit records establish where events occurred"
+  FINDING_LABEL["stig_audit_records_produce_audit_records_containing"] = "AIX must produce audit records containing information to establish the source and the identity of any individual or process associated with an event"
+  FINDING_LABEL["stig_audit_role"] = "Audit configuration role (ISSO/SA)"
+  FINDING_LABEL["stig_audit_rotation"] = "AIX audit logs rotated daily"
+  FINDING_LABEL["stig_audit_tool_perms"] = "AIX audit tools owner"
+  FINDING_LABEL["stig_audit_tool_perms_audit_tools"] = "AIX audit tools group ownership"
+  FINDING_LABEL["stig_audit_tool_perms_audit_tools_set_4550"] = "AIX audit tool permissions"
+  FINDING_LABEL["stig_audit_tools_present"] = "Audit record filtering and reduction utility"
+  FINDING_LABEL["stig_audit_tools_present_provide_report"] = "Audit report generation utility"
+  FINDING_LABEL["stig_audit_tools_tsd"] = "Audit tool hash verification"
+  FINDING_LABEL["stig_automated_file_mounting_tool"] = "Automated file system mounting tool disabled"
+  FINDING_LABEL["stig_automatically_lock_after_15"] = "CDE inactivity lock after 15 minutes"
+  FINDING_LABEL["stig_automatically_remove_disable_emergency"] = "Emergency accounts removed or disabled after crisis"
+  FINDING_LABEL["stig_automatically_remove_disable_temporary"] = "Temporary user account removal or disablement"
+  FINDING_LABEL["stig_bash_logout"] = "AIX must display logout messages for bash users"
+  FINDING_LABEL["stig_bootlist_modes"] = "AIX system boot device"
+  FINDING_LABEL["stig_bootlist_modes_use_removable"] = "AIX bootlist does not use removable media"
+  FINDING_LABEL["stig_cde_conceal_via_session"] = "CDE session lock conceals display"
+  FINDING_LABEL["stig_cde_dod_banner"] = "CDE DoD login banner"
+  FINDING_LABEL["stig_cde_xlock"] = "AIX CDE must provide the xlock command for session locking"
+  FINDING_LABEL["stig_cron_allow_sysaccounts"] = "Default system accounts in cron.allow/cron.deny"
+  FINDING_LABEL["stig_csh_logout"] = "csh/tcsh logout message"
+  FINDING_LABEL["stig_default_route6"] = "Default IPv6 gateway"
+  FINDING_LABEL["stig_devfile_worldwrite"] = "device file world-write"
+  FINDING_LABEL["stig_dhcp_client_disabled"] = "The AIX DHCP client must be disabled"
+  FINDING_LABEL["stig_dhcp_enabled_network_dhcprd"] = "DHCP daemon dhcprd starts at boot"
+  FINDING_LABEL["stig_dhcp_server_required_dhcp"] = "DHCP server disabled unless required"
+  FINDING_LABEL["stig_dhcp_updatedns"] = "DHCP client dynamic DNS updates"
+  FINDING_LABEL["stig_efs"] = "Encrypted File System for information at rest"
+  FINDING_LABEL["stig_efs_encrypt_user"] = "AIX EFS encryption of user data at rest"
+  FINDING_LABEL["stig_enhanced_rbac"] = "Enhanced RBAC state"
+  FINDING_LABEL["stig_failedlogin_symlink"] = "Unsuccessful remote login recording"
   FINDING_LABEL["stig_fileperms"] = "STIG file permissions"
+  FINDING_LABEL["stig_files_directories_have_valid"] = "Files and directories with a valid group owner"
+  FINDING_LABEL["stig_forward_absent"] = "Forward file (.forward)"
+  FINDING_LABEL["stig_globalinit_ldr_preload"] = "Global initialization file LDR_PRELOAD lists"
+  FINDING_LABEL["stig_globalinit_path"] = "Global init PATH entries"
+  FINDING_LABEL["stig_group_acl"] = "Group database extended ACL"
+  FINDING_LABEL["stig_have_accounts_configured_blank"] = "Interactive accounts with blank passwords"
+  FINDING_LABEL["stig_home_file_groups"] = "Home directory file group ownership"
+  FINDING_LABEL["stig_home_group"] = "Home directory group ownership"
+  FINDING_LABEL["stig_hosts_lpd_plus"] = "AIX hosts.lpd file must not contain a + character"
+  FINDING_LABEL["stig_icmp_timestamp_filter"] = "AIX must not process ICMP timestamp requests"
+  FINDING_LABEL["stig_inn_disabled"] = "INN server disabled"
+  FINDING_LABEL["stig_interactive_users_assigned_home"] = "interactive users have assigned, existing home directories"
+  FINDING_LABEL["stig_interactive_users_home_directories"] = "interactive users home directories"
+  FINDING_LABEL["stig_ipsec_default_deny"] = "IPsec default deny-all filter"
+  FINDING_LABEL["stig_ipv6_utilized_server_autoconf6"] = "IPv6 autoconf6 daemon state"
+  FINDING_LABEL["stig_ksh_logout"] = "Bourne/ksh logout messages"
+  FINDING_LABEL["stig_ldap_bindpwd"] = "LDAP bind/SSL key passwords in ldap.cfg"
+  FINDING_LABEL["stig_ldap_cachetimeout"] = "LDAP client user and group cache refresh"
+  FINDING_LABEL["stig_ldap_ssl"] = "LDAP SSL/TLS server certificate validation"
+  FINDING_LABEL["stig_ldap_ssl_ldap_authentication"] = "LDAP client SSL enforcement"
+  FINDING_LABEL["stig_ldap_ssl_ldap_used"] = "LDAP client uses SSL for LDAP authentication"
+  FINDING_LABEL["stig_ldap_ssl_only_allow"] = "LDAP SSL DoD PKI CAs only"
+  FINDING_LABEL["stig_ldd_mode"] = "ldd command disabled"
+  FINDING_LABEL["stig_lib_acl"] = "Extended ACLs on system library files"
+  FINDING_LABEL["stig_lib_mode"] = "AIX library files mode"
+  FINDING_LABEL["stig_limit_number_concurrent_sessions"] = "Concurrent session limit (maxulogs)"
+  FINDING_LABEL["stig_lock_cmd"] = "Lock command present"
+  FINDING_LABEL["stig_lock_cmd_configured_allow"] = "Session lock command configured and allowed"
+  FINDING_LABEL["stig_logfile_acl"] = "AIX log file extended ACLs"
+  FINDING_LABEL["stig_logfile_mode"] = "AIX log file mode"
+  FINDING_LABEL["stig_logfile_owner"] = "AIX log file owner is a system account"
+  FINDING_LABEL["stig_logfile_owner_log_files"] = "AIX log files system group"
+  FINDING_LABEL["stig_lppchk_cron"] = "AIX lppchk daily cron"
+  FINDING_LABEL["stig_lsitab_lpd"] = "lpd daemon disabled"
+  FINDING_LABEL["stig_lsitab_piobe"] = "piobe inittab entry"
+  FINDING_LABEL["stig_lsitab_qdaemon"] = "qdaemon inittab entry"
+  FINDING_LABEL["stig_mesg_n"] = "Global init files deny terminal write access (mesg n)"
+  FINDING_LABEL["stig_mfa_ca_file"] = "MFA server_ca.pem file"
+  FINDING_LABEL["stig_mfa_conf"] = "PowerSC Multi Factor Authentication configuration"
+  FINDING_LABEL["stig_mfa_filesets"] = "IBM PowerSC MFA filesets"
+  FINDING_LABEL["stig_mfa_hotplug"] = "PIV credential hotplug (bos.ahafs / pmfahotplugd)"
+  FINDING_LABEL["stig_mkuser_custom_absent"] = "mkuser.sys.custom must not exist"
+  FINDING_LABEL["stig_mkuser_pgrp"] = "Default primary group for new users"
+  FINDING_LABEL["stig_mkuser_sys_pristine"] = "Shipped mkuser.sys must not be customized"
+  FINDING_LABEL["stig_mount_nodev"] = "Removable and remote file systems nodev"
+  FINDING_LABEL["stig_ndpd_host_daemon_disabled"] = "IPv6 ndpd-host daemon state"
+  FINDING_LABEL["stig_ndpd_router_disabled"] = "ndpd-router daemon must be disabled"
   FINDING_LABEL["stig_nettune"] = "STIG network tunables"
+  FINDING_LABEL["stig_nfs_anon"] = "NFS anonymous UID and GID"
+  FINDING_LABEL["stig_nfs_nosuid"] = "NFS nosuid mount option"
+  FINDING_LABEL["stig_nis_domainname"] = "NIS domain name protection"
+  FINDING_LABEL["stig_nosuid_option_enabled_nfs"] = "NFS client nosuid option"
+  FINDING_LABEL["stig_openssl_version"] = "OpenSSL FIPS version floor"
+  FINDING_LABEL["stig_pam_rhosts"] = "PAM rhosts_auth support"
+  FINDING_LABEL["stig_pam_sshd_mfa"] = "sshd PAM multi-factor authentication"
+  FINDING_LABEL["stig_passwd_gid_defined"] = "AIX group identifiers referenced in /etc/passwd must be defined in /etc/group"
+  FINDING_LABEL["stig_passwd_nntp"] = "passwd.nntp file mode"
+  FINDING_LABEL["stig_passwd_shells"] = "Passwd shells listed in /etc/shells"
+  FINDING_LABEL["stig_plus_entries"] = "Passwd and group plus entries"
+  FINDING_LABEL["stig_protect_against_limit_effects"] = "DoS rate-limiting (clean_partial_conns)"
+  FINDING_LABEL["stig_pubdir_owner"] = "Public directory ownership"
+  FINDING_LABEL["stig_rc_ldr_preload"] = "Control script LDR_PRELOAD paths"
+  FINDING_LABEL["stig_rc_libpath"] = "AIX control scripts library search paths"
+  FINDING_LABEL["stig_rc_path"] = "Run control executable search paths"
+  FINDING_LABEL["stig_rcmd_binaries_mode"] = "Rcmd and telnet command binaries disabled" # network-lint: allow -- generated service-name label, not a command
+  FINDING_LABEL["stig_rds_unloaded"] = "RDS protocol disabled"
+  FINDING_LABEL["stig_reserved_gids"] = "Reserved GIDs for system accounts"
+  FINDING_LABEL["stig_reserved_uids"] = "UIDs reserved for system accounts"
+  FINDING_LABEL["stig_root_browser_dirs"] = "Root browser profile directories"
+  FINDING_LABEL["stig_root_ldr_preload"] = "Root LDR_PRELOAD list"
+  FINDING_LABEL["stig_root_net_login_sshd"] = "Root passwords never in network clear text"
+  FINDING_LABEL["stig_root_passwd_set"] = "Root password set"
+  FINDING_LABEL["stig_root_path_worldwrite"] = "Root PATH world-writable directories"
+  FINDING_LABEL["stig_root_rlogin"] = "Root account rlogin restriction"
+  FINDING_LABEL["stig_root_user_home_directory"] = "Root user home directory"
+  FINDING_LABEL["stig_roothome_acl"] = "Root home directory extended ACL"
+  FINDING_LABEL["stig_routing_daemons"] = "Routing protocol daemons not running"
+  FINDING_LABEL["stig_samba_absent"] = "Samba packages absent"
+  FINDING_LABEL["stig_sctp_absent"] = "SCTP disabled"
   FINDING_LABEL["stig_secattr"] = "STIG account policy"
+  FINDING_LABEL["stig_sed_mode"] = "Stack Execution Disable system-wide mode"
+  FINDING_LABEL["stig_sendmail_helpfile"] = "SMTP service HELP command"
+  FINDING_LABEL["stig_sendmail_loglevel"] = "Sendmail LogLevel"
+  FINDING_LABEL["stig_sendmail_version"] = "Sendmail DEBUG feature disabled"
+  FINDING_LABEL["stig_server_does_host_snmp"] = "dpid2 disabled when host does not host an SNMP agent"
+  FINDING_LABEL["stig_server_functioning_dns_server"] = "named daemon disabled when not a DNS server"
+  FINDING_LABEL["stig_server_functioning_multicast_router"] = "mrouted must be disabled when not a multicast router"
+  FINDING_LABEL["stig_ssh_clientalive"] = "SSH idle timeout interval"
+  FINDING_LABEL["stig_ssh_compression"] = "SSH daemon compression"
+  FINDING_LABEL["stig_ssh_daemon_configured_disable"] = "SSH daemon empty passwords disabled"
+  FINDING_LABEL["stig_ssh_daemon_configured_disable_ssh_daemon"] = "SSH daemon IgnoreRhosts"
+  FINDING_LABEL["stig_ssh_daemon_configured_only"] = "SSH daemon FIPS MACs"
+  FINDING_LABEL["stig_ssh_daemon_perform_strict"] = "SSH daemon StrictModes"
+  FINDING_LABEL["stig_ssh_dod_banner"] = "DoD SSH login banner"
+  FINDING_LABEL["stig_ssh_gssapi"] = "SSH GSSAPI authentication"
+  FINDING_LABEL["stig_ssh_hostbased"] = "SSH host-based authentication disabled"
+  FINDING_LABEL["stig_ssh_hostkey_mode"] = "SSH private host key file mode"
+  FINDING_LABEL["stig_ssh_kerberos"] = "SSH Kerberos authentication disabled"
+  FINDING_LABEL["stig_ssh_listenaddress"] = "SSH daemon listen addresses"
+  FINDING_LABEL["stig_ssh_privsep"] = "SSH daemon privilege separation"
+  FINDING_LABEL["stig_ssh_protocol2"] = "SSH server Protocol 2 only"
+  FINDING_LABEL["stig_ssh_revokedkeys"] = "SSH revoked public keys"
+  FINDING_LABEL["stig_ssh_rhostsrsa"] = "SSH RhostsRSAAuthentication"
+  FINDING_LABEL["stig_ssh_tcpforwarding"] = "SSH daemon TCP forwarding"
+  FINDING_LABEL["stig_ssh_tcpwrappers"] = "SSH daemon IP filtering (TCP wrappers)"
+  FINDING_LABEL["stig_ssh_verifyreversemapping"] = "SSH VerifyReverseMapping"
+  FINDING_LABEL["stig_ssh_x11forwarding"] = "SSH daemon X11 forwarding"
+  FINDING_LABEL["stig_sshd_active"] = "SSH server active for replay-resistant authentication"
+  FINDING_LABEL["stig_sshd_active_protect_confidentiality"] = "sshd active to protect transmitted information"
+  FINDING_LABEL["stig_sudo_authenticate"] = "sudo !authenticate option"
+  FINDING_LABEL["stig_sudo_nopasswd"] = "sudo NOPASSWD tag"
   FINDING_LABEL["stig_svcoff"] = "STIG disabled services"
+  FINDING_LABEL["stig_sysdir_acl"] = "System command directory extended ACLs"
+  FINDING_LABEL["stig_sysdump_null"] = "AIX kernel core dumps disabled unless needed"
+  FINDING_LABEL["stig_sysfile_group"] = "System files group-owned by a system group"
+  FINDING_LABEL["stig_sysfile_owner"] = "System file owner is a system account"
+  FINDING_LABEL["stig_syslog_daemon_accept_remote"] = "syslogd must not accept remote messages"
+  FINDING_LABEL["stig_syslog_mail_facility"] = "TCPD syslog mail facility"
+  FINDING_LABEL["stig_syslog_remote"] = "Remote syslog server"
+  FINDING_LABEL["stig_tcpwrappers_deny"] = "TCP wrappers hosts.deny ALL:ALL"
+  FINDING_LABEL["stig_telnet_subserver"] = "Telnet subserver must not be active"
+  FINDING_LABEL["stig_trustchk_kernext"] = "Trusted Execution Check policy"
+  FINDING_LABEL["stig_user_auth_type"] = "Multi-factor authentication type"
+  FINDING_LABEL["stig_user_core"] = "AIX process core dumps must be disabled"
+  FINDING_LABEL["stig_user_dictionlist"] = "Password dictionlist on default and every user"
+  FINDING_LABEL["stig_user_herald"] = "Standard Mandatory DoD Notice and Consent Banner"
+  FINDING_LABEL["stig_user_home_directories_have"] = "User home directory extended ACLs"
+  FINDING_LABEL["stig_user_loginretries"] = "Consecutive invalid login lock (loginretries)"
+  FINDING_LABEL["stig_user_maxage"] = "60-day maximum password lifetime (maxage)"
+  FINDING_LABEL["stig_user_maxrepeats"] = "Password consecutive repeating character limit (maxrepeats)"
+  FINDING_LABEL["stig_user_minage"] = "Minimum password lifetime (minage)"
+  FINDING_LABEL["stig_user_mindiff"] = "Password character-change minimum (mindiff)"
+  FINDING_LABEL["stig_user_mindigit"] = "Password numeric complexity (mindigit)"
+  FINDING_LABEL["stig_user_minlen"] = "Password minimum length (minlen)"
+  FINDING_LABEL["stig_user_minloweralpha"] = "$MLA_TITLE"
+  FINDING_LABEL["stig_user_minspecialchar"] = "Password minspecialchar on default and every user"
+  FINDING_LABEL["stig_user_minupperalpha"] = "Password uppercase character requirement"
+  FINDING_LABEL["stig_user_pwd_algorithm"] = "FIPS 140-2 approved password hashing algorithm"
+  FINDING_LABEL["stig_user_rlogin"] = "Direct logins to shared, default, application, and utility accounts"
+  FINDING_LABEL["stig_user_rlogin_isso"] = "Direct logins to ISSO/ISSM-managed shared, application, and utility accounts"
+  FINDING_LABEL["stig_user_shells"] = "The /etc/shells file must exist"
+  FINDING_LABEL["stig_user_system_attr"] = "AIX SYSTEM attribute must not be NONE"
+  FINDING_LABEL["stig_user_ttys"] = "Interactive user ttys value"
+  FINDING_LABEL["stig_user_umask"] = "Default user umask 077"
+  FINDING_LABEL["stig_userinit_ldr_preload"] = "Local init-file LDR_PRELOAD paths"
+  FINDING_LABEL["stig_userinit_libpath"] = "Local init-file library search paths"
+  FINDING_LABEL["stig_users_home_directories_have"] = "User home directory mode"
+  FINDING_LABEL["stig_usrck"] = "Unique account names"
+  FINDING_LABEL["stig_wall_present"] = "wall command present"
+  FINDING_LABEL["stig_worldwrite_objects"] = "World-writable objects confined to public directories"
+  FINDING_LABEL["stig_write_present"] = "write command present for currently logged-in users"
+  FINDING_LABEL["stig_wtmp_symlink"] = "wtmp is not a symlink"
   FINDING_LABEL["storage_layout"] = "Storage layout baseline"
   FINDING_LABEL["sudo_rbac"] = "Privilege delegation (sudo/RBAC)"
   FINDING_LABEL["sudo_syslog_priority"] = "sudo logging destination"
@@ -3254,8 +3454,8 @@ function load_renderer_finding_contract() {
     "rctcpip_mrouted rctcpip_named rctcpip_ndpd_router rctcpip_portmap " \
     "rctcpip_routed rctcpip_rwhod rctcpip_sendmail rctcpip_timed " \
     "remote_rcmd_filesets remote_syslog rhost_dotfiles_absent rhosts " \
-    "root_su_restrict rootvg_mirror rootvg_quorum sea_failover sec_apars " \
-    "secure_by_default sendmail_greeting sendmail_privacyoptions " \
+    "root_su_restrict rootvg_mirror rootvg_quorum savevg_datavg sea_failover " \
+    "sec_apars secure_by_default sendmail_greeting sendmail_privacyoptions " \
     "shell_timeout shell_timeout_readonly snapp_installed snmp_community " \
     "snmp_filesets_absent software_inventory ssh_access_lists ssh_banner " \
     "ssh_ciphers ssh_clientalive ssh_ignore_rhosts ssh_kexalgorithms " \
@@ -3263,10 +3463,87 @@ function load_renderer_finding_contract() {
     "ssh_packages_installed ssh_permitemptypasswords ssh_permitrootlogin " \
     "ssh_permituserenv ssh_rekeylimit ssh_rootlogin ssh_sftp_args " \
     "ssh_strictmodes sshd_version ssl_ssh ssp_cluster " \
-    "stale_privileged_accounts stig_fileperms stig_nettune stig_secattr " \
-    "stig_svcoff storage_layout sudo_rbac sudo_syslog_priority sudo_use_pty " \
-    "sudo_version suid_sgid suid_unexpected sysdump syslog_entries " \
-    "syslog_remote_host syslogd_inbound system_account_adm system_account_bin " \
+    "stale_privileged_accounts stig_able_control_ability_remote " \
+    "stig_accounts_assigned_unique_user stig_aixmibd_daemon_disabled " \
+    "stig_audio_dev_group stig_audit_bin_stanza stig_audit_boot " \
+    "stig_audit_capacity stig_audit_config_perms " \
+    "stig_audit_config_perms_audit_configuration " \
+    "stig_audit_config_perms_audit_configuration_files_set " \
+    "stig_audit_freespace stig_audit_log_perms " \
+    "stig_audit_log_perms_audit_logs stig_audit_log_perms_audit_logs_set_660 " \
+    "stig_audit_objects stig_audit_records stig_audit_records_002005 " \
+    "stig_audit_records_002006 stig_audit_records_produce_audit " \
+    "stig_audit_records_produce_audit_records_containing stig_audit_role " \
+    "stig_audit_rotation stig_audit_tool_perms " \
+    "stig_audit_tool_perms_audit_tools " \
+    "stig_audit_tool_perms_audit_tools_set_4550 stig_audit_tools_present " \
+    "stig_audit_tools_present_provide_report stig_audit_tools_tsd " \
+    "stig_automated_file_mounting_tool stig_automatically_lock_after_15 " \
+    "stig_automatically_remove_disable_emergency " \
+    "stig_automatically_remove_disable_temporary stig_bash_logout " \
+    "stig_bootlist_modes stig_bootlist_modes_use_removable " \
+    "stig_cde_conceal_via_session stig_cde_dod_banner stig_cde_xlock " \
+    "stig_cron_allow_sysaccounts stig_csh_logout stig_default_route6 " \
+    "stig_devfile_worldwrite stig_dhcp_client_disabled " \
+    "stig_dhcp_enabled_network_dhcprd stig_dhcp_server_required_dhcp " \
+    "stig_dhcp_updatedns stig_efs stig_efs_encrypt_user stig_enhanced_rbac " \
+    "stig_failedlogin_symlink stig_fileperms " \
+    "stig_files_directories_have_valid stig_forward_absent " \
+    "stig_globalinit_ldr_preload stig_globalinit_path stig_group_acl " \
+    "stig_have_accounts_configured_blank stig_home_file_groups " \
+    "stig_home_group stig_hosts_lpd_plus stig_icmp_timestamp_filter " \
+    "stig_inn_disabled stig_interactive_users_assigned_home " \
+    "stig_interactive_users_home_directories stig_ipsec_default_deny " \
+    "stig_ipv6_utilized_server_autoconf6 stig_ksh_logout stig_ldap_bindpwd " \
+    "stig_ldap_cachetimeout stig_ldap_ssl stig_ldap_ssl_ldap_authentication " \
+    "stig_ldap_ssl_ldap_used stig_ldap_ssl_only_allow stig_ldd_mode " \
+    "stig_lib_acl stig_lib_mode stig_limit_number_concurrent_sessions " \
+    "stig_lock_cmd stig_lock_cmd_configured_allow stig_logfile_acl " \
+    "stig_logfile_mode stig_logfile_owner stig_logfile_owner_log_files " \
+    "stig_lppchk_cron stig_lsitab_lpd stig_lsitab_piobe stig_lsitab_qdaemon " \
+    "stig_mesg_n stig_mfa_ca_file stig_mfa_conf stig_mfa_filesets " \
+    "stig_mfa_hotplug stig_mkuser_custom_absent stig_mkuser_pgrp " \
+    "stig_mkuser_sys_pristine stig_mount_nodev stig_ndpd_host_daemon_disabled " \
+    "stig_ndpd_router_disabled stig_nettune stig_nfs_anon stig_nfs_nosuid " \
+    "stig_nis_domainname stig_nosuid_option_enabled_nfs stig_openssl_version " \
+    "stig_pam_rhosts stig_pam_sshd_mfa stig_passwd_gid_defined " \
+    "stig_passwd_nntp stig_passwd_shells stig_plus_entries " \
+    "stig_protect_against_limit_effects stig_pubdir_owner stig_rc_ldr_preload " \
+    "stig_rc_libpath stig_rc_path stig_rcmd_binaries_mode stig_rds_unloaded " \
+    "stig_reserved_gids stig_reserved_uids stig_root_browser_dirs " \
+    "stig_root_ldr_preload stig_root_net_login_sshd stig_root_passwd_set " \
+    "stig_root_path_worldwrite stig_root_rlogin stig_root_user_home_directory " \
+    "stig_roothome_acl stig_routing_daemons stig_samba_absent " \
+    "stig_sctp_absent stig_secattr stig_sed_mode stig_sendmail_helpfile " \
+    "stig_sendmail_loglevel stig_sendmail_version stig_server_does_host_snmp " \
+    "stig_server_functioning_dns_server " \
+    "stig_server_functioning_multicast_router stig_ssh_clientalive " \
+    "stig_ssh_compression stig_ssh_daemon_configured_disable " \
+    "stig_ssh_daemon_configured_disable_ssh_daemon " \
+    "stig_ssh_daemon_configured_only stig_ssh_daemon_perform_strict " \
+    "stig_ssh_dod_banner stig_ssh_gssapi stig_ssh_hostbased " \
+    "stig_ssh_hostkey_mode stig_ssh_kerberos stig_ssh_listenaddress " \
+    "stig_ssh_privsep stig_ssh_protocol2 stig_ssh_revokedkeys " \
+    "stig_ssh_rhostsrsa stig_ssh_tcpforwarding stig_ssh_tcpwrappers " \
+    "stig_ssh_verifyreversemapping stig_ssh_x11forwarding stig_sshd_active " \
+    "stig_sshd_active_protect_confidentiality stig_sudo_authenticate " \
+    "stig_sudo_nopasswd stig_svcoff stig_sysdir_acl stig_sysdump_null " \
+    "stig_sysfile_group stig_sysfile_owner stig_syslog_daemon_accept_remote " \
+    "stig_syslog_mail_facility stig_syslog_remote stig_tcpwrappers_deny " \
+    "stig_telnet_subserver stig_trustchk_kernext stig_user_auth_type " \
+    "stig_user_core stig_user_dictionlist stig_user_herald " \
+    "stig_user_home_directories_have stig_user_loginretries stig_user_maxage " \
+    "stig_user_maxrepeats stig_user_minage stig_user_mindiff " \
+    "stig_user_mindigit stig_user_minlen stig_user_minloweralpha " \
+    "stig_user_minspecialchar stig_user_minupperalpha stig_user_pwd_algorithm " \
+    "stig_user_rlogin stig_user_rlogin_isso stig_user_shells " \
+    "stig_user_system_attr stig_user_ttys stig_user_umask " \
+    "stig_userinit_ldr_preload stig_userinit_libpath " \
+    "stig_users_home_directories_have stig_usrck stig_wall_present " \
+    "stig_worldwrite_objects stig_write_present stig_wtmp_symlink " \
+    "storage_layout sudo_rbac sudo_syslog_priority sudo_use_pty sudo_version " \
+    "suid_sgid suid_unexpected sysdump syslog_entries syslog_remote_host " \
+    "syslogd_inbound system_account_adm system_account_bin " \
     "system_account_daemon system_account_guest system_account_lpd " \
     "system_account_nobody system_account_nuucp system_account_sys " \
     "system_account_uucp system_accounts_ftpusers system_aslr " \
@@ -4907,7 +5184,30 @@ BEGIN {
   load_schema_contract()
   load_structural_contract()
   load_tokens()
-  CANONICAL_THEME_SCRIPT = "(function(){var stored=null;try{stored=localStorage['ptxray-theme'];}catch(e){}})();"
+  # BEGIN GENERATED CANONICAL THEME SCRIPT
+  CANONICAL_THEME_SCRIPT = ""
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "\n(function(){\n  var stored=null;\n  try{stored=localStorage['ptxray-theme'];}catc"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "h(e){}\n  function sys(){\n    return matchMedia('(prefers-color-scheme: dark)').m"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "atches?'dark':'light';\n  }\n  function resolved(){\n    return (stored==='light'||"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "stored==='dark')?stored:sys();\n  }\n  function labelFor(t){return t==='dark'?'Lig"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "ht':'Dark';}\n  function apply(){\n    var t=resolved();\n    document.documentElem"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "ent.dataset.theme=t;\n    var b=document.querySelector('.theme-toggle');\n    if(b"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT ") b.textContent=labelFor(t);\n  }\n  apply();\n  if(stored!=='light'&&stored!=='dar"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "k'){\n    try{\n      matchMedia('(prefers-color-scheme: dark)').addEventListener("
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "'change',function(){\n        if(stored!=='light'&&stored!=='dark') apply();\n    "
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "  });\n    }catch(e){}\n  }\n  function go(){var h=location.hash.slice(1);if(!h)ret"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "urn;var el=document.getElementById(h);if(!el)return;\n  var d=el.closest(\"details"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "\");while(d){d.open=true;d=d.parentElement&&d.parentElement.closest(\"details\");}\n"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "  el.scrollIntoView({block:\"start\"});}\n  function bind(){\n    var b=document.que"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "rySelector('.theme-toggle');\n    if(b){\n      b.textContent=labelFor(document.do"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "cumentElement.dataset.theme||resolved());\n      b.addEventListener('click',funct"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "ion(){\n        var next=document.documentElement.dataset.theme==='dark'?'light':"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "'dark';\n        document.documentElement.dataset.theme=next;\n        stored=next"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT ";\n        try{localStorage['ptxray-theme']=next;}catch(e){}\n        b.textConten"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "t=labelFor(next);\n      });\n    }\n    addEventListener(\"hashchange\",go);go();\n  "
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT "}\n  if(document.readyState==='loading') addEventListener('DOMContentLoaded',bind"
+  CANONICAL_THEME_SCRIPT = CANONICAL_THEME_SCRIPT ");\n  else bind();\n})();\n"
+  # END GENERATED CANONICAL THEME SCRIPT
 }
 
 {

@@ -31,14 +31,7 @@ jobs:
       - name: Run public tests
         run: sh tests/run-tests.sh
       - name: Enforce assessment and review no-egress surface
-        run: |
-          # ptxray-defs.sh is intentionally excluded: it is the separate,
-          # network-capable definitions downloader, not assessment execution.
-          set -- ptxray-aix.sh ptxray-ibmi.sh ptxray-review-pack.sh checks/*/*.ksh
-          if [ -f ptxray-review-validate.awk ]; then
-            set -- "$@" ptxray-review-validate.awk
-          fi
-          sh tools/ci/egress-lint.sh "$@"
+        run: python3 tests/check-packaged-egress.py
       - name: Reject redistributed IBM delivery data
         run: python3 tools/check-no-ibm-redistribution.py
 

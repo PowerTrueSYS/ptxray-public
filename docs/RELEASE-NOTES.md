@@ -1,5 +1,17 @@
 # Release notes
 
+<!-- PTXRAY-PUBLICATION-READY:v1.8.0 -->
+
+## v1.8.0
+
+- AIX report runs now acquire the pinned IBM FLRTVC engine separately, capture local fileset/interim-fix inventory, execute FLRTVC offline, and include validated exposure findings in HTML and JSON. The complete compact engine report is retained. Failed or incomplete engine execution cannot produce a completed assessment.
+- IBM i defaults to the complete 134-check selection, including both CIS levels and operational checks. Explicit narrower selections remain available. A missing Level 2 QRETSVRSEC check has been added with its distinct IBM i 7.4 requirement.
+- IBM i assessment no longer opens SMTP/SMB loopback sockets or queries the network-backed SYSTOOLS.GROUP_PTF_DETAILS view. Local evidence remains assessable; unavailable evidence is disclosed as NOT_ASSESSED. Partial and manual benchmark coverage remains explicit.
+- The review-copy helper has a verified packaged validator binding but refuses the current composed report format. Manually review and remove sensitive details before sharing a full report.
+- Fixed native AIX temporary-directory portability and IBM i trusted-path handling; packaged shared libraries and validator bindings are verified together with their callers.
+- Refreshed verified lifecycle/advisory sources and added support for CISA's optional forensic-triage field without accepting unknown schema fields. Upgrade to 1.8.0 before refreshing definitions that contain this newer CISA field; older helpers can reject the newer catalog. Unknown hardware models no longer produce a clean lifecycle verdict.
+- Updated public release verification for the composed report bundles, including signed payload identity and unsafe archive rejection. IBM FLRTVC and the APAR feed remain separately acquired and are not redistributed in these bundles.
+
 
 <!-- PTXRAY-PUBLICATION-READY:v1.7.0 -->
 
