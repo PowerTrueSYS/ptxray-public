@@ -104,3 +104,23 @@ See [SECURITY.md](SECURITY.md) for the trust boundary and private vulnerability-
 ## Release history
 
 For changes in each version, see the [release notes](docs/RELEASE-NOTES.md) and [GitHub releases](https://github.com/PowerTrueSYS/ptxray-public/releases).
+
+<!-- ptxray-release-artifacts:begin -->
+## Release artifacts
+
+The product entry points are the report runners inside the versioned report bundles, with these exact commands:
+
+AIX (`ptxray-report-aix-1.8.2.tar`):
+
+```sh
+ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out DIR
+```
+
+IBM i (`ptxray-report-ibmi-1.8.2.tar`):
+
+```sh
+ksh dist/tools/ibmi-scan.ksh --html --json --compliance all --out DIR
+```
+
+`aixray-scan.ksh` and `ibmi-scan.ksh` at the release top level are the same bytes as the runner inside the matching bundle, kept for the manifest; they do not run standalone outside an extracted bundle. Extract the matching bundle and run the runner above.
+<!-- ptxray-release-artifacts:end -->

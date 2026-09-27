@@ -1,0 +1,18 @@
+{
+  "id": "ck-npiv-maps",
+  "pillar": "resiliency",
+  "category": "storage",
+  "finding_ids": [
+    "npiv_maps"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsmap -all -npiv"
+  ],
+  "tags": [],
+  "blurb": "This check reads virtual FC (NPIV) mappings with ioscli lsmap -all -npiv and reports vfchost adapters that are not logged in to the fabric. No vfchost on a confirmed VIOS is not applicable. A failed lsmap is not assessed. The check never changes a mapping.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-npiv-maps/ck-npiv-maps.ksh"
+}

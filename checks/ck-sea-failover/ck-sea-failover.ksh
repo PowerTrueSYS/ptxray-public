@@ -7,7 +7,7 @@ set -u
 # whether private fixture hooks are active.
 PTXRAY_PRIVATE_TEST_BUILD=0
 if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
-  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
 fi
 
 # Match the monolith's guarded AIX command search path and parsing locale.
@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.1"
+AIXRAY_STANDALONE_VERSION="1.8.2"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -122,6 +122,16 @@ function aixv {
   "$@" 2>&1
 }
 
+# vios <capture_key> <ioscli-args...>
+# Live: /usr/ios/cli/ioscli. Fixture, capture, and rc behavior are aix()'s.
+# The absolute path is the probe. Do not prepend /usr/ios/cli onto PATH.
+function vios {
+  typeset key
+  key=$1
+  shift
+  aix "$key" /usr/ios/cli/ioscli "$@"
+}
+
 # aix_capture_missing <key> — fixture-replay helper: true (rc=0) iff no capture
 # exists for <key> at all, i.e. the rc a probe just received was the "no
 # capture" default and not a genuine command status. aix()/aixv() return 127 for
@@ -192,6 +202,8 @@ set -A F_SEV
 set -A F_OBS
 set -A F_MEAN
 set -A F_FIX
+set -A F_STATUS_BEFORE
+set -A F_NA_REASON
 NFIND=0
 
 function add {
@@ -676,8 +688,37 @@ function standalone_initialize {
   fi
 }
 
+# vios_role_classify — one marker read, the monolith rule.
+# rc 0 and exactly one matching row → vios; rc 2 and empty output → aix;
+# anything else → unknown. Sets ROLE, IS_VIOS, UC_IOSL on aix, and VIOS_MARKER_*.
+function vios_role_classify {
+  typeset marker rc rows match nonempty
+  marker=$(aix ls_ioscli ls /usr/ios/cli/ioscli)
+  rc=$?
+  rows=$(printf '%s\n' "$marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  match=${rows%%:*}
+  nonempty=${rows#*:}
+  VIOS_MARKER=$marker
+  VIOS_MARKER_RC=$rc
+  VIOS_MARKER_ROWS=$rows
+  VIOS_MARKER_MATCH=$match
+  VIOS_MARKER_NONEMPTY=$nonempty
+  if [ "$rc" -eq 0 ] && [ "$match" -eq 1 ] && [ "$nonempty" -eq 1 ]; then
+    IS_VIOS=1
+    ROLE=vios
+  elif [ "$rc" -eq 2 ] && [ "$nonempty" -eq 0 ]; then
+    IS_VIOS=0
+    ROLE=aix
+    UC_IOSL=NOT_APPLICABLE
+  else
+    IS_VIOS=0
+    ROLE=unknown
+  fi
+}
+
 function standalone_emit {
-  typeset i sep
+  typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
   printf '  "generated": "%s",\n' "$(printf '%s' "$NOW" | jesc)"
   printf '  "version": "%s",\n' "$AIXRAY_STANDALONE_VERSION"
@@ -690,7 +731,29 @@ function standalone_emit {
   while [ "$i" -lt "$NFIND" ]; do
     sep=','
     [ "$i" -eq $((NFIND - 1)) ] && sep=''
-    printf '    { "id": "%s", "category": "%s", "status": "%s", "severity": "%s", "observed": "%s", "meaning": "%s", "fix": "%s" }%s\n' \
+    # Extras stay off the id line unless the check set them. An unset
+    # LIVE_BRANCH omits live_branch and live_verified, so AIX findings
+    # that never set it stay the eight-field object.
+    extras=""
+    if [ -n "${LIVE_BRANCH:-}" ]; then
+      if [ -z "${AIXRAY_FIXTURES:-}" ]; then
+        live_verified=true
+      else
+        live_verified=false
+      fi
+      branch_esc=$(printf '%s' "$LIVE_BRANCH" | jesc)
+      extras=$(printf ', "live_branch": "%s", "live_verified": %s' \
+        "$branch_esc" "$live_verified")
+    fi
+    # status_before and na_reason are appended only when a deviation row
+    # rewrote this finding. F_OBS is not edited. Empty registry: no keys.
+    if [ -n "${F_NA_REASON[$i]}" ]; then
+      before_esc=$(printf '%s' "${F_STATUS_BEFORE[$i]}" | jesc)
+      reason_esc=$(printf '%s' "${F_NA_REASON[$i]}" | jesc)
+      extras="${extras}$(printf ', "status_before": "%s", "na_reason": "%s"' \
+        "$before_esc" "$reason_esc")"
+    fi
+    printf '    { "id": "%s", "category": "%s", "status": "%s", "severity": "%s", "observed": "%s", "meaning": "%s", "fix": "%s"%s }%s\n' \
       "$(printf '%s' "${F_ID[$i]}" | jesc)" \
       "$(printf '%s' "${F_CAT[$i]}" | jesc)" \
       "${F_ST[$i]}" \
@@ -698,14 +761,56 @@ function standalone_emit {
       "$(printf '%s' "${F_OBS[$i]}" | jesc)" \
       "$(printf '%s' "${F_MEAN[$i]}" | jesc)" \
       "$(printf '%s' "${F_FIX[$i]}" | jesc)" \
+      "$extras" \
       "$sep"
     i=$((i + 1))
   done
   printf '  ]\n}\n'
 }
 
+VIOS_DEVIATION_COUNT=0
+# vios_deviation_apply — after add(), before standalone_emit.
+# ROLE=vios (or the scan export AIXRAY_ROLE) rewrites a matching finding to
+# the registry status. F_OBS is not edited. ROLE=aix does not rewrite.
+# An empty registry is a no-op. The check body does not grow an IS_VIOS test.
+function vios_deviation_apply {
+  typeset role i j
+  i=0
+  while [ "$i" -lt "$NFIND" ]; do
+    F_STATUS_BEFORE[$i]=""
+    F_NA_REASON[$i]=""
+    i=$((i + 1))
+  done
+  role=${ROLE:-}
+  if [ -z "$role" ]; then
+    role=${AIXRAY_ROLE:-}
+  fi
+  if [ "$role" != vios ]; then
+    return 0
+  fi
+  if [ "${VIOS_DEVIATION_COUNT:-0}" -eq 0 ]; then
+    return 0
+  fi
+  i=0
+  while [ "$i" -lt "$NFIND" ]; do
+    j=0
+    while [ "$j" -lt "$VIOS_DEVIATION_COUNT" ]; do
+      if [ "${F_ID[$i]}" = "${VD_FINDING_ID[$j]}" ] \
+          && [ "${VD_APPLIES_WHEN[$j]}" = always ]; then
+        F_STATUS_BEFORE[$i]=${F_ST[$i]}
+        F_NA_REASON[$i]=${VD_REASON[$j]}
+        F_ST[$i]=${VD_STATUS[$j]}
+        break
+      fi
+      j=$((j + 1))
+    done
+    i=$((i + 1))
+  done
+  return 0
+}
+
 function standalone_main {
-  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
+  typeset i assessed initialize_rc run_rc uid_rc
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
@@ -721,27 +826,13 @@ function standalone_main {
     echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
     return 2
   fi
-  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
-  # runner's local marker gate before date initialization or any check probe.
-  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
-  vios_rc=$?
-  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
-    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
-  vios_match=${vios_rows%%:*}
-  vios_nonempty=${vios_rows#*:}
-  if [ "$vios_rc" -eq 0 ] \
-      && [ "$vios_match" -eq 1 ] \
-      && [ "$vios_nonempty" -eq 1 ] \
-      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
-    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
-    return 2
-  fi
   standalone_initialize
   initialize_rc=$?
   [ "$initialize_rc" -eq 0 ] || return "$initialize_rc"
   standalone_run
   run_rc=$?
   [ "$run_rc" -eq 0 ] || return 1
+  vios_deviation_apply || return 1
   standalone_emit || return 1
   assessed=0
   i=0
@@ -779,7 +870,8 @@ _AIXRAY_SESSION_KEYS=""
   # logic: a CAA/SSP cluster enables the newer control-channel-less SEA failover, so a
   # missing ctl_chan is NOT a hard FAIL when a cluster is present).
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
-  CLST=$(aix cluster_status ioscli cluster -status); RC=$?
+  vios_role_classify
+  CLST=$(vios cluster_status cluster -status); RC=$?
   CLPRESENT=0
   if [ "$RC" -eq 0 ] && [ -n "$CLST" ] && printf '%s\n' "$CLST" | grep -qi 'Cluster'; then CLPRESENT=1; fi
 
@@ -802,13 +894,13 @@ _AIXRAY_SESSION_KEYS=""
   # failover statistics"; no STANDBY state is documented. ctl_chan is validated to look like
   # 'entN' precisely so an empty value (where awk would otherwise read the description
   # column) degrades to "unset", not a misparse.
-  SEA_RAW=$(aix lsdev_sea ioscli lsdev -type sea); SEA_RC=$?
+  SEA_RAW=$(vios lsdev_sea lsdev -type sea); SEA_RC=$?
   SEAS=$(printf '%s\n' "$SEA_RAW" | awk 'NR>1 && $1 ~ /^ent[0-9]+$/{print $1}')
-  if [ -n "$SEAS" ] && [ "$SEA_RC" -eq 0 ]; then
+  if [ "$ROLE" != aix ] && [ -n "$SEAS" ] && [ "$SEA_RC" -eq 0 ]; then
     SEACNT=0; BADHA=0; NOCTL=0; NOPRIO=0; NOLSA=0; SEADET=""
     for SEA in $SEAS; do
       SEACNT=$((SEACNT+1))
-      LSA=$(aix "lsattr_sea_$SEA" ioscli lsdev -dev "$SEA" -attr); LSA_RC=$?
+      LSA=$(vios "lsattr_sea_$SEA" lsdev -dev "$SEA" -attr); LSA_RC=$?
       if [ "$LSA_RC" -ne 0 ]; then NOLSA=$((NOLSA+1)); LSAFAIL_RC=$LSA_RC; continue; fi
       HAM=$(printf '%s\n' "$LSA" | awk '$1=="ha_mode"{print $2; exit}')
       CTL=$(printf '%s\n' "$LSA" | awk '$1=="ctl_chan"{print $2; exit}')
@@ -828,53 +920,69 @@ _AIXRAY_SESSION_KEYS=""
       SEADET="$SEADET${SEADET:+; }$SEA ha_mode=$HAM ctl_chan=${CTL:-none} priority=${PRIO:-unset} state=$SST"
     done
     if [ "$NOLSA" -gt 0 ]; then
+      LIVE_BRANCH=probe_failed
       add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
           "not assessed — the SEA attribute probe failed for $NOLSA SEA(s) (rc=$LSAFAIL_RC)" \
           "The SEA list was read, but 'ioscli lsdev -dev <sea> -attr' failed for one or more SEAs — an empty ha_mode from a failed probe must not be read as 'not configured for failover'." \
           "re-run 'ioscli lsdev -dev <sea> -attr' on the box and inspect its error before grading SEA failover posture."
     elif [ "$BADHA" -gt 0 ]; then
+      LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
           "A Shared Ethernet Adapter on this VIOS is not configured for failover (ha_mode not auto/standby/sharing) — a second VIOS cannot take over the bridge, so every client LPAR bridged through this SEA loses its network the moment this VIOS goes down. This is not a redundant network." \
           "set the SEA for failover ('chdev -dev <sea> -attr ha_mode=auto ctl_chan=<ent> priority=<n>'), give the pair distinct priorities, and confirm the partner VIOS's SEA ('entstat -d <sea>' on both)."
     elif [ "$NOCTL" -gt 0 ] && [ "$CLPRESENT" -eq 0 ]; then
+      LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
           "A Shared Ethernet Adapter is set to fail over but has no control channel (ctl_chan) and no CAA cluster to replace it — the two VIOS cannot arbitrate primary/backup, so a failover can leave both bridging at once (split-brain: duplicated frames, a broadcast storm) or neither." \
           "add a control-channel adapter/VLAN ('mkvdev -sea ...'/'chdev -dev <sea> -attr ctl_chan=<ent>'), or adopt the CAA control-channel-less method on a supported VIOS level; verify on both VIOS."
     elif [ "$NOCTL" -gt 0 ]; then
+      LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
           "A Shared Ethernet Adapter has no ctl_chan, but a CAA cluster is present — the newer control-channel-less SEA failover uses the cluster instead. Likely intentional; confirm it is actually the CAA method and not a half-removed control channel." \
           "confirm the SEA uses CAA-based failover (supported VIOS level + cluster) rather than a lost control channel; check the partner VIOS's SEA config too."
     elif [ "$NOPRIO" -gt 0 ]; then
+      LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
           "The SEA is set for failover with a control channel, but a priority is unset/unreadable — without distinct priorities across the pair the primary/backup roles are undefined and can flap." \
           "set a priority on each side ('chdev -dev <sea> -attr priority=<n>'), distinct between the two VIOS (e.g. 1 and 2)."
     else
+      LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" PASS low "$SEADET" \
           "This VIOS's Shared Ethernet Adapter(s) are configured for failover (ha_mode auto/standby/sharing, a control channel set, a priority set) — the network bridge is set up to survive this VIOS. Single-box scan: confirm the partner VIOS's SEA (priority + state on the other LPAR) to prove the pair actually fails over." \
           "n/a"
     fi
-  elif [ "$SEA_RC" -eq 127 ]; then
-    if aix_capture_missing lsdev_sea; then
-      add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
-          "not assessed — no ioscli capture present in the fixture set (probe rc=$SEA_RC), ioscli absence not confirmed" \
-          "The SEA-list probe returned rc=$SEA_RC but no capture exists to say whether ioscli is truly absent — a missing capture is not proof this host is not a VIOS, and a failed capture must not become 'this host has no SEA'." \
-          "capture the 'ioscli lsdev -type sea' probe on the box, or run the check live, then re-assess."
-    else
-      add resilience sea_failover "SEA failover posture" NOT_APPLICABLE low \
-          "no Shared Ethernet Adapter (SEA) present" \
-          "This host has no Shared Ethernet Adapter — it is not a VIOS: ioscli is absent (rc 127 on the probe), so SEA failover posture does not apply here." \
-          "n/a"
-    fi
-  elif [ "$SEA_RC" -ne 0 ]; then
+  elif [ "$ROLE" = aix ]; then
+    LIVE_BRANCH=subject_absent
+    add resilience sea_failover "SEA failover posture" NOT_APPLICABLE low \
+        "no Shared Ethernet Adapter (SEA) present" \
+        "This host is not a VIOS: the ioscli marker is absent, so SEA failover posture does not apply here." \
+        "n/a"
+  elif [ "$SEA_RC" -eq 0 ]; then
+    # rc 0 and an empty SEA list is determinate absence on a VIOS.
+    # NOT_APPLICABLE is that case. A failed probe stays NOT_ASSESSED.
+    LIVE_BRANCH=subject_absent
+    add resilience sea_failover "SEA failover posture" NOT_APPLICABLE low \
+        "no SEA on this VIOS (rc=$SEA_RC)" \
+        "ioscli listed no Shared Ethernet Adapter. A storage-only VIOS has no SEA failover posture to grade, so this control is not applicable." \
+        "n/a"
+  elif aix_capture_missing lsdev_sea; then
+    LIVE_BRANCH=probe_failed
+    add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
+        "not assessed — no ioscli capture present in the fixture set (probe rc=$SEA_RC), ioscli absence not confirmed" \
+        "The SEA-list probe returned rc=$SEA_RC but no capture exists to say whether ioscli is truly absent — a missing capture is not proof this host is not a VIOS, and a failed capture must not become 'this host has no SEA'." \
+        "capture '/usr/ios/cli/ioscli lsdev -type sea' on the box, or run the check live, then re-assess."
+  elif [ "$ROLE" = vios ] || [ "$SEA_RC" -ne 127 ]; then
+    LIVE_BRANCH=probe_failed
     add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
         "not assessed — ioscli present but 'ioscli lsdev -type sea' failed (rc=$SEA_RC)" \
-        "This host runs ioscli, but the SEA-list probe errored — an empty list from a failed capture must not be read as 'this host has no SEA'." \
-        "re-run 'ioscli lsdev -type sea' on the box and inspect its error before grading SEA failover posture."
+        "The SEA list probe failed. On a VIOS that failure is not 'no SEA', and a marker that says this is a VIOS keeps rc 127 as NOT_ASSESSED too." \
+        "re-run '/usr/ios/cli/ioscli lsdev -type sea' on the box and inspect its error before grading SEA failover posture."
   else
-    add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
-        "not assessed — ioscli present (rc=$SEA_RC) but the SEA list is empty" \
-        "This host runs ioscli (rc 0), so it is a VIOS; with no SEA to grade, SEA failover posture cannot be assessed, and NOT_APPLICABLE is reserved for hosts where ioscli is absent." \
-        "confirm whether this VIOS is intentionally SEA-less (storage-only) or has a missing/broken SEA configuration."
+    LIVE_BRANCH=subject_absent
+    add resilience sea_failover "SEA failover posture" NOT_APPLICABLE low \
+        "no Shared Ethernet Adapter (SEA) present" \
+        "This host has no Shared Ethernet Adapter — it is not a VIOS: ioscli is absent (rc 127 on the probe), so SEA failover posture does not apply here." \
+        "n/a"
   fi
 }
 

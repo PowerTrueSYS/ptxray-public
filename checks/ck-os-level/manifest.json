@@ -9,8 +9,7 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "oslevel -s",
-    "ls /usr/ios/cli/ioscli"
+    "oslevel -s"
   ],
   "tags": [
     "ffiec:II.C.11"

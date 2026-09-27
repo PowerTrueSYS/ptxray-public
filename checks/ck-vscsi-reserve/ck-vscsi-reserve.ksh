@@ -7,7 +7,7 @@ set -u
 # whether private fixture hooks are active.
 PTXRAY_PRIVATE_TEST_BUILD=0
 if [ "$PTXRAY_PRIVATE_TEST_BUILD" -ne 1 ]; then
-  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_VIOS_DEV AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
+  unset AIXRAY_FIXTURES AIXRAY_CAPTURE_DIR AIXRAY_TODAY AIXRAY_NO_MENU AIXRAY_NO_BUNDLED_FLRTVC AIXRAY_PROBE_LOG
 fi
 
 # Match the monolith's guarded AIX command search path and parsing locale.
@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.1"
+AIXRAY_STANDALONE_VERSION="1.8.2"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -122,6 +122,16 @@ function aixv {
   "$@" 2>&1
 }
 
+# vios <capture_key> <ioscli-args...>
+# Live: /usr/ios/cli/ioscli. Fixture, capture, and rc behavior are aix()'s.
+# The absolute path is the probe. Do not prepend /usr/ios/cli onto PATH.
+function vios {
+  typeset key
+  key=$1
+  shift
+  aix "$key" /usr/ios/cli/ioscli "$@"
+}
+
 # aix_capture_missing <key> — fixture-replay helper: true (rc=0) iff no capture
 # exists for <key> at all, i.e. the rc a probe just received was the "no
 # capture" default and not a genuine command status. aix()/aixv() return 127 for
@@ -192,6 +202,8 @@ set -A F_SEV
 set -A F_OBS
 set -A F_MEAN
 set -A F_FIX
+set -A F_STATUS_BEFORE
+set -A F_NA_REASON
 NFIND=0
 
 function add {
@@ -676,8 +688,37 @@ function standalone_initialize {
   fi
 }
 
+# vios_role_classify — one marker read, the monolith rule.
+# rc 0 and exactly one matching row → vios; rc 2 and empty output → aix;
+# anything else → unknown. Sets ROLE, IS_VIOS, UC_IOSL on aix, and VIOS_MARKER_*.
+function vios_role_classify {
+  typeset marker rc rows match nonempty
+  marker=$(aix ls_ioscli ls /usr/ios/cli/ioscli)
+  rc=$?
+  rows=$(printf '%s\n' "$marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  match=${rows%%:*}
+  nonempty=${rows#*:}
+  VIOS_MARKER=$marker
+  VIOS_MARKER_RC=$rc
+  VIOS_MARKER_ROWS=$rows
+  VIOS_MARKER_MATCH=$match
+  VIOS_MARKER_NONEMPTY=$nonempty
+  if [ "$rc" -eq 0 ] && [ "$match" -eq 1 ] && [ "$nonempty" -eq 1 ]; then
+    IS_VIOS=1
+    ROLE=vios
+  elif [ "$rc" -eq 2 ] && [ "$nonempty" -eq 0 ]; then
+    IS_VIOS=0
+    ROLE=aix
+    UC_IOSL=NOT_APPLICABLE
+  else
+    IS_VIOS=0
+    ROLE=unknown
+  fi
+}
+
 function standalone_emit {
-  typeset i sep
+  typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
   printf '  "generated": "%s",\n' "$(printf '%s' "$NOW" | jesc)"
   printf '  "version": "%s",\n' "$AIXRAY_STANDALONE_VERSION"
@@ -690,7 +731,29 @@ function standalone_emit {
   while [ "$i" -lt "$NFIND" ]; do
     sep=','
     [ "$i" -eq $((NFIND - 1)) ] && sep=''
-    printf '    { "id": "%s", "category": "%s", "status": "%s", "severity": "%s", "observed": "%s", "meaning": "%s", "fix": "%s" }%s\n' \
+    # Extras stay off the id line unless the check set them. An unset
+    # LIVE_BRANCH omits live_branch and live_verified, so AIX findings
+    # that never set it stay the eight-field object.
+    extras=""
+    if [ -n "${LIVE_BRANCH:-}" ]; then
+      if [ -z "${AIXRAY_FIXTURES:-}" ]; then
+        live_verified=true
+      else
+        live_verified=false
+      fi
+      branch_esc=$(printf '%s' "$LIVE_BRANCH" | jesc)
+      extras=$(printf ', "live_branch": "%s", "live_verified": %s' \
+        "$branch_esc" "$live_verified")
+    fi
+    # status_before and na_reason are appended only when a deviation row
+    # rewrote this finding. F_OBS is not edited. Empty registry: no keys.
+    if [ -n "${F_NA_REASON[$i]}" ]; then
+      before_esc=$(printf '%s' "${F_STATUS_BEFORE[$i]}" | jesc)
+      reason_esc=$(printf '%s' "${F_NA_REASON[$i]}" | jesc)
+      extras="${extras}$(printf ', "status_before": "%s", "na_reason": "%s"' \
+        "$before_esc" "$reason_esc")"
+    fi
+    printf '    { "id": "%s", "category": "%s", "status": "%s", "severity": "%s", "observed": "%s", "meaning": "%s", "fix": "%s"%s }%s\n' \
       "$(printf '%s' "${F_ID[$i]}" | jesc)" \
       "$(printf '%s' "${F_CAT[$i]}" | jesc)" \
       "${F_ST[$i]}" \
@@ -698,14 +761,56 @@ function standalone_emit {
       "$(printf '%s' "${F_OBS[$i]}" | jesc)" \
       "$(printf '%s' "${F_MEAN[$i]}" | jesc)" \
       "$(printf '%s' "${F_FIX[$i]}" | jesc)" \
+      "$extras" \
       "$sep"
     i=$((i + 1))
   done
   printf '  ]\n}\n'
 }
 
+VIOS_DEVIATION_COUNT=0
+# vios_deviation_apply — after add(), before standalone_emit.
+# ROLE=vios (or the scan export AIXRAY_ROLE) rewrites a matching finding to
+# the registry status. F_OBS is not edited. ROLE=aix does not rewrite.
+# An empty registry is a no-op. The check body does not grow an IS_VIOS test.
+function vios_deviation_apply {
+  typeset role i j
+  i=0
+  while [ "$i" -lt "$NFIND" ]; do
+    F_STATUS_BEFORE[$i]=""
+    F_NA_REASON[$i]=""
+    i=$((i + 1))
+  done
+  role=${ROLE:-}
+  if [ -z "$role" ]; then
+    role=${AIXRAY_ROLE:-}
+  fi
+  if [ "$role" != vios ]; then
+    return 0
+  fi
+  if [ "${VIOS_DEVIATION_COUNT:-0}" -eq 0 ]; then
+    return 0
+  fi
+  i=0
+  while [ "$i" -lt "$NFIND" ]; do
+    j=0
+    while [ "$j" -lt "$VIOS_DEVIATION_COUNT" ]; do
+      if [ "${F_ID[$i]}" = "${VD_FINDING_ID[$j]}" ] \
+          && [ "${VD_APPLIES_WHEN[$j]}" = always ]; then
+        F_STATUS_BEFORE[$i]=${F_ST[$i]}
+        F_NA_REASON[$i]=${VD_REASON[$j]}
+        F_ST[$i]=${VD_STATUS[$j]}
+        break
+      fi
+      j=$((j + 1))
+    done
+    i=$((i + 1))
+  done
+  return 0
+}
+
 function standalone_main {
-  typeset i assessed initialize_rc run_rc uid_rc vios_rc vios_marker vios_rows vios_match vios_nonempty
+  typeset i assessed initialize_rc run_rc uid_rc
   if [ "$#" -ne 1 ] || [ "$1" != "--json" ]; then
     echo "usage: $0 --json" >&2
     return 2
@@ -721,27 +826,13 @@ function standalone_main {
     echo "$AIXRAY_TOOL: root is required; re-run this standalone check as root. No assessment was run." >&2
     return 2
   fi
-  # VIOS is AIX underneath, so uname cannot distinguish it. Match the AIX
-  # runner's local marker gate before date initialization or any check probe.
-  vios_marker=$(aix ls_ioscli /usr/bin/ls /usr/ios/cli/ioscli)
-  vios_rc=$?
-  vios_rows=$(printf '%s\n' "$vios_marker" | awk '
-    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
-  vios_match=${vios_rows%%:*}
-  vios_nonempty=${vios_rows#*:}
-  if [ "$vios_rc" -eq 0 ] \
-      && [ "$vios_match" -eq 1 ] \
-      && [ "$vios_nonempty" -eq 1 ] \
-      && [ "${AIXRAY_VIOS_DEV:-0}" != 1 ]; then
-    echo "$AIXRAY_TOOL: VIOS assessment is temporarily disabled in this release; no assessment was run." >&2
-    return 2
-  fi
   standalone_initialize
   initialize_rc=$?
   [ "$initialize_rc" -eq 0 ] || return "$initialize_rc"
   standalone_run
   run_rc=$?
   [ "$run_rc" -eq 0 ] || return 1
+  vios_deviation_apply || return 1
   standalone_emit || return 1
   assessed=0
   i=0
@@ -778,9 +869,10 @@ _AIXRAY_SESSION_KEYS=""
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
   # 'lsmap -all': a vhost's VTD names its "Backing device". Mapping posture is
   # ck-vscsi-maps; this door only grades reserve_policy on those backing LUNs.
-  VSRAW=$(aix lsmap_vscsi ioscli lsmap -all)
+  vios_role_classify
+  VSRAW=$(vios lsmap_vscsi lsmap -all)
   VSRAW_RC=$?
-  if [ "$VSRAW_RC" -eq 0 ] && [ -n "$VSRAW" ] && printf '%s\n' "$VSRAW" | awk '$1 ~ /^vhost[0-9]/{f=1} END{exit f?0:1}'; then
+  if [ "$ROLE" != aix ] && [ "$VSRAW_RC" -eq 0 ] && [ -n "$VSRAW" ] && printf '%s\n' "$VSRAW" | awk '$1 ~ /^vhost[0-9]/{f=1} END{exit f?0:1}'; then
     # For a LUN to be served by BOTH VIOS (vSCSI failover), the backing hdisk must NOT hold a
     # SCSI reservation: reserve_policy=no_reserve (older attr reserve_lock=no). If a backing
     # LUN is single_path / PR_exclusive / reserve_lock=yes, the OTHER VIOS physically cannot
@@ -805,7 +897,7 @@ _AIXRAY_SESSION_KEYS=""
       RSVTOT=0; RSVBAD=0; RSVUNK=0; RSVDET=""
       for HD in $BACKHD; do
         RSVTOT=$((RSVTOT+1))
-        RP=$(aix "reserve_$HD" ioscli lsdev -dev "$HD" -attr reserve_policy)
+        RP=$(vios "reserve_$HD" lsdev -dev "$HD" -attr reserve_policy)
         RP_RC=$?
         if [ "$RP_RC" -ne 0 ]; then
           RSVUNK=$((RSVUNK+1)); RSVDET="$RSVDET${RSVDET:+, }$HD=?"
@@ -828,33 +920,34 @@ _AIXRAY_SESSION_KEYS=""
         fi
       done
       if [ "$RSVBAD" -gt 0 ]; then
+        LIVE_BRANCH=no_reserve
         add storage vscsi_reserve "vSCSI backing-LUN reservation" FAIL high "$RSVBAD of $RSVTOT backing LUN(s) reserved: $RSVDET" \
             "A backing LUN behind a vSCSI map is holding a SCSI reservation (reserve_policy not no_reserve) — the OTHER VIOS physically cannot open this LUN, so vSCSI failover for that client fails SILENTLY. Everything looks mapped and 'dual', but if this VIOS drops, the client's disk does not come back on the partner. This vSCSI path is not actually redundant." \
             "set the backing disk to no_reserve on this VIOS ('chdev -dev <hdisk> -attr reserve_policy=no_reserve'; older disks: reserve_lock=no) and confirm the SAME on the partner VIOS for the same LUN before relying on failover."
       elif [ "$RSVUNK" -gt 0 ]; then
+        LIVE_BRANCH=no_reserve
         add storage vscsi_reserve "vSCSI backing-LUN reservation" WARN med "reserve_policy unreadable on $RSVUNK of $RSVTOT backing LUN(s): $RSVDET" \
             "Could not read reserve_policy on the vSCSI backing LUNs — cannot confirm they are no_reserve, which dual-VIOS vSCSI failover requires (older disks expose reserve_lock instead). Not confirming this leaves a common silent-failover trap unchecked." \
             "check each backing hdisk ('lsdev -dev <hdisk> -attr reserve_policy' or 'lsattr -El <hdisk> -a reserve_lock') on BOTH VIOS; they must be no_reserve / reserve_lock=no to fail over."
       else
+        LIVE_BRANCH=no_reserve
         add storage vscsi_reserve "vSCSI backing-LUN reservation" PASS low "$RSVTOT backing LUN(s), all no_reserve: $RSVDET" \
             "Every vSCSI backing LUN on this VIOS is no_reserve — the partner VIOS can physically open the same LUNs, so vSCSI failover is viable from this side. Single-box scan: confirm the partner VIOS holds no_reserve on the same LUNs too." "n/a"
       fi
     else
+      LIVE_BRANCH=subject_absent
       add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_APPLICABLE low "no vSCSI backing device mapped to any vhost (every vhost is empty)" \
           "Every vhost on this VIOS has no backing device (NO VIRTUAL TARGET DEVICE FOUND), so there is no vSCSI backing LUN whose reservation policy could be checked — dual-VIOS vSCSI failover cannot be validated from this VIOS because it serves no backing LUN." "n/a"
     fi
+  elif [ "$ROLE" != aix ] && { [ "$VSRAW_RC" -ne 0 ] || aix_capture_missing lsmap_vscsi; }; then
+    # A failed probe, including a missing capture, is not "no vhost".
+    LIVE_BRANCH=probe_failed
+    add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_ASSESSED low "vSCSI map probe has no capture — applicability not determinable" \
+        "The vSCSI map probe (/usr/ios/cli/ioscli lsmap -all) failed or has no capture (rc=$VSRAW_RC), so the absence of a vhost mapping cannot prove this box has no vSCSI stack." "n/a"
   else
-    # aix_capture_missing: a probe with no capture (missing fixture, or a probe that
-    # could not run) must NOT launder into NOT_APPLICABLE. Absence is determinate only
-    # when the probe genuinely returned no vhost mapping — live mode, or a present
-    # capture with no vhost. A missing capture refuses (NOT_ASSESSED) instead.
-    if aix_capture_missing lsmap_vscsi; then
-      add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_ASSESSED low "vSCSI map probe has no capture — applicability not determinable" \
-          "The vSCSI map probe (ioscli lsmap -all) has no capture, so the absence of a vhost mapping cannot prove this box has no vSCSI stack — a failed capture refuses rather than confirms absence." "n/a"
-    else
-      add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_APPLICABLE low "no vSCSI host adapter (vhost) on this box" \
-          "No virtual-SCSI host adapter (vhost) is present, so there is no vSCSI backing LUN whose reservation policy could be checked — dual-VIOS vSCSI failover does not apply here." "n/a"
-    fi
+    LIVE_BRANCH=subject_absent
+    add storage vscsi_reserve "vSCSI backing-LUN reservation" NOT_APPLICABLE low "no vSCSI host adapter (vhost) on this box" \
+        "No virtual-SCSI host adapter (vhost) is present, so there is no vSCSI backing LUN whose reservation policy could be checked — dual-VIOS vSCSI failover does not apply here." "n/a"
   fi
 }
 

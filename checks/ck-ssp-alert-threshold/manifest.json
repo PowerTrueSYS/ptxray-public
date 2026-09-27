@@ -1,0 +1,18 @@
+{
+  "id": "ck-ssp-alert-threshold",
+  "pillar": "backup",
+  "category": "storage",
+  "finding_ids": [
+    "ssp_alert_threshold"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli cluster -status"
+  ],
+  "tags": [],
+  "blurb": "This check looks for a Shared Storage Pool alert threshold on a VIOS and is separate from ssp_cluster. No cluster is not applicable. ioscli cluster -status does not report ThresholdPercent (https://www.ibm.com/docs/en/power7/8231-E1D?topic=commands-cluster-command). IBM documents that field on alert -list, which this check does not run. A configured cluster is not assessed, and no threshold number is graded.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-ssp-alert-threshold/ck-ssp-alert-threshold.ksh"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "ck-sea-largesend",
+  "pillar": "backup",
+  "category": "resilience",
+  "finding_ids": [
+    "sea_largesend"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsdev -type sea",
+    "/usr/ios/cli/ioscli lsdev -dev <sea> -attr"
+  ],
+  "tags": [],
+  "blurb": "This check reads the Shared Ethernet Adapter largesend attribute on a VIOS. IBM documents 0 as disabled and 1 as enabled, and says largesend should be enabled on the SEA when the physical adapter has large send enabled (https://www.ibm.com/support/pages/how-determine-if-large-send-offload-lsolargesend-and-large-receive-offload-lrolargereceive-are-enabled-sea and https://www.ibm.com/support/pages/seaproc-consuming-high-cpu-vios). The physical adapter is not visible from the SEA attribute alone, so 0 is a warning rather than a failure. No SEA is not applicable. The check never runs chdev.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-sea-largesend/ck-sea-largesend.ksh"
+}

@@ -1,0 +1,19 @@
+{
+  "id": "ck-npiv-redundancy",
+  "pillar": "resiliency",
+  "category": "storage",
+  "finding_ids": [
+    "npiv_redundancy"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsmap -all -npiv",
+    "/usr/ios/cli/ioscli lsnports"
+  ],
+  "tags": [],
+  "blurb": "This check judges whether the NPIV paths on a VIOS are actually redundant: a vfchost that is not logged in is a dead path, and vfchosts that all ride one physical FC adapter are a single point of failure. No vfchost on a confirmed VIOS is not applicable. A failed lsmap is not assessed. The check never changes a mapping.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-npiv-redundancy/ck-npiv-redundancy.ksh"
+}

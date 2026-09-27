@@ -3074,11 +3074,14 @@ function load_finding_label_contract() {
   FINDING_LABEL["remote_syslog"] = "Remote syslog"
   FINDING_LABEL["rhost_dotfiles_absent"] = "Plain-text credential file (.netrc)"
   FINDING_LABEL["rhosts"] = "Trust files (.rhosts)"
+  FINDING_LABEL["rmc_state"] = "RMC management path"
   FINDING_LABEL["root_su_restrict"] = "Restrict su to root"
   FINDING_LABEL["rootvg_mirror"] = "rootvg redundancy"
   FINDING_LABEL["rootvg_quorum"] = "rootvg quorum"
   FINDING_LABEL["savevg_datavg"] = "savevg evidence (datavg)"
   FINDING_LABEL["sea_failover"] = "SEA failover posture"
+  FINDING_LABEL["sea_largesend"] = "SEA large send"
+  FINDING_LABEL["sea_threading"] = "SEA threading"
   FINDING_LABEL["sec_apars"] = "Tracked security APARs"
   FINDING_LABEL["secure_by_default"] = "Secure by Default installation"
   FINDING_LABEL["sendmail_greeting"] = "Sendmail SMTP greeting"
@@ -3109,7 +3112,9 @@ function load_finding_label_contract() {
   FINDING_LABEL["ssh_strictmodes"] = "SSH strict mode checks"
   FINDING_LABEL["sshd_version"] = "SSH daemon version currency"
   FINDING_LABEL["ssl_ssh"] = "OpenSSH / OpenSSL levels"
+  FINDING_LABEL["ssp_alert_threshold"] = "SSP alert threshold"
   FINDING_LABEL["ssp_cluster"] = "Shared Storage Pool cluster"
+  FINDING_LABEL["ssp_pool_capacity"] = "SSP pool capacity"
   FINDING_LABEL["stale_privileged_accounts"] = "Stale privileged accounts"
   FINDING_LABEL["stig_able_control_ability_remote"] = "Remote login control for users"
   FINDING_LABEL["stig_accounts_assigned_unique_user"] = "All accounts have unique User Identification Numbers"
@@ -3355,6 +3360,10 @@ function load_finding_label_contract() {
   FINDING_LABEL["vg_stale"] = "LV mirror sync"
   FINDING_LABEL["vios_level"] = "VIOS level currency"
   FINDING_LABEL["vios_topology"] = "VIOS redundancy topology"
+  FINDING_LABEL["vios_users_nonpadmin"] = "VIOS non-padmin accounts"
+  FINDING_LABEL["vios_users_shell_bypass"] = "VIOS restricted-shell bypass"
+  FINDING_LABEL["viosecure_firewall"] = "VIOS firewall"
+  FINDING_LABEL["viosecure_level"] = "VIOS security rules"
   FINDING_LABEL["vmm_tuning"] = "VMM cache tuning"
   FINDING_LABEL["vscsi_maps"] = "Virtual SCSI mappings"
   FINDING_LABEL["vscsi_reserve"] = "vSCSI backing-LUN reservation"
@@ -3454,19 +3463,20 @@ function load_renderer_finding_contract() {
     "rctcpip_mrouted rctcpip_named rctcpip_ndpd_router rctcpip_portmap " \
     "rctcpip_routed rctcpip_rwhod rctcpip_sendmail rctcpip_timed " \
     "remote_rcmd_filesets remote_syslog rhost_dotfiles_absent rhosts " \
-    "root_su_restrict rootvg_mirror rootvg_quorum savevg_datavg sea_failover " \
-    "sec_apars secure_by_default sendmail_greeting sendmail_privacyoptions " \
-    "shell_timeout shell_timeout_readonly snapp_installed snmp_community " \
+    "rmc_state root_su_restrict rootvg_mirror rootvg_quorum savevg_datavg " \
+    "sea_failover sea_largesend sea_threading sec_apars secure_by_default " \
+    "sendmail_greeting sendmail_privacyoptions shell_timeout " \
+    "shell_timeout_readonly snapp_installed snmp_community " \
     "snmp_filesets_absent software_inventory ssh_access_lists ssh_banner " \
     "ssh_ciphers ssh_clientalive ssh_ignore_rhosts ssh_kexalgorithms " \
     "ssh_logingracetime ssh_loglevel ssh_macs ssh_maxauthtries " \
     "ssh_packages_installed ssh_permitemptypasswords ssh_permitrootlogin " \
     "ssh_permituserenv ssh_rekeylimit ssh_rootlogin ssh_sftp_args " \
-    "ssh_strictmodes sshd_version ssl_ssh ssp_cluster " \
-    "stale_privileged_accounts stig_able_control_ability_remote " \
-    "stig_accounts_assigned_unique_user stig_aixmibd_daemon_disabled " \
-    "stig_audio_dev_group stig_audit_bin_stanza stig_audit_boot " \
-    "stig_audit_capacity stig_audit_config_perms " \
+    "ssh_strictmodes sshd_version ssl_ssh ssp_alert_threshold ssp_cluster " \
+    "ssp_pool_capacity stale_privileged_accounts " \
+    "stig_able_control_ability_remote stig_accounts_assigned_unique_user " \
+    "stig_aixmibd_daemon_disabled stig_audio_dev_group stig_audit_bin_stanza " \
+    "stig_audit_boot stig_audit_capacity stig_audit_config_perms " \
     "stig_audit_config_perms_audit_configuration " \
     "stig_audit_config_perms_audit_configuration_files_set " \
     "stig_audit_freespace stig_audit_log_perms " \
@@ -3551,7 +3561,8 @@ function load_renderer_finding_contract() {
     "trustchk_stop_untrusted trustchk_te_tep trustchk_untrusted_scan " \
     "trusted_exec tunables tz_set uid0_accounts umask_default unowned_files " \
     "upgrade_headroom_preview vg_capacity vg_geometry vg_pvs vg_stale " \
-    "vios_level vios_topology vmm_tuning vscsi_maps vscsi_reserve " \
+    "vios_level vios_topology vios_users_nonpadmin vios_users_shell_bypass " \
+    "viosecure_firewall viosecure_level vmm_tuning vscsi_maps vscsi_reserve " \
     "world_writable worldwrite_dirs_nosvtx worldwrite_files " \
     "worldwrite_objects writesrv")
 }

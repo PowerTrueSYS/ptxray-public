@@ -1,0 +1,18 @@
+{
+  "id": "ck-vios-users-nonpadmin",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "vios_users_nonpadmin"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lsuser -a shell account_locked login rlogin ALL"
+  ],
+  "tags": [],
+  "blurb": "This check inventories login-capable Virtual I/O Server accounts other than the factory padmin user. IBM ships a VIOS with only padmin active; an extra login expands who can reach the appliance. On a plain AIX partition the VIOS user model does not apply.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-vios-users-nonpadmin/ck-vios-users-nonpadmin.ksh"
+}

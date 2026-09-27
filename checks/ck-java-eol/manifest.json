@@ -9,8 +9,7 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "lslpp -qcL Java*",
-    "ls /usr/ios/cli/ioscli"
+    "lslpp -qcL Java*"
   ],
   "tags": [
     "eol"

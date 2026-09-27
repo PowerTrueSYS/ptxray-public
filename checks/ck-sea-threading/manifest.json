@@ -1,0 +1,19 @@
+{
+  "id": "ck-sea-threading",
+  "pillar": "backup",
+  "category": "resilience",
+  "finding_ids": [
+    "sea_threading"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsdev -type sea",
+    "/usr/ios/cli/ioscli lsdev -dev <sea> -attr"
+  ],
+  "tags": [],
+  "blurb": "This check records the Shared Ethernet Adapter thread attribute on a VIOS. IBM does not require thread=1. https://www.ibm.com/support/pages/ibm-virtual-io-server-download-support says thread=1 is the default after APAR IY62264 and thread=0 is a valid throughput choice (more consistent quality of service, lower LAN throughput). Either value passes. The check does not invent a required setting and never runs chdev. No SEA is not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-sea-threading/ck-sea-threading.ksh"
+}

@@ -9,8 +9,8 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "ioscli lsmap -all",
-    "ioscli lsdev -dev <hdisk> -attr reserve_policy"
+    "/usr/ios/cli/ioscli lsmap -all",
+    "/usr/ios/cli/ioscli lsdev -dev <hdisk> -attr reserve_policy"
   ],
   "tags": [],
   "blurb": "This check confirms every vSCSI backing LUN on a VIOS is free of SCSI reservation (reserve_policy no_reserve), so dual-VIOS vSCSI failover can actually work. A reserved backing LUN fails silently: everything looks mapped and dual, but the partner VIOS cannot open the LUN and the disk of the client never comes back on failover.",

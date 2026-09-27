@@ -181,7 +181,10 @@ def tar_regular_member_payloads(path: Path, label: str) -> dict[str, list[bytes]
                 if name.rsplit("/", 1)[-1] in RETIRED_MONOLITH_BASENAMES:
                     raise ProofError(f"{label} contains retired monolith member {name}")
                 if (member.mode & 0o111 or name.endswith((".sh", ".ksh", ".awk"))) and not (
-                    name == "ptxray-defs.sh" or name.startswith(("dist/tools/", "dist/ibmi/tools/", "dist/compose/", "dist/render/", "dist/lib/"))
+                    name == "ptxray-defs.sh"
+                    or name == "ptxray-vios.sh"
+                    or name == "dist/data/vios-deviation-count.awk"
+                    or name.startswith(("dist/tools/", "dist/ibmi/tools/", "dist/compose/", "dist/render/", "dist/lib/"))
                 ):
                     raise ProofError(f"{label} contains unexpected executable member {name}")
                 handle = archive.extractfile(member)

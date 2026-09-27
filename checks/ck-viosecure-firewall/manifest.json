@@ -1,0 +1,18 @@
+{
+  "id": "ck-viosecure-firewall",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "viosecure_firewall"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli viosecure -firewall view"
+  ],
+  "tags": [],
+  "blurb": "This check reads the VIOS viosecure firewall page and nothing else. IPv4 Firewall OFF is a warning: a factory VIOS is not a pass and is not a failure for a firewall that was never enabled. IPv4 Firewall ON with an allowed-ports table passes. No address on the host is not an input. A plain AIX LPAR is not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-viosecure-firewall/ck-viosecure-firewall.ksh"
+}

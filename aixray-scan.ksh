@@ -56,7 +56,7 @@ IBM FLRTVC requires native ksh93 and trusted OpenSSL; initial connected engine a
 Every run assesses the operational pillars (OS/firmware currency, known vulnerabilities, resilience) in addition to the selected standard.
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE to point at definitions you copied in (air-gapped machines).'
 
-PTXRAY_RUNNER_VERSION="1.8.1"
+PTXRAY_RUNNER_VERSION="1.8.2"
 
 WANT_HTML=0
 WANT_PDF=0
@@ -717,6 +717,39 @@ if [ "$MENU_MODE" -eq 1 ]; then
   WANT_PTXDOC=1
 fi
 
+# vios_scan_classify — monolith rule, once, before dispatch.
+# Fixture: readable ls_ioscli.out plus ls_ioscli.rc (default rc 0).
+# Otherwise a live /usr/bin/ls. rc 0 and one matching row → vios;
+# rc 2 and empty output → aix; anything else → unknown.
+function vios_scan_classify {
+  typeset marker rc rows match nonempty out rcfile
+  marker=""
+  rc=0
+  if [ -n "${AIXRAY_FIXTURES:-}" ] && [ -r "${AIXRAY_FIXTURES%/}/ls_ioscli.out" ]; then
+    out=${AIXRAY_FIXTURES%/}/ls_ioscli.out
+    rcfile=${AIXRAY_FIXTURES%/}/ls_ioscli.rc
+    marker=$(cat "$out")
+    rc=0
+    if [ -r "$rcfile" ]; then
+      read rc < "$rcfile" || :
+    fi
+  else
+    marker=$(/usr/bin/ls /usr/ios/cli/ioscli 2>/dev/null)
+    rc=$?
+  fi
+  rows=$(printf '%s\n' "$marker" | awk '
+    $0=="/usr/ios/cli/ioscli"{n++} NF{all++} END{print n+0 ":" all+0}')
+  match=${rows%%:*}
+  nonempty=${rows#*:}
+  if [ "$rc" -eq 0 ] && [ "$match" -eq 1 ] && [ "$nonempty" -eq 1 ]; then
+    echo vios
+  elif [ "$rc" -eq 2 ] && [ "$nonempty" -eq 0 ]; then
+    echo aix
+  else
+    echo unknown
+  fi
+}
+
 function acquire_flrtvc {
   typeset defs_sh mode rc
   [ -z "$FLRTVC" ] || return 0
@@ -1001,6 +1034,14 @@ if [ "$WANT_FLRT" -eq 1 ]; then
 fi
 
 if [ "$WANT_ASSESS" -eq 1 ]; then
+  AIXRAY_ROLE=$(vios_scan_classify)
+  export AIXRAY_ROLE
+  unset AIXRAY_VIOS_ACCEPTANCE
+  if [ "$AIXRAY_ROLE" = vios ]; then
+    AIXRAY_VIOS_ACCEPTANCE=absence-only
+    export AIXRAY_VIOS_ACCEPTANCE
+  fi
+
   # The fact tools are pure transformers: they read a capture on --in and
   # never probe. fact-probe is the door that runs the read-only probes on this
   # box and writes one capture per fact. A probe the box cannot answer leaves

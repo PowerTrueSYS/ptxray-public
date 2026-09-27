@@ -1,0 +1,19 @@
+{
+  "id": "ck-rmc-state",
+  "pillar": "operational-readiness",
+  "category": "monitoring",
+  "finding_ids": [
+    "rmc_state"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "lssrc -s ctrmc",
+    "/opt/rsct/bin/rmcdomainstatus -s ctrmc"
+  ],
+  "tags": [],
+  "blurb": "This check confirms that the Resource Monitoring and Control path the HMC uses for DLPAR and partition management is active on a VIOS. It reads the ctrmc SRC subsystem and rmcdomainstatus. If ctrmc is not active or no HMC management-domain control point is Up, the HMC cannot drive DLPAR, LPM, or concurrent firmware activation on this VIOS. On a plain AIX LPAR the VIOS appliance form of this check does not apply.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-rmc-state/ck-rmc-state.ksh"
+}

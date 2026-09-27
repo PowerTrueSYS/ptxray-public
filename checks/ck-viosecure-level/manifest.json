@@ -1,0 +1,18 @@
+{
+  "id": "ck-viosecure-level",
+  "pillar": "security",
+  "category": "security",
+  "finding_ids": [
+    "viosecure_level"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli viosecure -view -nonint"
+  ],
+  "tags": [],
+  "blurb": "This check reads whether a VIOS has a viosecure hardening level applied. It runs only the read-only view. A factory page that says security rules are not applied is a warning, not a pass. A page that names an lls, mls, or hls rule is an applied level. A plain AIX LPAR is not applicable.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-viosecure-level/ck-viosecure-level.ksh"
+}
