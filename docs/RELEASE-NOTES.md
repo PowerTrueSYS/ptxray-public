@@ -1,5 +1,13 @@
 # Release notes
 
+<!-- PTXRAY-PUBLICATION-READY:v1.8.2 -->
+
+## v1.8.2
+
+VIOS is now a role of the AIX scanner. `ptxray-vios.sh` in the AIX report bundle checks for root and `/usr/ios/cli/ioscli`, then runs `dist/tools/aixray-scan.ksh`. From the padmin shell, run `oem_setup_env` first.
+
+A bare VIOS report is banner `absence-only`. That means the install was assessed, including the absence of a Shared Ethernet Adapter, NPIV, virtual SCSI, and a Shared Storage Pool. It is not a finished redundant-VIOS assessment. Configured SEA failover, logged-in NPIV, and a Shared Storage Pool are not claimed by this release. There is no CIS VIOS benchmark. Ordinary AIX, STIG, CIS, and vulnerability findings stay findings.
+
 <!-- PTXRAY-PUBLICATION-READY:v1.8.1 -->
 
 ## v1.8.1
