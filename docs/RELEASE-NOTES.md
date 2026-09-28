@@ -1,5 +1,13 @@
 # Release notes
 
+<!-- PTXRAY-PUBLICATION-READY:v1.8.4 -->
+
+## v1.8.4
+
+A primary Shared Ethernet Adapter with Bridge Mode None warns, and a real-adapter Link Status other than Up warns. An idle backup with Bridge Mode None stays a pass. A missing entstat label stays unread.
+
+The VIOS edition remains `catalog-ready`. A bare VIOS still reports `absence-only`. This is not a live configured VIOS and not a CIS VIOS certification.
+
 <!-- PTXRAY-PUBLICATION-READY:v1.8.3 -->
 
 ## v1.8.3

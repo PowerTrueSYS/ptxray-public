@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.3"
+AIXRAY_STANDALONE_VERSION="1.8.4"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -930,7 +930,7 @@ _AIXRAY_SESSION_KEYS=""
   SEA_RAW=$(vios lsdev_sea lsdev -type sea); SEA_RC=$?
   SEAS=$(printf '%s\n' "$SEA_RAW" | awk 'NR>1 && $1 ~ /^ent[0-9]+$/{print $1}')
   if [ "$ROLE" != aix ] && [ -n "$SEAS" ] && [ "$SEA_RC" -eq 0 ]; then
-    SEACNT=0; BADHA=0; NOCTL=0; NOPRIO=0; NOLSA=0; UNSETTLED=0; SEADET=""
+    SEACNT=0; BADHA=0; NOCTL=0; NOPRIO=0; NOLSA=0; UNSETTLED=0; BRIDGENONE=0; LINKDOWN=0; SEADET=""
     for SEA in $SEAS; do
       SEACNT=$((SEACNT+1))
       LSA=$(vios "lsattr_sea_$SEA" lsdev -dev "$SEA" -attr); LSA_RC=$?
@@ -955,7 +955,30 @@ _AIXRAY_SESSION_KEYS=""
       case "$SST" in
         LIMBO|RECOVERY) UNSETTLED=$((UNSETTLED+1));;
       esac
-      SEADET="$SEADET${SEADET:+; }$SEA ha_mode=$HAM ctl_chan=${CTL:-none} priority=${PRIO:-unset} state=$SST"
+      # Bridge Mode and Link Status are entstat labels. A missing line is
+      # unread, not a failure. None on a PRIMARY means the active bridge is
+      # not passing traffic. None on BACKUP is the idle partner, not a fault.
+      # IBM: None is not sending or receiving. Link Status other than Up is
+      # the real adapter down.
+      BMODE=$(printf '%s\n' "$ESTAT" | awk -F: '/^[ \t]*Bridge Mode:/{v=$2; gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit}')
+      LSTAT=$(printf '%s\n' "$ESTAT" | awk -F: '/^[ \t]*Link Status:/{v=$2; gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit}')
+      if [ "$ESTAT_RC" -ne 0 ]; then BMODE=""; LSTAT=""; fi
+      case "$BMODE" in
+        None)
+          case "$HAM" in
+            auto|standby|sharing)
+              case "$SST" in
+                PRIMARY|PRIMARY_SH) BRIDGENONE=$((BRIDGENONE+1));;
+              esac
+              ;;
+          esac
+          ;;
+      esac
+      case "$LSTAT" in
+        ""|Up|up|UP) : ;;
+        *) LINKDOWN=$((LINKDOWN+1));;
+      esac
+      SEADET="$SEADET${SEADET:+; }$SEA ha_mode=$HAM ctl_chan=${CTL:-none} priority=${PRIO:-unset} state=$SST bridge=${BMODE:-unread} link=${LSTAT:-unread}"
     done
     if [ "$NOLSA" -gt 0 ]; then
       LIVE_BRANCH=probe_failed
@@ -994,6 +1017,11 @@ _AIXRAY_SESSION_KEYS=""
       add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
           "A Shared Ethernet Adapter runtime State is LIMBO or RECOVERY. Those two states cannot settle a role, so a configured ha_mode is not a settled failover. An unread state is not this warning." \
           "inspect 'entstat -d <sea>' on this VIOS and its partner until State leaves LIMBO or RECOVERY."
+    elif [ "$BRIDGENONE" -gt 0 ] || [ "$LINKDOWN" -gt 0 ]; then
+      LIVE_BRANCH=configured_ha
+      add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
+          "A primary Shared Ethernet Adapter has Bridge Mode None, or a real-adapter Link Status is not Up. None means the SEA is not sending or receiving. An idle BACKUP with Bridge Mode None is not this warning. A missing Bridge Mode or Link Status line is unread, not a failure." \
+          "inspect 'entstat -d <sea>' Bridge Mode and the real adapter Link Status. A primary that is not bridging, or a link that is not Up, is not a settled failover."
     else
       LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" PASS low "$SEADET" \

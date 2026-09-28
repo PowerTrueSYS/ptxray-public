@@ -110,13 +110,13 @@ For changes in each version, see the [release notes](docs/RELEASE-NOTES.md) and 
 
 The product entry points are the report runners inside the versioned report bundles, with these exact commands:
 
-AIX (`ptxray-report-aix-1.8.3.tar`):
+AIX (`ptxray-report-aix-1.8.4.tar`):
 
 ```sh
 ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out DIR
 ```
 
-IBM i (`ptxray-report-ibmi-1.8.3.tar`):
+IBM i (`ptxray-report-ibmi-1.8.4.tar`):
 
 ```sh
 ksh dist/tools/ibmi-scan.ksh --html --json --compliance all --out DIR
