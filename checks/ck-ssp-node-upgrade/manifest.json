@@ -1,0 +1,19 @@
+{
+  "id": "ck-ssp-node-upgrade",
+  "pillar": "currency",
+  "category": "lifecycle",
+  "finding_ids": [
+    "ssp_node_upgrade"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli cluster -status",
+    "/usr/ios/cli/ioscli cluster -status -verbose"
+  ],
+  "tags": [],
+  "blurb": "This check reads Node Upgrade Status from ioscli cluster -status -verbose and is separate from ssp_cluster. No cluster is not applicable. ON_LEVEL passes. UP_LEVEL warns because IBM says that node is not ready for viosupgrade, not because the pool is down. A missing field is not assessed. There is no fail.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-ssp-node-upgrade/ck-ssp-node-upgrade.ksh"
+}

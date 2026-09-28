@@ -9,10 +9,11 @@
   "requires_root": true,
   "read_only": true,
   "commands": [
-    "/usr/ios/cli/ioscli cluster -status"
+    "/usr/ios/cli/ioscli cluster -status",
+    "/usr/ios/cli/ioscli lssp -clustername <cluster>"
   ],
   "tags": [],
-  "blurb": "This check looks for Shared Storage Pool capacity on a VIOS and is separate from ssp_cluster. No cluster is not applicable. ioscli cluster -status reports cluster and pool state, not pool size or free space (https://www.ibm.com/docs/en/power7/8231-E1D?topic=commands-cluster-command). Those numbers belong to lssp, which this check does not run. A configured cluster is not assessed, and no capacity number is graded.",
+  "blurb": "This check grades Shared Storage Pool free space on a VIOS and is separate from ssp_cluster. No cluster is not applicable. After the cluster is present it runs lssp -clustername and compares FREE_SPACE with POOL_SIZE. IBM states that I/O operations on the virtual client partition might fail when free space falls below 5 percent of total space. Bare lssp, Size(mb), Free(mb), and rootvg are not graded. 35 percent is the default alert, not this fail-line.",
   "license": "Apache-2.0",
   "artifact": "checks/ck-ssp-pool-capacity/ck-ssp-pool-capacity.ksh"
 }

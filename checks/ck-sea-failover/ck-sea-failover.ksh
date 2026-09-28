@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -872,8 +906,7 @@ _AIXRAY_SESSION_KEYS=""
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
   vios_role_classify
   CLST=$(vios cluster_status cluster -status); RC=$?
-  CLPRESENT=0
-  if [ "$RC" -eq 0 ] && [ -n "$CLST" ] && printf '%s\n' "$CLST" | grep -qi 'Cluster'; then CLPRESENT=1; fi
+  CLCLASS=$(vios_cluster_classify cluster_status "$RC" "$CLST")
 
   # sea_failover — Shared Ethernet Adapter HA posture (DEEPENED).
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
@@ -897,7 +930,7 @@ _AIXRAY_SESSION_KEYS=""
   SEA_RAW=$(vios lsdev_sea lsdev -type sea); SEA_RC=$?
   SEAS=$(printf '%s\n' "$SEA_RAW" | awk 'NR>1 && $1 ~ /^ent[0-9]+$/{print $1}')
   if [ "$ROLE" != aix ] && [ -n "$SEAS" ] && [ "$SEA_RC" -eq 0 ]; then
-    SEACNT=0; BADHA=0; NOCTL=0; NOPRIO=0; NOLSA=0; SEADET=""
+    SEACNT=0; BADHA=0; NOCTL=0; NOPRIO=0; NOLSA=0; UNSETTLED=0; SEADET=""
     for SEA in $SEAS; do
       SEACNT=$((SEACNT+1))
       LSA=$(vios "lsattr_sea_$SEA" lsdev -dev "$SEA" -attr); LSA_RC=$?
@@ -916,7 +949,12 @@ _AIXRAY_SESSION_KEYS=""
       ESTAT=$(aix "entstat_sea_$SEA" entstat -d "$SEA"); ESTAT_RC=$?
       SST=$(printf '%s\n' "$ESTAT" | awk -F: '/^[ \t]*State:/{v=$2; gsub(/^[ \t]+|[ \t]+$/,"",v); print v; exit}')
       [ -z "$SST" ] && SST="?"
+      # A failed entstat is an unread state. Do not grade it as LIMBO, and
+      # do not call it PRIMARY. Only a read LIMBO or RECOVERY cannot settle.
       if [ "$ESTAT_RC" -ne 0 ]; then SST="?"; fi
+      case "$SST" in
+        LIMBO|RECOVERY) UNSETTLED=$((UNSETTLED+1));;
+      esac
       SEADET="$SEADET${SEADET:+; }$SEA ha_mode=$HAM ctl_chan=${CTL:-none} priority=${PRIO:-unset} state=$SST"
     done
     if [ "$NOLSA" -gt 0 ]; then
@@ -930,21 +968,32 @@ _AIXRAY_SESSION_KEYS=""
       add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
           "A Shared Ethernet Adapter on this VIOS is not configured for failover (ha_mode not auto/standby/sharing) — a second VIOS cannot take over the bridge, so every client LPAR bridged through this SEA loses its network the moment this VIOS goes down. This is not a redundant network." \
           "set the SEA for failover ('chdev -dev <sea> -attr ha_mode=auto ctl_chan=<ent> priority=<n>'), give the pair distinct priorities, and confirm the partner VIOS's SEA ('entstat -d <sea>' on both)."
-    elif [ "$NOCTL" -gt 0 ] && [ "$CLPRESENT" -eq 0 ]; then
+    elif [ "$NOCTL" -gt 0 ] && [ "$CLCLASS" = absent ]; then
       LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" FAIL high "$SEADET" \
           "A Shared Ethernet Adapter is set to fail over but has no control channel (ctl_chan) and no CAA cluster to replace it — the two VIOS cannot arbitrate primary/backup, so a failover can leave both bridging at once (split-brain: duplicated frames, a broadcast storm) or neither." \
           "add a control-channel adapter/VLAN ('mkvdev -sea ...'/'chdev -dev <sea> -attr ctl_chan=<ent>'), or adopt the CAA control-channel-less method on a supported VIOS level; verify on both VIOS."
-    elif [ "$NOCTL" -gt 0 ]; then
+    elif [ "$NOCTL" -gt 0 ] && [ "$CLCLASS" = present ]; then
       LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
           "A Shared Ethernet Adapter has no ctl_chan, but a CAA cluster is present — the newer control-channel-less SEA failover uses the cluster instead. Likely intentional; confirm it is actually the CAA method and not a half-removed control channel." \
           "confirm the SEA uses CAA-based failover (supported VIOS level + cluster) rather than a lost control channel; check the partner VIOS's SEA config too."
+    elif [ "$NOCTL" -gt 0 ]; then
+      LIVE_BRANCH=probe_failed
+      add resilience sea_failover "SEA failover posture" NOT_ASSESSED low \
+          "not assessed — cluster -status unreadable (rc=$RC); ctl_chan not graded" \
+          "A Shared Ethernet Adapter is set to fail over but has no control channel, and cluster -status was not readable. An unreadable cluster is not 'no cluster' and is not a CAA control channel, so the missing ctl_chan is not graded." \
+          "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading SEA failover posture."
     elif [ "$NOPRIO" -gt 0 ]; then
       LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
           "The SEA is set for failover with a control channel, but a priority is unset/unreadable — without distinct priorities across the pair the primary/backup roles are undefined and can flap." \
           "set a priority on each side ('chdev -dev <sea> -attr priority=<n>'), distinct between the two VIOS (e.g. 1 and 2)."
+    elif [ "$UNSETTLED" -gt 0 ]; then
+      LIVE_BRANCH=configured_ha
+      add resilience sea_failover "SEA failover posture" WARN med "$SEADET" \
+          "A Shared Ethernet Adapter runtime State is LIMBO or RECOVERY. Those two states cannot settle a role, so a configured ha_mode is not a settled failover. An unread state is not this warning." \
+          "inspect 'entstat -d <sea>' on this VIOS and its partner until State leaves LIMBO or RECOVERY."
     else
       LIVE_BRANCH=configured_ha
       add resilience sea_failover "SEA failover posture" PASS low "$SEADET" \

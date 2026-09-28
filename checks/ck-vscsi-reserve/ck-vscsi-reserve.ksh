@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -920,17 +954,17 @@ _AIXRAY_SESSION_KEYS=""
         fi
       done
       if [ "$RSVBAD" -gt 0 ]; then
-        LIVE_BRANCH=no_reserve
+        LIVE_BRANCH=reserve_held
         add storage vscsi_reserve "vSCSI backing-LUN reservation" FAIL high "$RSVBAD of $RSVTOT backing LUN(s) reserved: $RSVDET" \
             "A backing LUN behind a vSCSI map is holding a SCSI reservation (reserve_policy not no_reserve) — the OTHER VIOS physically cannot open this LUN, so vSCSI failover for that client fails SILENTLY. Everything looks mapped and 'dual', but if this VIOS drops, the client's disk does not come back on the partner. This vSCSI path is not actually redundant." \
             "set the backing disk to no_reserve on this VIOS ('chdev -dev <hdisk> -attr reserve_policy=no_reserve'; older disks: reserve_lock=no) and confirm the SAME on the partner VIOS for the same LUN before relying on failover."
       elif [ "$RSVUNK" -gt 0 ]; then
-        LIVE_BRANCH=no_reserve
+        LIVE_BRANCH=reserve_unreadable
         add storage vscsi_reserve "vSCSI backing-LUN reservation" WARN med "reserve_policy unreadable on $RSVUNK of $RSVTOT backing LUN(s): $RSVDET" \
             "Could not read reserve_policy on the vSCSI backing LUNs — cannot confirm they are no_reserve, which dual-VIOS vSCSI failover requires (older disks expose reserve_lock instead). Not confirming this leaves a common silent-failover trap unchecked." \
             "check each backing hdisk ('lsdev -dev <hdisk> -attr reserve_policy' or 'lsattr -El <hdisk> -a reserve_lock') on BOTH VIOS; they must be no_reserve / reserve_lock=no to fail over."
       else
-        LIVE_BRANCH=no_reserve
+        LIVE_BRANCH=reserve_ok
         add storage vscsi_reserve "vSCSI backing-LUN reservation" PASS low "$RSVTOT backing LUN(s), all no_reserve: $RSVDET" \
             "Every vSCSI backing LUN on this VIOS is no_reserve — the partner VIOS can physically open the same LUNs, so vSCSI failover is viable from this side. Single-box scan: confirm the partner VIOS holds no_reserve on the same LUNs too." "n/a"
       fi

@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -869,7 +903,8 @@ _AIXRAY_SESSION_KEYS=""
   # Re-ported from the monolith idea. Same lsmap -all -npiv probe as
   # npiv_maps, plus lsnports for the fabric-connected port count. A vfchost
   # that is not logged in is FAIL here (npiv_maps warns). No vfchost on a
-  # confirmed VIOS is NOT_APPLICABLE. A failed lsmap is NOT_ASSESSED.
+  # confirmed VIOS is NOT_APPLICABLE. A failed lsmap, or an unparsed
+  # adapter span, is NOT_ASSESSED.
   vios_role_classify
   case "$ROLE" in
   aix)
@@ -893,33 +928,61 @@ _AIXRAY_SESSION_KEYS=""
       NPLIST=$(printf '%s\n' "$NPIVRAW" | awk -F: '
         $1 ~ /^vfchost[0-9]/ { split($0,a," "); name=a[1] }
         /^Status:/ { s=$2; gsub(/[ \t]/,"",s); if (s!="LOGGED_IN") printf "%s%s (%s)", (n++?", ":""), name, s }')
-      # lsnports column order (name physloc fabric ...) is the monolith parse.
-      # fabric=1 means connected. A failed lsnports contributes a zero count,
-      # the same as the monolith; it is not a second map probe.
-      LSNP=$(vios lsnports lsnports); LSNP_RC=$?
-      if [ "$LSNP_RC" -ne 0 ]; then LSNP=""; fi
-      NPFAB=$(printf '%s\n' "$LSNP" | awk 'NR>1 && $3+0>=1{n++} END{print n+0}')
-      NPSPAN=$(printf '%s\n' "$NPIVRAW" | awk -F'FC loc code:' '
-        /FC loc code:/ { v=$2; gsub(/^[ \t]+/,"",v); sub(/[ \t].*/,"",v); sub(/-T[0-9]+.*/,"",v);
-                         if (v!="" && !s[v]++) n++ } END{print n+0}')
-      NPFCS=$(printf '%s\n' "$NPIVRAW" | awk -F'FC name:' '
-        /FC name:/ { v=$2; gsub(/^[ \t]+/,"",v); sub(/[ \t].*/,"",v);
-                     if (v!="" && !s[v]++) n++ } END{print n+0}')
-      [ "${NPSPAN:-0}" -eq 0 ] && NPSPAN=$NPFCS
+      # NOT_LOGGED_IN is lsmap alone, before any span probe.
       if [ "${NPBAD:-0}" -gt 0 ]; then
         LIVE_BRANCH=configured_redundancy
         add storage npiv_redundancy "NPIV path redundancy" FAIL high "$NPBAD of $NPTOT vfchost NOT_LOGGED_IN: $NPLIST" \
             "One or more virtual-FC host adapters on this VIOS are NOT_LOGGED_IN — that client's FC path THROUGH THIS VIOS is dead. Right now the client is surviving only on its other VIOS's path (if it has one); this side is not providing the redundancy it is supposed to." \
             "restore the physical FC login (fcstat/errpt on this VIOS, SAN zoning, switch port), then confirm the vfchost logs in; verify the client's second path via the partner VIOS is actually up so it is not a single path masquerading as two."
-      elif [ "${NPSPAN:-0}" -ge 2 ]; then
-        LIVE_BRANCH=configured_redundancy
-        add storage npiv_redundancy "NPIV path redundancy" PASS low "$NPTOT vfchost across $NPSPAN physical FC adapter(s); $NPFAB fabric-connected port(s)" \
-            "Every NPIV vfchost is logged in, and they ride more than one physical FC adapter on this VIOS — a single FC card/port loss does not take out all NPIV clients on this side." "n/a"
       else
-        LIVE_BRANCH=configured_redundancy
-        add storage npiv_redundancy "NPIV path redundancy" WARN high "all $NPTOT vfchost on a single physical FC adapter" \
-            "Every NPIV vfchost is logged in, but they all ride ONE physical FC adapter on this VIOS — no fabric/adapter redundancy from this side. One FC card, port, or fabric event takes out every NPIV client served by this VIOS at once (they then depend entirely on the partner VIOS)." \
-            "spread the NPIV maps across a second physical FC adapter/fabric on this VIOS ('vfcmap' to a vfchost backed by a different fcs), and confirm the partner VIOS uses a different adapter/fabric too."
+        # First count above zero: FC loc-code slot, else FC name, else
+        # lsnports fabric ports only when that command's rc is 0. A failed
+        # lsnports is not a fabric count of zero and does not choose WARN
+        # versus PASS once a loc code or an FC name parsed.
+        NPLOC=$(printf '%s\n' "$NPIVRAW" | awk -F'FC loc code:' '
+          /FC loc code:/ { v=$2; gsub(/^[ \t]+/,"",v); sub(/[ \t].*/,"",v); sub(/-T[0-9]+.*/,"",v);
+                           if (v!="" && !s[v]++) n++ } END{print n+0}')
+        NPFCS=$(printf '%s\n' "$NPIVRAW" | awk -F'FC name:' '
+          /FC name:/ { v=$2; gsub(/^[ \t]+/,"",v); sub(/[ \t].*/,"",v);
+                       if (v!="" && !s[v]++) n++ } END{print n+0}')
+        LSNP=$(vios lsnports lsnports); LSNP_RC=$?
+        NPFAB=""
+        if [ "$LSNP_RC" -eq 0 ]; then
+          NPFAB=$(printf '%s\n' "$LSNP" | awk 'NR>1 && $3+0>=1{n++} END{print n+0}')
+        fi
+        NPSPAN=0
+        if [ "${NPLOC:-0}" -gt 0 ]; then
+          NPSPAN=$NPLOC
+        elif [ "${NPFCS:-0}" -gt 0 ]; then
+          NPSPAN=$NPFCS
+        elif [ "$LSNP_RC" -eq 0 ] && [ "${NPFAB:-0}" -gt 0 ]; then
+          NPSPAN=$NPFAB
+        fi
+        if [ "${NPSPAN:-0}" -ge 2 ]; then
+          LIVE_BRANCH=configured_redundancy
+          if [ "$LSNP_RC" -eq 0 ]; then
+            NPOBS="$NPTOT vfchost across $NPSPAN physical FC adapter(s); $NPFAB fabric-connected port(s)"
+          else
+            NPOBS="$NPTOT vfchost across $NPSPAN physical FC adapter(s)"
+          fi
+          add storage npiv_redundancy "NPIV path redundancy" PASS low "$NPOBS" \
+              "Every NPIV vfchost is logged in, and they ride more than one physical FC adapter on this VIOS — a single FC card/port loss does not take out all NPIV clients on this side." "n/a"
+        elif [ "${NPSPAN:-0}" -eq 1 ]; then
+          LIVE_BRANCH=configured_redundancy
+          add storage npiv_redundancy "NPIV path redundancy" WARN high "all $NPTOT vfchost on a single physical FC adapter" \
+              "Every NPIV vfchost is logged in, but they all ride ONE physical FC adapter on this VIOS — no fabric/adapter redundancy from this side. One FC card, port, or fabric event takes out every NPIV client served by this VIOS at once (they then depend entirely on the partner VIOS)." \
+              "spread the NPIV maps across a second physical FC adapter/fabric on this VIOS ('vfcmap' to a vfchost backed by a different fcs), and confirm the partner VIOS uses a different adapter/fabric too."
+        else
+          LIVE_BRANCH=probe_failed
+          if [ "$LSNP_RC" -ne 0 ]; then
+            NPOBS="not assessed — NPIV span unparsed and '/usr/ios/cli/ioscli lsnports' failed (rc=$LSNP_RC)"
+          else
+            NPOBS="not assessed — NPIV span unparsed (no FC loc code, no FC name, lsnports fabric count 0)"
+          fi
+          add storage npiv_redundancy "NPIV path redundancy" NOT_ASSESSED low "$NPOBS" \
+              "FC loc codes and FC names did not yield a span, and a successful lsnports did not supply a fabric-port count, so this is not graded as a single physical FC adapter." \
+              "re-run '/usr/ios/cli/ioscli lsmap -all -npiv' and '/usr/ios/cli/ioscli lsnports' before grading NPIV path redundancy."
+        fi
       fi
     else
       LIVE_BRANCH=subject_absent

@@ -1,0 +1,19 @@
+{
+  "id": "ck-vios-backup-schedule",
+  "pillar": "backup",
+  "category": "monitoring",
+  "finding_ids": [
+    "vios_backup_schedule"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli viosbr -view -list",
+    "/usr/ios/cli/ioscli viosbr -autobackup status"
+  ],
+  "tags": [],
+  "blurb": "This check looks at whether a VIOS configuration backup is current. It runs viosbr -autobackup status and viosbr -view -list. Node or cluster configuration changes that are Complete pass. An empty backup directory warns only when status is not already current. It does not read crontab, and it does not run backupios or viosbr -backup. A plain AIX LPAR is not applicable. ck-backup-job stays pared.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-vios-backup-schedule/ck-vios-backup-schedule.ksh"
+}

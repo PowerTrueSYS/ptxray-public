@@ -1,0 +1,18 @@
+{
+  "id": "ck-vscsi-lv-backing",
+  "pillar": "resiliency",
+  "category": "storage",
+  "finding_ids": [
+    "vscsi_lv_backing"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsmap -all"
+  ],
+  "tags": [],
+  "blurb": "This check reads the Backing device token from ioscli lsmap -all, the same capture as vscsi_maps. Every token shaped hdisk plus digits passes. The viosupgrade checklist (https://www.ibm.com/support/pages/node/6258119) does not print a logical-volume name shape, so any other non-empty token is not assessed. No vhost is not applicable. It does not re-grade a missing or Defined virtual target, and it does not run viosbr.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-vscsi-lv-backing/ck-vscsi-lv-backing.ksh"
+}

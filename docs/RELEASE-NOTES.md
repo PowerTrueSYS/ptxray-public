@@ -1,5 +1,13 @@
 # Release notes
 
+<!-- PTXRAY-PUBLICATION-READY:v1.8.3 -->
+
+## v1.8.3
+
+The VIOS edition is `catalog-ready`. Every in-scope appliance control has a door, a configured-branch fixture, an absence fixture, and a deviation-research note. A bare VIOS still reports `absence-only`.
+
+That is not a live test of SEA failover, logged-in NPIV, virtual SCSI, or a Shared Storage Pool, and it is not a CIS VIOS certification. There is no CIS VIOS benchmark.
+
 <!-- PTXRAY-PUBLICATION-READY:v1.8.2 -->
 
 ## v1.8.2

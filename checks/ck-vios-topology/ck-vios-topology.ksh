@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -872,8 +906,7 @@ _AIXRAY_SESSION_KEYS=""
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
   vios_role_classify
   CLST=$(vios cluster_status cluster -status); RC=$?
-  CLPRESENT=0
-  if [ "$RC" -eq 0 ] && [ -n "$CLST" ] && printf '%s\n' "$CLST" | grep -qi 'Cluster'; then CLPRESENT=1; fi
+  CLCLASS=$(vios_cluster_classify cluster_status "$RC" "$CLST")
 
   RAW_SEA=$(vios lsdev_sea lsdev -type sea); RC_SEA=$?
   SEAS=$(printf '%s\n' "$RAW_SEA" | awk 'NR>1 && $1 ~ /^ent[0-9]+$/{print $1}')
@@ -914,35 +947,43 @@ _AIXRAY_SESSION_KEYS=""
   # confident FAIL); FAIL only when a SEA is present but demonstrably unable to fail over.
   # Verified: the ha_mode / ctl_chan / priority reads above are documented per the IBM
   # mkvdev command reference. This tool emits vios_topology only.
-  if [ "$ROLE" != aix ] && { { [ -n "$SEAS" ] && [ "$RC_SEA" -eq 0 ]; } || [ "$CLPRESENT" -eq 1 ]; }; then
-    if [ "${NOLSA:-0}" -gt 0 ] && [ "$CLPRESENT" -eq 0 ]; then
+  if [ "$ROLE" != aix ] && { { [ -n "$SEAS" ] && [ "$RC_SEA" -eq 0 ]; } || [ "$CLCLASS" = present ]; }; then
+    if [ "${NOLSA:-0}" -gt 0 ] && [ "$CLCLASS" = unreadable ]; then
+      LIVE_BRANCH=probe_failed
+      add resilience vios_topology "VIOS redundancy topology" NOT_ASSESSED low \
+          "cluster probe unreadable (rc=$RC); SEA failover posture was not graded" \
+          "The cluster probe was not readable, so a missing control channel is not 'no cluster' and is not a partner VIOS. Topology is not graded from an unread cluster." \
+          "re-run '/usr/ios/cli/ioscli cluster -status' before grading VIOS topology."
+    elif [ "${NOLSA:-0}" -gt 0 ] && [ "$CLCLASS" != present ]; then
       LIVE_BRANCH=probe_failed
       add resilience vios_topology "VIOS redundancy topology" NOT_ASSESSED low \
           "SEA attribute probe failed for $NOLSA SEA(s) (rc=$LSAFAIL_RC); no CAA cluster" \
           "The SEA list was read, but 'lsattr -El <sea>' failed, so HA attributes cannot be graded — a failed probe must not be read as a missing partner or as a failover-ready pair." \
           "re-run 'lsattr -El <sea>' on the box and inspect its error before grading VIOS topology."
-    elif [ -n "$SEAS" ] && { [ "$BADHA" -gt 0 ] || [ "$NOCTL" -gt 0 ]; } && [ "$CLPRESENT" -eq 0 ]; then
+    elif [ -n "$SEAS" ] && { [ "$BADHA" -gt 0 ] || [ "$NOCTL" -gt 0 ]; } && [ "$CLCLASS" = absent ]; then
       LIVE_BRANCH=configured_ha
       add resilience vios_topology "VIOS redundancy topology" FAIL high "SEA present, not failover-ready; no CAA cluster" \
           "This VIOS bridges the network but its SEA is not able to fail over to a partner (no control channel / ha_mode not set) and there is no CAA cluster — so a second VIOS cannot cleanly take over the network. Either this is a standalone VIOS (a single point of failure for every client's disk and network) or a broken pair where the second side was never fully wired." \
           "decide the intent: if it is meant to be an HA pair, wire the SEA control channel + ha_mode on BOTH VIOS and confirm the partner is serving; if it is genuinely standalone, treat this VIOS as a known SPOF (single client outage domain) in the runbook."
-    elif { [ -n "$SEAS" ] && [ "$BADHA" -eq 0 ] && [ "$NOCTL" -eq 0 ]; } || [ "$CLPRESENT" -eq 1 ]; then
+    elif { [ -n "$SEAS" ] && [ "$BADHA" -eq 0 ] && [ "$NOCTL" -eq 0 ]; } || [ "$CLCLASS" = present ]; then
       LIVE_BRANCH=configured_ha
       add resilience vios_topology "VIOS redundancy topology" PASS low "HA config present (SEA failover / CAA cluster) — partner VIOS implied" \
           "This VIOS carries HA configuration (a failover-ready SEA and/or a CAA cluster), which implies a partner VIOS exists to take over. A single-box scan cannot PROVE the partner is healthy and actually serving — that lives on the other LPAR." \
           "confirm the second VIOS exists, is on a different physical path, and is genuinely serving clients (its own ptxray/entstat/lsmap) — do not assume 'configured for failover' means the partner is up."
     else
-      LIVE_BRANCH=configured_ha
-      add resilience vios_topology "VIOS redundancy topology" WARN high "no SEA HA config and no CAA cluster visible from this box" \
-          "Nothing on this box indicates a partner VIOS — no failover-ready SEA, no CAA cluster. This may be a genuinely single VIOS, in which case every client LPAR's disk AND network depends on this one server: a single point of failure whose loss takes down all its clients." \
-          "confirm whether a second VIOS exists and is actually serving; if not, this is a real SPOF — plan a partner VIOS, or document the single-VIOS risk and its blast radius explicitly."
+      LIVE_BRANCH=probe_failed
+      add resilience vios_topology "VIOS redundancy topology" NOT_ASSESSED low \
+          "cluster probe unreadable (rc=$RC); SEA failover posture was not graded" \
+          "The cluster probe was not readable, so a missing control channel is not 'no cluster' and is not a partner VIOS. Topology is not graded from an unread cluster." \
+          "re-run '/usr/ios/cli/ioscli cluster -status' before grading VIOS topology."
     fi
   fi
 
-  # No SEA and no cluster is one finding. rc 0 empty is NOT_APPLICABLE
+  # No SEA and an absent cluster is one finding. rc 0 empty is NOT_APPLICABLE
   # (subject absent). A failed SEA probe is NOT_ASSESSED, not "no SEA".
-  # ROLE=aix is NOT_APPLICABLE even when a probe failed.
-  if [ "$ROLE" = aix ] || { { [ -z "$SEAS" ] || [ "$RC_SEA" -ne 0 ]; } && [ "$CLPRESENT" -eq 0 ]; }; then
+  # ROLE=aix is NOT_APPLICABLE even when a probe failed. An unreadable
+  # cluster is not this absence.
+  if [ "$ROLE" = aix ] || { { [ -z "$SEAS" ] || [ "$RC_SEA" -ne 0 ]; } && [ "$CLCLASS" = absent ]; }; then
     if [ "$ROLE" != aix ] && [ "$RC_SEA" -ne 0 ]; then
       LIVE_BRANCH=probe_failed
       add resilience vios_topology "VIOS redundancy topology" NOT_ASSESSED low \
@@ -956,6 +997,14 @@ _AIXRAY_SESSION_KEYS=""
           "No Shared Ethernet Adapter and no CAA cluster are visible on this box, so there is no VIOS redundancy topology to grade." \
           "n/a"
     fi
+  fi
+  if [ "$ROLE" != aix ] && [ "$CLCLASS" = unreadable ] \
+      && { [ -z "$SEAS" ] || [ "$RC_SEA" -ne 0 ]; }; then
+    LIVE_BRANCH=probe_failed
+    add resilience vios_topology "VIOS redundancy topology" NOT_ASSESSED low \
+        "cluster probe unreadable (rc=$RC); sea probe rc=$RC_SEA" \
+        "The cluster probe was not readable and no Shared Ethernet Adapter was graded. An unreadable cluster is not absence and is not a partner VIOS." \
+        "re-run '/usr/ios/cli/ioscli cluster -status' and 'lsdev -type sea' before grading VIOS topology."
   fi
 }
 

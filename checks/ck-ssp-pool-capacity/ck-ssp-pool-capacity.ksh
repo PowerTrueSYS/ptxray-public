@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -866,12 +900,11 @@ AIXRAY_TOOL=ck-ssp-pool-capacity
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   # ssp_pool_capacity — one finding, not folded into ck-ssp-cluster.
-  # The only allowlisted SSP query is cluster -status. That text carries
-  # cluster and pool state, not pool size or free space. Those numbers are
-  # lssp fields, and this check does not run lssp. No cluster is
-  # NOT_APPLICABLE / subject_absent. A present cluster is NOT_ASSESSED
-  # because the capacity field was not reported. An undocumented column is
-  # not graded. LIVE_BRANCH is set; live_verified is not.
+  # After the cluster is present, lssp -clustername supplies POOL_SIZE and
+  # FREE_SPACE. Bare lssp is not run: that table includes rootvg and prints
+  # Size(mb)/Free(mb), which are not graded. The only fail-line is free
+  # space below 5 percent of total space. 35 percent is the default alert,
+  # not this rule. LIVE_BRANCH is set; live_verified is not.
   vios_role_classify
   if [ "$ROLE" != vios ]; then
     if [ "$ROLE" = aix ]; then
@@ -889,51 +922,100 @@ _AIXRAY_SESSION_KEYS=""
     fi
   else
     CLST=$(vios cluster_status cluster -status); RC=$?
-    HAS_NAME=0
-    ABSENT=0
-    if [ "$RC" -eq 0 ] && printf '%s\n' "$CLST" | grep -qi 'Cluster Name:'; then
-      HAS_NAME=1
-    fi
-    if [ -z "$CLST" ]; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'not configured'; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'does not exist'; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'no cluster'; then
-      ABSENT=1
-    fi
-    if [ "$HAS_NAME" -eq 1 ]; then
-      ABSENT=0
-    fi
-    if [ "$RC" -eq 127 ] && aix_capture_missing cluster_status; then
-      LIVE_BRANCH=probe_failed
-      add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
-        "not assessed - cluster -status has no capture (rc=$RC)" \
-        "The cluster probe was not captured, so absence of an SSP cannot be claimed and a capacity number cannot be read." \
-        "capture '/usr/ios/cli/ioscli cluster -status' and re-assess."
-    elif [ "$ABSENT" -eq 1 ]; then
-      LIVE_BRANCH=subject_absent
-      add storage ssp_pool_capacity "SSP pool capacity" NOT_APPLICABLE low \
-        "no CAA/SSP cluster present" \
-        "cluster -status shows no cluster (empty output, or text that the cluster is not configured or does not exist). Shared Storage Pool capacity does not apply." \
-        "n/a"
-    elif [ "$RC" -ne 0 ] || [ "$HAS_NAME" -ne 1 ]; then
-      LIVE_BRANCH=probe_failed
-      add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
-        "not assessed - cluster -status failed or was unreadable (rc=$RC)" \
-        "The cluster probe did not show a configured cluster and did not show the none or not-configured absence text. A failed probe is not 'no cluster'." \
-        "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading SSP pool capacity."
-    else
-      LIVE_BRANCH=configured_cluster
-      add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
-        "cluster present; cluster -status did not report a pool-capacity field" \
-        "A cluster is defined, but ioscli cluster -status did not report pool size or free space. IBM documents those numbers on lssp, which this check does not run. No capacity number is graded, and an undocumented column is not a failure." \
-        "n/a"
-    fi
+    CLCLASS=$(vios_cluster_classify cluster_status "$RC" "$CLST")
+    case "$CLCLASS" in
+      absent)
+        LIVE_BRANCH=subject_absent
+        add storage ssp_pool_capacity "SSP pool capacity" NOT_APPLICABLE low \
+          "no CAA/SSP cluster present" \
+          "cluster -status shows no cluster (empty output, or text that the cluster is not configured or does not exist). Shared Storage Pool capacity does not apply." \
+          "n/a"
+        ;;
+      present)
+        # Remainder of "Cluster Name:" with edge whitespace removed.
+        # Internal spaces stay inside the one quoted lssp argument.
+        CLNAME=$(printf '%s\n' "$CLST" | awk '
+          /^Cluster Name:/ {
+            sub(/^Cluster Name:[ \t]*/, "")
+            sub(/[ \t]+$/, "")
+            print
+            exit
+          }')
+        if [ -z "$CLNAME" ]; then
+          LIVE_BRANCH=probe_failed
+          add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+            "not assessed - Cluster Name was empty" \
+            "cluster -status matched a present cluster, but the Cluster Name remainder was empty. lssp -clustername was not run." \
+            "n/a"
+        else
+          LSSP=$(vios lssp lssp -clustername "$CLNAME"); LRC=$?
+          if [ "$LRC" -ne 0 ]; then
+            LIVE_BRANCH=probe_failed
+            add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+              "not assessed - lssp -clustername failed (rc=$LRC)" \
+              "The shared-pool probe failed. Bare lssp is not graded, and a failed lssp -clustername is not a low pool." \
+              "re-run '/usr/ios/cli/ioscli lssp -clustername <cluster>' and inspect its error before grading pool capacity."
+          else
+            PSIZE=$(printf '%s\n' "$LSSP" | awk '
+              /^POOL_SIZE:/ { sub(/^POOL_SIZE:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }')
+            FSPACE=$(printf '%s\n' "$LSSP" | awk '
+              /^FREE_SPACE:/ { sub(/^FREE_SPACE:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }')
+            # free/size >= 0.05 is free*20 >= size. POOL_SIZE 0 is not a divide.
+            REL=$(printf '%s %s\n' "$FSPACE" "$PSIZE" | awk '
+              {
+                fs = $1; ps = $2
+                if (fs !~ /^[0-9]+$/ || ps !~ /^[0-9]+$/) { print "missing"; exit }
+                if (ps + 0 == 0) { print "zero"; exit }
+                if (fs * 20 >= ps) print "ok"; else print "low"
+              }')
+            case "$REL" in
+              ok)
+                LIVE_BRANCH=configured_pool
+                add storage ssp_pool_capacity "SSP pool capacity" PASS low \
+                  "FREE_SPACE=$FSPACE POOL_SIZE=$PSIZE" \
+                  "Free space is at least 5 percent of total space. IBM states that I/O operations on the virtual client partition might fail when free space falls below 5 percent of total space." \
+                  "n/a"
+                ;;
+              low)
+                LIVE_BRANCH=configured_pool
+                add storage ssp_pool_capacity "SSP pool capacity" FAIL high \
+                  "FREE_SPACE=$FSPACE POOL_SIZE=$PSIZE" \
+                  "IBM states that I/O operations on the virtual client partition might fail when free space falls below 5 percent of total space." \
+                  "add physical volumes to the shared pool or delete data from the pool so free space is at least 5 percent of total space."
+                ;;
+              zero)
+                LIVE_BRANCH=probe_failed
+                add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+                  "POOL_SIZE=0" \
+                  "POOL_SIZE is 0, so free space cannot be divided by total space. That is not a capacity failure." \
+                  "re-run '/usr/ios/cli/ioscli lssp -clustername <cluster>' and confirm POOL_SIZE is a non-zero integer."
+                ;;
+              *)
+                LIVE_BRANCH=probe_failed
+                add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+                  "lssp -clustername did not report POOL_SIZE and FREE_SPACE" \
+                  "lssp -clustername did not report both POOL_SIZE and FREE_SPACE. Size(mb) and Free(mb) are not graded, and rootvg is not the shared pool." \
+                  "re-run '/usr/ios/cli/ioscli lssp -clustername <cluster>' and read POOL_SIZE and FREE_SPACE."
+                ;;
+            esac
+          fi
+        fi
+        ;;
+      *)
+        LIVE_BRANCH=probe_failed
+        if [ "$RC" -eq 127 ]; then
+          add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+            "not assessed - cluster -status has no capture (rc=$RC)" \
+            "The cluster probe was not captured, so absence of an SSP cannot be claimed and a capacity number cannot be read." \
+            "capture '/usr/ios/cli/ioscli cluster -status' and re-assess."
+        else
+          add storage ssp_pool_capacity "SSP pool capacity" NOT_ASSESSED low \
+            "not assessed - cluster -status failed or was unreadable (rc=$RC)" \
+            "The cluster probe did not show a configured cluster and did not show the none or not-configured absence text. A failed probe is not 'no cluster'." \
+            "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading SSP pool capacity."
+        fi
+        ;;
+    esac
   fi
 }
 

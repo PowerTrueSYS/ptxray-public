@@ -56,7 +56,7 @@ IBM FLRTVC requires native ksh93 and trusted OpenSSL; initial connected engine a
 Every run assesses the operational pillars (OS/firmware currency, known vulnerabilities, resilience) in addition to the selected standard.
 PTxray downloads the latest signed definitions by default. Opt out with --offline (cache only) or --definitions-bundle FILE to point at definitions you copied in (air-gapped machines).'
 
-PTXRAY_RUNNER_VERSION="1.8.2"
+PTXRAY_RUNNER_VERSION="1.8.3"
 
 WANT_HTML=0
 WANT_PDF=0
@@ -1037,9 +1037,10 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
   AIXRAY_ROLE=$(vios_scan_classify)
   export AIXRAY_ROLE
   unset AIXRAY_VIOS_ACCEPTANCE
+  unset AIXRAY_VIOS_EDITION
   if [ "$AIXRAY_ROLE" = vios ]; then
-    AIXRAY_VIOS_ACCEPTANCE=absence-only
-    export AIXRAY_VIOS_ACCEPTANCE
+    AIXRAY_VIOS_EDITION=catalog-ready
+    export AIXRAY_VIOS_EDITION
   fi
 
   # The fact tools are pure transformers: they read a capture on --in and
@@ -1118,6 +1119,112 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
   rc=$?
   if [ "$rc" -ne 0 ]; then
     exit "$rc"
+  fi
+
+  # This run only. Four live_branch values, nothing else. Dispatch already
+  # wrote vios_edition. Patch envelope.json before the date-only emit copy
+  # so report.json and the emitter see the same key. Does not read
+  # AIXRAY_FIXTURES and does not set live_verified.
+  if [ "$AIXRAY_ROLE" = vios ]; then
+    awk '
+#VAWK-START
+function jget(line, key,    p, rest, i, c, esc, out) {
+  p = index(line, "\"" key "\"")
+  if (p == 0) return ""
+  rest = substr(line, p + length(key) + 2)
+  if (sub(/^[ \t]*:[ \t]*"/, "", rest) != 1) return ""
+  out = ""
+  esc = 0
+  for (i = 1; i <= length(rest); i++) {
+    c = substr(rest, i, 1)
+    if (esc) {
+      out = out c
+      esc = 0
+      continue
+    }
+    if (c == "\\") {
+      esc = 1
+      continue
+    }
+    if (c == "\"") return out
+    out = out c
+  }
+  return ""
+}
+function kind(b) {
+  if (b == "subject_absent") return "absent"
+  if (index(b, "configured_") == 1) return "conf"
+  return "other"
+}
+function take(id, br) {
+  if (id == "sea_failover") {
+    if (seen_sea) dup = 1
+    seen_sea = 1
+    b_sea = br
+  } else if (id == "npiv_maps") {
+    if (seen_npiv) dup = 1
+    seen_npiv = 1
+    b_npiv = br
+  } else if (id == "vscsi_maps") {
+    if (seen_vscsi) dup = 1
+    seen_vscsi = 1
+    b_vscsi = br
+  } else if (id == "ssp_cluster") {
+    if (seen_ssp) dup = 1
+    seen_ssp = 1
+    b_ssp = br
+  }
+}
+{
+  line[NR] = $0
+  if (inf == 0 && index($0, "\"role\"") > 0 && index($0, "\"tool\"") == 0)
+    role = jget($0, "role")
+  if (index($0, "\"findings\"") > 0) inf = 1
+  if (inf == 0) next
+  id = jget($0, "id")
+  if (id == "") next
+  take(id, jget($0, "live_branch"))
+}
+END {
+  if (role != "vios") {
+    for (i = 1; i <= NR; i++) print line[i]
+    exit
+  }
+  acc = "subjects-ungraded"
+  if (!dup && seen_sea && seen_npiv && seen_vscsi && seen_ssp) {
+    k1 = kind(b_sea)
+    k2 = kind(b_npiv)
+    k3 = kind(b_vscsi)
+    k4 = kind(b_ssp)
+    if (k1 == "other" || k2 == "other" || k3 == "other" || k4 == "other")
+      acc = "subjects-ungraded"
+    else if (k1 == "absent" && k2 == "absent" && k3 == "absent" && k4 == "absent")
+      acc = "absence-only"
+    else if (k1 == "conf" && k2 == "conf" && k3 == "conf" && k4 == "conf")
+      acc = "subjects-present"
+    else
+      acc = "subjects-mixed"
+  }
+  wrote = 0
+  for (i = 1; i <= NR; i++) {
+    s = line[i]
+    if (wrote == 0 && index(s, "\"vios_acceptance\"") > 0 && index(s, "\"tool\"") == 0) {
+      sub(/"vios_acceptance"[ \t]*:[ \t]*"[^"]*"/, "\"vios_acceptance\": \"" acc "\"", s)
+      wrote = 1
+    } else if (wrote == 0 && index(s, "\"findings\"") > 0) {
+      print "  \"vios_acceptance\": \"" acc "\","
+      wrote = 1
+    }
+    print s
+  }
+}
+#VAWK-END
+' "$WORKDIR/envelope.json" > "$WORKDIR/envelope-accept.json" || exit 1
+    if [ ! -s "$WORKDIR/envelope-accept.json" ]; then
+      echo "aixray-scan: cannot write vios acceptance" >&2
+      exit 1
+    fi
+    mv "$WORKDIR/envelope-accept.json" "$WORKDIR/envelope.json" || exit 1
   fi
 
   if [ "$WANT_PTXDOC" -eq 1 ]; then
@@ -1212,6 +1319,11 @@ if [ "$WANT_ASSESS" -eq 1 ]; then
         KEEP_PTX=1
       else
         cat "$WORKDIR/scan-validate.err" >&2
+        # AIX still writes HTML and JSON with KEEP_PTX left at 0.
+        # A VIOS document that does not validate is not a report.
+        if [ "$AIXRAY_ROLE" = vios ]; then
+          exit "$vrc"
+        fi
       fi
     fi
     if [ "$KEEP_PTX" -eq 1 ]; then

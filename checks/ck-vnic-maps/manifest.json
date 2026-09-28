@@ -1,0 +1,18 @@
+{
+  "id": "ck-vnic-maps",
+  "pillar": "resiliency",
+  "category": "resilience",
+  "finding_ids": [
+    "vnic_maps"
+  ],
+  "captures": [],
+  "requires_root": true,
+  "read_only": true,
+  "commands": [
+    "/usr/ios/cli/ioscli lsmap -all -vnic"
+  ],
+  "tags": [],
+  "blurb": "This check reads vNIC server adapters with ioscli lsmap -all -vnic. The name token is vnicserver plus an instance number. No vnicserver row is not applicable, including on a VIOS that has a Shared Ethernet Adapter. One or more rows pass. A failed command is not assessed. vnicstat -r is not run.",
+  "license": "Apache-2.0",
+  "artifact": "checks/ck-vnic-maps/ck-vnic-maps.ksh"
+}

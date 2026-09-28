@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -872,8 +906,7 @@ _AIXRAY_SESSION_KEYS=""
   # documentation-grounded; validate on a live VIOS (IBM Partner Silver test box).
   vios_role_classify
   CLST=$(vios cluster_status cluster -status); RC=$?
-  CLPRESENT=0
-  if [ "$ROLE" != aix ] && [ "$RC" -eq 0 ] && [ -n "$CLST" ] && printf '%s\n' "$CLST" | grep -qi 'Cluster'; then CLPRESENT=1; fi
+  CLCLASS=$(vios_cluster_classify cluster_status "$RC" "$CLST")
 
   # ssp_cluster — Shared Storage Pool / CAA cluster state (reported ONLY when a cluster
   # exists on this VIOS). Reuses the cluster -status read at the top of this function.
@@ -881,7 +914,7 @@ _AIXRAY_SESSION_KEYS=""
   # 'cluster -status': the pool and each node report a State (OK vs DOWN/DEGRADED). A node
   # DOWN or a degraded pool means the SSP's shared storage is not fully redundant. When no
   # cluster is defined the command errors / prints nothing — skip cleanly (no finding).
-  if [ "$CLPRESENT" -eq 1 ]; then
+  if [ "$ROLE" != aix ] && [ "$CLCLASS" = present ]; then
     CLBAD=$(printf '%s\n' "$CLST" | awk '{u=toupper($0)} u ~ /DOWN|DEGRADED|FAILED|INCOMPLETE/{n++} END{print n+0}')
     CLNODES=$(printf '%s\n' "$CLST" | awk '/^[ \t]+[A-Za-z]/ && NR>2 {n++} END{print n+0}')
     if [ "${CLBAD:-0}" -gt 0 ]; then
@@ -899,23 +932,27 @@ _AIXRAY_SESSION_KEYS=""
       add resilience ssp_cluster "Shared Storage Pool cluster" PASS low "cluster + ${CLNODES} node(s) report OK" \
           "The Shared Storage Pool / CAA cluster and its nodes report OK — the shared pool backing client disks is healthy on this VIOS's view." "n/a"
     fi
-  fi
-  if [ "$CLPRESENT" -ne 1 ]; then
-    # ioscli cluster -status errors when no cluster is defined. That rc is
-    # absence. A missing capture is not absence.
-    if [ "$ROLE" != aix ] && aix_capture_missing cluster_status; then
-      LIVE_BRANCH=probe_failed
+  elif [ "$ROLE" != aix ] && [ "$CLCLASS" = unreadable ]; then
+    # Missing capture and any other non-absence result are probe failures.
+    # Neither one is "no cluster".
+    LIVE_BRANCH=probe_failed
+    if [ "$RC" -eq 127 ]; then
       add resilience ssp_cluster "Shared Storage Pool cluster" NOT_ASSESSED low \
           "not assessed — cluster -status has no capture (rc=$RC)" \
           "The cluster probe was not captured, so absence of an SSP cannot be claimed." \
           "capture '/usr/ios/cli/ioscli cluster -status' and re-assess."
     else
-      LIVE_BRANCH=subject_absent
-      add resilience ssp_cluster "Shared Storage Pool cluster" NOT_APPLICABLE none \
-          "no CAA/SSP cluster present" \
-          "No Shared Storage Pool / CAA cluster is defined on this system — the SSP cluster control does not apply." \
-          "n/a"
+      add resilience ssp_cluster "Shared Storage Pool cluster" NOT_ASSESSED low \
+          "not assessed — cluster -status failed or was unreadable (rc=$RC)" \
+          "The cluster probe did not show a configured cluster and did not show the none or not-configured absence text. A failed probe is not 'no cluster'." \
+          "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading the SSP cluster."
     fi
+  else
+    LIVE_BRANCH=subject_absent
+    add resilience ssp_cluster "Shared Storage Pool cluster" NOT_APPLICABLE none \
+        "no CAA/SSP cluster present" \
+        "No Shared Storage Pool / CAA cluster is defined on this system — the SSP cluster control does not apply." \
+        "n/a"
   fi
 }
 

@@ -8,7 +8,7 @@ set -u
 # artifact's version against the release tag; a review pack without this line
 # was silently skipped by that check and v1.0.0 nearly shipped unversioned,
 # a regression from v0.1.0 which carried it.
-AIXRAY_REVIEW_PACK_VERSION="1.8.2"
+AIXRAY_REVIEW_PACK_VERSION="1.8.3"
 
 PATH=/usr/bin:/bin:/etc:/usr/sbin:/usr/ucb:/usr/bin/X11:/sbin
 export PATH
@@ -362,7 +362,7 @@ fi
 [ ! -L "$VALIDATOR_PROGRAM" ] \
   || fail "refusing symlinked independent validator"
 VALIDATOR_SOURCE_PROGRAM=$VALIDATOR_PROGRAM
-PTXRAY_REVIEW_VALIDATOR_SHA256=83a5a3924ccce2007edc612434d505ad2c891a2f5011f1069c7f5181730dd875
+PTXRAY_REVIEW_VALIDATOR_SHA256=4b39289e868adf66a737078e35f8335c75159d19874ae9dd86248d46107577d6
 
 case "$INPUT" in
   */*)

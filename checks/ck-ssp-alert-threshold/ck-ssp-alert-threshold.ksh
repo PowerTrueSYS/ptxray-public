@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -866,11 +900,11 @@ AIXRAY_TOOL=ck-ssp-alert-threshold
 function standalone_check {
 _AIXRAY_SESSION_KEYS=""
   # ssp_alert_threshold — one finding, not folded into ck-ssp-cluster.
-  # The only allowlisted SSP query is cluster -status. That text does not
-  # carry ThresholdPercent. IBM's alert -list command does, and this check
-  # does not run it and does not invent a threshold. No cluster is
-  # NOT_APPLICABLE / subject_absent. A present cluster is NOT_ASSESSED
-  # because the alert field was not reported. LIVE_BRANCH is set;
+  # After the cluster is present, bare alert -list supplies every
+  # ThresholdPercent. PASS only when each is an integer 1..99. 35 is the
+  # documented default, not the only legal value. No ThresholdPercent line
+  # warns. 0, 100, N/A, or any other token is not assessed. alert -set is
+  # not run. OverCommitPercent is not this finding. LIVE_BRANCH is set;
   # live_verified is not.
   vios_role_classify
   if [ "$ROLE" != vios ]; then
@@ -889,51 +923,87 @@ _AIXRAY_SESSION_KEYS=""
     fi
   else
     CLST=$(vios cluster_status cluster -status); RC=$?
-    HAS_NAME=0
-    ABSENT=0
-    if [ "$RC" -eq 0 ] && printf '%s\n' "$CLST" | grep -qi 'Cluster Name:'; then
-      HAS_NAME=1
-    fi
-    if [ -z "$CLST" ]; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'not configured'; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'does not exist'; then
-      ABSENT=1
-    fi
-    if printf '%s\n' "$CLST" | grep -qi 'no cluster'; then
-      ABSENT=1
-    fi
-    if [ "$HAS_NAME" -eq 1 ]; then
-      ABSENT=0
-    fi
-    if [ "$RC" -eq 127 ] && aix_capture_missing cluster_status; then
-      LIVE_BRANCH=probe_failed
-      add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
-        "not assessed - cluster -status has no capture (rc=$RC)" \
-        "The cluster probe was not captured, so absence of an SSP cannot be claimed and an alert threshold cannot be read." \
-        "capture '/usr/ios/cli/ioscli cluster -status' and re-assess."
-    elif [ "$ABSENT" -eq 1 ]; then
-      LIVE_BRANCH=subject_absent
-      add storage ssp_alert_threshold "SSP alert threshold" NOT_APPLICABLE low \
-        "no CAA/SSP cluster present" \
-        "cluster -status shows no cluster (empty output, or text that the cluster is not configured or does not exist). A Shared Storage Pool alert threshold does not apply." \
-        "n/a"
-    elif [ "$RC" -ne 0 ] || [ "$HAS_NAME" -ne 1 ]; then
-      LIVE_BRANCH=probe_failed
-      add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
-        "not assessed - cluster -status failed or was unreadable (rc=$RC)" \
-        "The cluster probe did not show a configured cluster and did not show the none or not-configured absence text. A failed probe is not 'no cluster'." \
-        "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading an SSP alert threshold."
-    else
-      LIVE_BRANCH=configured_cluster
-      add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
-        "cluster present; cluster -status did not report an alert-threshold field" \
-        "A cluster is defined, but ioscli cluster -status did not report an alert threshold. IBM documents ThresholdPercent on alert -list, which this check does not run. No threshold number is graded, and an undocumented column is not a failure." \
-        "n/a"
-    fi
+    CLCLASS=$(vios_cluster_classify cluster_status "$RC" "$CLST")
+    case "$CLCLASS" in
+      absent)
+        LIVE_BRANCH=subject_absent
+        add storage ssp_alert_threshold "SSP alert threshold" NOT_APPLICABLE low \
+          "no CAA/SSP cluster present" \
+          "cluster -status shows no cluster (empty output, or text that the cluster is not configured or does not exist). A Shared Storage Pool alert threshold does not apply." \
+          "n/a"
+        ;;
+      present)
+        ALERT=$(vios alert_list alert -list); ARC=$?
+        if [ "$ARC" -ne 0 ]; then
+          LIVE_BRANCH=probe_failed
+          add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
+            "not assessed - alert -list failed (rc=$ARC)" \
+            "The alert probe failed. A failed alert -list is not a missing threshold, and alert -set is not run." \
+            "re-run '/usr/ios/cli/ioscli alert -list' and inspect its error before grading the threshold."
+        elif printf '%s\n' "$ALERT" | grep -F 'Unable to query record.' >/dev/null; then
+          LIVE_BRANCH=probe_failed
+          add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
+            "not assessed - alert -list printed Unable to query record." \
+            "alert -list could not query a record. That is a failed probe, not a missing ThresholdPercent." \
+            "re-run '/usr/ios/cli/ioscli alert -list' only after cluster -status shows a cluster."
+        else
+          GRADE=$(printf '%s\n' "$ALERT" | awk '
+            /^ThresholdPercent:/ {
+              n++
+              v = $0
+              sub(/^ThresholdPercent:[ \t]*/, "", v)
+              sub(/[ \t]+$/, "", v)
+              if (v !~ /^[0-9]+$/ || v + 0 < 1 || v + 0 > 99) bad = 1
+              q = q (q ? " " : "") "\"" v "\""
+            }
+            END {
+              if (n + 0 == 0) { print "none"; exit }
+              if (bad) print "bad"
+              else print "ok"
+              print q
+            }')
+          KIND=$(printf '%s\n' "$GRADE" | awk 'NR==1 { print; exit }')
+          SHOWN=$(printf '%s\n' "$GRADE" | awk 'NR==2 { print; exit }')
+          case "$KIND" in
+            ok)
+              LIVE_BRANCH=configured_alert
+              add storage ssp_alert_threshold "SSP alert threshold" PASS low \
+                "ThresholdPercent $SHOWN" \
+                "Every ThresholdPercent is an integer from 1 to 99. 35 is the documented default, not the only legal value. OverCommitPercent is not this finding." \
+                "n/a"
+              ;;
+            none)
+              LIVE_BRANCH=configured_alert
+              add storage ssp_alert_threshold "SSP alert threshold" WARN med \
+                "no ThresholdPercent line" \
+                "alert -list returned no ThresholdPercent line. The threshold was not shown. That is not a failed threshold and not OverCommitPercent." \
+                "run '/usr/ios/cli/ioscli alert -list' and confirm a ThresholdPercent from 1 to 99 is set."
+              ;;
+            *)
+              LIVE_BRANCH=probe_failed
+              add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
+                "ThresholdPercent $SHOWN" \
+                "A ThresholdPercent was not an integer from 1 to 99. 0, 100, and N/A are not graded as a pass or a fail. OverCommitPercent is not this finding." \
+                "re-run '/usr/ios/cli/ioscli alert -list' and read each ThresholdPercent."
+              ;;
+          esac
+        fi
+        ;;
+      *)
+        LIVE_BRANCH=probe_failed
+        if [ "$RC" -eq 127 ]; then
+          add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
+            "not assessed - cluster -status has no capture (rc=$RC)" \
+            "The cluster probe was not captured, so absence of an SSP cannot be claimed and an alert threshold cannot be read." \
+            "capture '/usr/ios/cli/ioscli cluster -status' and re-assess."
+        else
+          add storage ssp_alert_threshold "SSP alert threshold" NOT_ASSESSED low \
+            "not assessed - cluster -status failed or was unreadable (rc=$RC)" \
+            "The cluster probe did not show a configured cluster and did not show the none or not-configured absence text. A failed probe is not 'no cluster'." \
+            "re-run '/usr/ios/cli/ioscli cluster -status' and inspect its error before grading an SSP alert threshold."
+        fi
+        ;;
+    esac
   fi
 }
 

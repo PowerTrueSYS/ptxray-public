@@ -18,7 +18,7 @@ export LC_ALL
 
 # Composed-path product version. Dispatch, standalone_emit, and assembled
 # doors read this assignment. It is not derived from the monolith.
-AIXRAY_STANDALONE_VERSION="1.8.2"
+AIXRAY_STANDALONE_VERSION="1.8.3"
 
 # aix_capture_dir_ok — true when AIXRAY_CAPTURE_DIR is set, exists, and is
 # writable. Never mkdir. On first unusable directory, print one stderr line
@@ -717,6 +717,40 @@ function vios_role_classify {
   fi
 }
 
+# vios_cluster_classify <key> <rc> <stdout> — print one word.
+# Order is fixed: rc 127 and aix_capture_missing → unreadable; rc 0 and a
+# Cluster Name: line → present; empty stdout, or "does not exist" /
+# "not configured" / "no cluster", with no Cluster Name: line → absent;
+# otherwise unreadable. The substring Cluster is not presence. Call after
+# the probe. ksh88: typeset only, no local, no arrays.
+function vios_cluster_classify {
+  typeset key rc text
+  key=$1
+  rc=$2
+  text=$3
+  if [ "$rc" -eq 127 ] && aix_capture_missing "$key"; then
+    printf '%s\n' unreadable
+    return 0
+  fi
+  if [ "$rc" -eq 0 ] && printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+    printf '%s\n' present
+    return 0
+  fi
+  if [ -z "$text" ] \
+      || printf '%s\n' "$text" | grep -qi 'does not exist' \
+      || printf '%s\n' "$text" | grep -qi 'not configured' \
+      || printf '%s\n' "$text" | grep -qi 'no cluster'; then
+    if printf '%s\n' "$text" | grep -qi 'Cluster Name:'; then
+      printf '%s\n' unreadable
+      return 0
+    fi
+    printf '%s\n' absent
+    return 0
+  fi
+  printf '%s\n' unreadable
+  return 0
+}
+
 function standalone_emit {
   typeset i sep extras live_verified branch_esc before_esc reason_esc
   printf '{\n'
@@ -871,6 +905,7 @@ _AIXRAY_SESSION_KEYS=""
   ROOTP=$(aix lsvg_p_rootvg lsvg -p rootvg); ROOTPRC=$?
   ROOTL=$(aix lsvg_l_rootvg lsvg -l rootvg); ROOTLRC=$?
   if [ "$ROOTPRC" -ne 0 ] || [ -z "$ROOTP" ]; then
+    LIVE_BRANCH=pvs_unreadable
     add resilience rootvg_mirror "rootvg redundancy" WARN high "lsvg -p rootvg failed or empty" \
         "The rootvg PV list could not be read — mirroring cannot be assessed from missing evidence." \
         "rerun 'lsvg -p rootvg' and confirm the volume group is varied on."
@@ -888,21 +923,31 @@ _AIXRAY_SESSION_KEYS=""
     RVGMISS=$(printf '%s\n' "$ROOTP" | awk '$2=="missing" || $2=="removed" {n++} END{print n+0}')
     RVGSTALE=$(printf '%s\n' "$ROOTL" | awk '/stale/{n++} END{print n+0}')
     if [ "$NPV" -le 1 ]; then
+      LIVE_BRANCH=single_disk
       add resilience rootvg_mirror "rootvg redundancy" WARN high "1 disk, unmirrored" \
           "The OS lives on one disk — a single point of failure unless the backing storage is RAID/SAN-protected. Verify which." \
           "mirror rootvg (mirrorvg + bosboot + bootlist) or document the storage-level protection."
     elif [ "${RVGMISS:-0}" -gt 0 ] || [ "${RVGSTALE:-0}" -gt 0 ]; then
+      LIVE_BRANCH=degraded
       add resilience rootvg_mirror "rootvg redundancy" FAIL high "$NPV disks, mirror degraded" \
           "The PP counts say 'mirrored', but a rootvg disk is missing or LVs are stale — a copy is already lost/out of sync and you are running on the surviving copy. This is not redundancy." \
           "address the disk first (check errpt and 'lsvg -p rootvg'), then resync once it is back ('syncvg -v rootvg'); do not trust the mirror until every LV reads syncd."
     elif [ "$MIRR" = "full" ]; then
+      LIVE_BRANCH=full
       add resilience rootvg_mirror "rootvg redundancy" PASS low "$NPV disks, fully mirrored" \
           "The OS survives a single disk loss." "n/a"
     elif [ "$MIRR" = "partial" ]; then
+      LIVE_BRANCH=partial
       add resilience rootvg_mirror "rootvg redundancy" FAIL med "$NPV disks, partially mirrored" \
           "Some LVs are mirrored and some are not — a disk loss still takes the box down, while costing mirror overhead." \
           "finish the mirror ('mirrorvg rootvg', bosboot, bootlist) or unmirror deliberately."
     else
+      # Unread lsvg -l is not "no second copy". none is a list that was read.
+      if [ "$ROOTLRC" -ne 0 ]; then
+        LIVE_BRANCH=lvs_unreadable
+      else
+        LIVE_BRANCH=none
+      fi
       add resilience rootvg_mirror "rootvg redundancy" WARN high "$NPV disks, no LV copies" \
           "rootvg spans multiple disks with no mirroring — losing any one of them takes the OS down." \
           "mirror rootvg, or shrink it to one protected disk."

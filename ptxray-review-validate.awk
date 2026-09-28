@@ -3114,6 +3114,7 @@ function load_finding_label_contract() {
   FINDING_LABEL["ssl_ssh"] = "OpenSSH / OpenSSL levels"
   FINDING_LABEL["ssp_alert_threshold"] = "SSP alert threshold"
   FINDING_LABEL["ssp_cluster"] = "Shared Storage Pool cluster"
+  FINDING_LABEL["ssp_node_upgrade"] = "SSP node upgrade status"
   FINDING_LABEL["ssp_pool_capacity"] = "SSP pool capacity"
   FINDING_LABEL["stale_privileged_accounts"] = "Stale privileged accounts"
   FINDING_LABEL["stig_able_control_ability_remote"] = "Remote login control for users"
@@ -3358,6 +3359,7 @@ function load_finding_label_contract() {
   FINDING_LABEL["vg_geometry"] = "Volume group geometry"
   FINDING_LABEL["vg_pvs"] = "Volume group disks"
   FINDING_LABEL["vg_stale"] = "LV mirror sync"
+  FINDING_LABEL["vios_backup_schedule"] = "VIOS configuration backup"
   FINDING_LABEL["vios_level"] = "VIOS level currency"
   FINDING_LABEL["vios_topology"] = "VIOS redundancy topology"
   FINDING_LABEL["vios_users_nonpadmin"] = "VIOS non-padmin accounts"
@@ -3365,6 +3367,8 @@ function load_finding_label_contract() {
   FINDING_LABEL["viosecure_firewall"] = "VIOS firewall"
   FINDING_LABEL["viosecure_level"] = "VIOS security rules"
   FINDING_LABEL["vmm_tuning"] = "VMM cache tuning"
+  FINDING_LABEL["vnic_maps"] = "vNIC server mappings"
+  FINDING_LABEL["vscsi_lv_backing"] = "vSCSI backing device class"
   FINDING_LABEL["vscsi_maps"] = "Virtual SCSI mappings"
   FINDING_LABEL["vscsi_reserve"] = "vSCSI backing-LUN reservation"
   FINDING_LABEL["world_writable"] = "World-writable files"
@@ -3473,7 +3477,7 @@ function load_renderer_finding_contract() {
     "ssh_packages_installed ssh_permitemptypasswords ssh_permitrootlogin " \
     "ssh_permituserenv ssh_rekeylimit ssh_rootlogin ssh_sftp_args " \
     "ssh_strictmodes sshd_version ssl_ssh ssp_alert_threshold ssp_cluster " \
-    "ssp_pool_capacity stale_privileged_accounts " \
+    "ssp_node_upgrade ssp_pool_capacity stale_privileged_accounts " \
     "stig_able_control_ability_remote stig_accounts_assigned_unique_user " \
     "stig_aixmibd_daemon_disabled stig_audio_dev_group stig_audit_bin_stanza " \
     "stig_audit_boot stig_audit_capacity stig_audit_config_perms " \
@@ -3561,10 +3565,10 @@ function load_renderer_finding_contract() {
     "trustchk_stop_untrusted trustchk_te_tep trustchk_untrusted_scan " \
     "trusted_exec tunables tz_set uid0_accounts umask_default unowned_files " \
     "upgrade_headroom_preview vg_capacity vg_geometry vg_pvs vg_stale " \
-    "vios_level vios_topology vios_users_nonpadmin vios_users_shell_bypass " \
-    "viosecure_firewall viosecure_level vmm_tuning vscsi_maps vscsi_reserve " \
-    "world_writable worldwrite_dirs_nosvtx worldwrite_files " \
-    "worldwrite_objects writesrv")
+    "vios_backup_schedule vios_level vios_topology vios_users_nonpadmin " \
+    "vios_users_shell_bypass viosecure_firewall viosecure_level vmm_tuning " \
+    "vnic_maps vscsi_lv_backing vscsi_maps vscsi_reserve world_writable " \
+    "worldwrite_dirs_nosvtx worldwrite_files worldwrite_objects writesrv")
 }
 # END GENERATED RENDERER FINDING REGISTRY
 
