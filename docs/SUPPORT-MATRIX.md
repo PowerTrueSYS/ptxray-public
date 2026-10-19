@@ -76,7 +76,8 @@ Every cell above comes from these sources:
   - Lifecycle data: `EOS_VIOS` in `dist/tools/ck-vios-level.ksh` in the AIX bundle.
   - No CIS VIOS benchmark, the not-present behaviour, and the live-test limit: RELEASE-NOTES v1.8.2, v1.8.3, and v1.8.4.
   - Unreadable output never passes: [README.md](../README.md) ("Missing evidence is never silently counted as a pass") and the VIOS check manifests (for example `ck-npiv-maps`: "A failed lsmap is not assessed").
-  - Built from IBM's documented command output, and the single-VIOS limit: PTxray's VIOS coverage notes (`docs/COVERAGE.md`, "VIOS role checks", in the private source repository), together with the live-test statements in RELEASE-NOTES v1.8.3 and v1.8.4.
+  - Built from IBM's documented command output and test data: the VIOS check manifests in [checks/](../checks/), which list the exact `ioscli` commands each check reads and cite IBM's documentation (for example `ck-sea-largesend`, `ck-sea-threading`, and `ck-vscsi-lv-backing`), and RELEASE-NOTES v1.8.3 ("a configured-branch fixture, an absence fixture"), together with the live-test statements in RELEASE-NOTES v1.8.3 and v1.8.4.
+  - The single-VIOS limit: the `ck-vios-topology` manifest (it infers a partner VIOS from this VIOS's own Shared Ethernet Adapter and CAA cluster state) and the other VIOS check manifests, whose commands all run locally on the scanned VIOS.
 - **IBM i row.**
   - OS levels, QSECOFR, PASE ksh, the run command, and native PTF evidence: [README.md](../README.md), "Run a complete IBM i assessment".
   - Since 1.3.0: RELEASE-NOTES v1.3.0 ("PTxray joins the IBM i platform").
@@ -85,5 +86,5 @@ Every cell above comes from these sources:
   - `--pdf` documented for AIX only: [README.md](../README.md), "Reports and offline use".
 - **Linux row.**
   - The [v1.8.4 GitHub release](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.4) has eleven assets and none of them is a Linux scanner or bundle.
-  - The frozen Linux demo: `CHANGELOG.md` and `PROJECT.md` in the private source repository ("The Linux reference is frozen as a demo artifact").
+  - The frozen Linux demo: no public release, release note, or bundle file records it, so this statement is not publicly verifiable.
   - Planned status: product decision. No release version or distribution list is documented.
