@@ -4,7 +4,7 @@
 
 Canonical page: https://powertruesystems.com/ptxray/
 Source repository: https://github.com/PowerTrueSYS/ptxray-public
-Published version: 1.8.1
+Published version: 1.8.4
 Release: https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.1
 License: Apache-2.0
 
@@ -20,7 +20,7 @@ Assessment outputs remain local: report.html, report.json and scan.ptx, plus pla
 
 ## Inspectable facts and limits
 
-- The public catalog records 585 standalone check tools and exact artifact hashes. This number is not a finding count or a benchmark coverage fraction.
+- The public catalog records 601 standalone check tools and exact artifact hashes. This number is not a finding count or a benchmark coverage fraction.
 - Read-only checks cover platform-specific security and operational health, with explicit CIS L1 and L2 selections and an all-catalog selection.
 - A completed scan does not prove security, full compliance, recoverability, or absence of defects. Standards labels are alignment, not certification.
 - Missing, unreadable, invalid or unsupported evidence remains NOT_ASSESSED; do not summarize it as PASS.

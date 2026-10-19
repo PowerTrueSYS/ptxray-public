@@ -7,7 +7,7 @@
   "description": "PTxray 1.8.1 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.8.1",
+  "softwareVersion": "1.8.4",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -34,7 +34,7 @@
     "Offline assessments use verified cached or locally transferred signed inputs",
     "Unavailable evidence remains NOT_ASSESSED; stale data cannot support a clean vulnerability conclusion",
     "Platform-specific standards alignment and disclosed coverage, not compliance certification",
-    "585 standalone check tools with machine-readable command manifests"
+    "601 standalone check tools with machine-readable command manifests"
   ],
   "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
@@ -46,7 +46,7 @@
     {
       "@type": "PropertyValue",
       "name": "standaloneCheckCount",
-      "value": 585
+      "value": 601
     },
     {
       "@type": "PropertyValue",

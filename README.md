@@ -42,7 +42,7 @@ Reports contain sensitive system details. The bundled review-copy helper rejects
 
 PTxray's published assessment code is **open source under [Apache-2.0](LICENSE)**. Download and run it without an email address, form, or registration. You can inspect the shell code and the commands it uses before running it.
 
-The public AIX catalog contains 585 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. The IBM i report bundle contains its own 134-check catalog. These are tool counts, not counts of findings or benchmark controls.
+The public AIX catalog contains 601 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. The IBM i report bundle contains its own 134-check catalog. These are tool counts, not counts of findings or benchmark controls.
 
 IBM FLRTVC and IBM's APAR feed are separately acquired vendor inputs, not redistributed in the report bundles; their use remains subject to the applicable vendor terms.
 

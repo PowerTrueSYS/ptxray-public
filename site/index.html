@@ -25,7 +25,7 @@
   "description": "PTxray 1.8.1 provides full report bundles for IBM AIX and IBM i. A separate downloader acquires verified inputs before assessment. Assessment probes change no system configuration, perform no remediation, make no network calls, and send no assessment data or telemetry away from the host.",
   "url": "https://powertruesystems.com/ptxray/",
   "codeRepository": "https://github.com/PowerTrueSYS/ptxray-public",
-  "softwareVersion": "1.8.1",
+  "softwareVersion": "1.8.4",
   "applicationCategory": "System administration and security assessment",
   "applicationSubCategory": "IBM AIX and IBM i health check and posture assessment",
   "operatingSystem": [
@@ -52,7 +52,7 @@
     "Offline assessments use verified cached or locally transferred signed inputs",
     "Unavailable evidence remains NOT_ASSESSED; stale data cannot support a clean vulnerability conclusion",
     "Platform-specific standards alignment and disclosed coverage, not compliance certification",
-    "585 standalone check tools with machine-readable command manifests"
+    "601 standalone check tools with machine-readable command manifests"
   ],
   "keywords": "IBM AIX health check, IBM i assessment, IBM i posture assessment, IBM Power security audit, AIX posture assessment, AIX risk scanner, DISA STIG IBM AIX 7.x, CIS IBM AIX 7, CIS IBM i, CIS L1-aligned checks, ksh88, read-only assessment, air-gapped assessment",
   "additionalProperty": [
@@ -64,7 +64,7 @@
     {
       "@type": "PropertyValue",
       "name": "standaloneCheckCount",
-      "value": 585
+      "value": 601
     },
     {
       "@type": "PropertyValue",
@@ -403,7 +403,7 @@
             <p class="fine">AIX requires root, native ksh93 and supported OpenSSL; connected acquisition also needs curl and unzip. IBM i requires PASE ksh and QSECOFR. VIOS runs <code>ptxray-vios.sh</code> from the AIX bundle as root.</p>
             <p><a class="button" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-aix-1.8.1.tar">Download the AIX report bundle</a></p>
             <p><a class="button alt" href="https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.1/ptxray-report-ibmi-1.8.1.tar">Download the IBM i report bundle</a></p>
-            <p class="fine">Version 1.8.1 · Apache-2.0. <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Read the source on GitHub</a>. Both bundles produce <code>report.html</code>, JSON findings, and structured report data. Their README files describe exact prerequisites and offline staging.</p>
+            <p class="fine">Version 1.8.4 · Apache-2.0. <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Read the source on GitHub</a>. Both bundles produce <code>report.html</code>, JSON findings, and structured report data. Their README files describe exact prerequisites and offline staging.</p>
             <ul class="mini-proof">
               <li>No email, no gate — read before you run</li>
               <li>Read-only on system configuration</li>
@@ -449,7 +449,7 @@
         <div class="inspect-copy">
           <p class="eyebrow">Trust through inspection</p>
           <h2 id="inspect-title">The claims are in the files.</h2>
-          <p>The repository includes the report bundles, 585 standalone checks with adjacent command manifests, and a catalog with SHA-256 hashes. Read the exact command surface before anything runs.</p>
+          <p>The repository includes the report bundles, 601 standalone checks with adjacent command manifests, and a catalog with SHA-256 hashes. Read the exact command surface before anything runs.</p>
           <a class="text-link" href="https://github.com/PowerTrueSYS/ptxray-public">Inspect PTxray on GitHub →</a>
         </div>
         <pre aria-label="PTxray example commands"><code># First verify the release signature and bundle checksum.
