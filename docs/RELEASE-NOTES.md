@@ -1,5 +1,9 @@
 # Release notes
 
+## VIOS live acceptance (2026-10-19 update)
+
+PTxray 1.8.2 and 1.8.4 were run end to end with `ptxray-vios.sh` on a live, bare VIOS 4.1.2.00 in September 2026. See [docs/evidence/vios-live-acceptance.md](evidence/vios-live-acceptance.md). For a bare VIOS, this supersedes the older "VIOS lane remains disabled pending live VIOS acceptance" lines (v1.5.0 to v1.7.0) and the "not a live test" / "not a live configured VIOS" lines (v1.8.3 and v1.8.4). Configured SEA failover, NPIV, virtual SCSI, and Shared Storage Pools were verified live only in the not-present case and are still not live-tested. The entries below are unchanged.
+
 <!-- PTXRAY-PUBLICATION-READY:v1.8.4 -->
 
 ## v1.8.4
