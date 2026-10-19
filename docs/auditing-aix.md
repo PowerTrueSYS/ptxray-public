@@ -78,25 +78,25 @@ If you manage Power through a Hardware Management Console, the HMC deserves its 
 
 Working through the checklist above by hand across a fleet is a real day of typing, and the biggest risk is inconsistency — you check paging carefully on one LPAR and skip it on the next. This is exactly the gap [PTxray](https://powertruesystems.com/ptxray/) was built to close.
 
-PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — and produces an HTML or JSON report you keep. PTxray 1.8.1 is the current published release at `releases/latest`.
+PTxray is a free, open-source (Apache-2.0) assessment that collects the evidence for every dimension above — lifecycle and patch currency, storage and capacity, resilience, error history, security configuration, configuration hygiene, and monitoring and backup readiness — and produces an HTML or JSON report you keep. PTxray 1.8.4 is the current published release at `releases/latest`.
 
 What makes it safe to run on a production system you care about:
 
 - **Read-only assessment probes.** They read state and report; they do not remediate or change the host. Requested reports, protected temporary scratch, and the separate signed-definitions cache are documented local writes.
 - **No network during assessment.** Before the probes begin, the runner may invoke the separate, adjacent, digest-bound `ptxray-defs.sh`. Connected mode attempts a signed-definitions update by default and discloses the request first; `--offline` uses the signed cache. The assessment probes themselves send nothing off the box.
-- **Inspectable ksh, no package or agent install.** Extract the complete AIX report bundle. It requires root, native ksh93 for IBM FLRTVC, and supported OpenSSL. Connected acquisition additionally requires curl and unzip; the separate downloader may create its documented cache. Its VIOS lane remains disabled pending live acceptance.
+- **Inspectable ksh, no package or agent install.** Extract the complete AIX report bundle. It requires root, native ksh93 for IBM FLRTVC, and supported OpenSSL. Connected acquisition additionally requires curl and unzip; the separate downloader may create its documented cache. On a VIOS, run `ptxray-vios.sh` from the same bundle as root after `oem_setup_env`; see the [support matrix](SUPPORT-MATRIX.md).
 - **It refuses to guess.** When evidence is missing, unreadable, or ambiguous, PTxray reports `NOT_ASSESSED` rather than quietly converting it to a `PASS`. An audit tool that invents reassurance is worse than no tool; PTxray is honest about what it could and could not see.
 
 Because it is open source, you do not have to take any of that on faith — the source, the per-check manifests, and the SHA-256 hashes are all public on [GitHub](https://github.com/PowerTrueSYS/ptxray-public), so a cautious admin can read exactly what runs before it runs.
 
-The commands below describe the published PTxray 1.8.1 release. Download the
+The commands below describe the published PTxray 1.8.4 release. Download the
 complete signed asset set, verify it, review it, copy it to your AIX host, and
 run:
 
 ```sh
 mkdir ptxray-aix
 cd ptxray-aix
-tar -xf ../ptxray-report-aix-1.8.1.tar
+tar -xf ../ptxray-report-aix-1.8.4.tar
 mkdir report
 ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report
 ```

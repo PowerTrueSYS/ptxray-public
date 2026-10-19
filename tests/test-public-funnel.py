@@ -52,6 +52,23 @@ CUSTOMER_FILES = (
     JSONLD,
     ROOT / "llms.txt",
 )
+# Every customer page that mentions VIOS. Each one must point at the VIOS
+# entry point or the support matrix, and must not call VIOS disabled or
+# CIS VIOS certified.
+VIOS_SURFACES = (
+    ROOT / "README.md",
+    ROOT / "SECURITY.md",
+    ROOT / "AGENTS.md",
+    ROOT / "docs" / "SUPPORT-MATRIX.md",
+    ROOT / "docs" / "auditing-aix.md",
+    ROOT / "llms.txt",
+    JSONLD,
+    SITE / "index.html",
+    SITE / "ready" / "index.html",
+)
+# "CIS VIOS" may appear only in a negative form, such as "no CIS VIOS
+# benchmark" or "does not claim CIS VIOS certification".
+NEGATED_CIS_VIOS = re.compile(r"\b(?:no|not claim|never claim) cis vios\b")
 
 
 def sha256(path: Path) -> str:
@@ -293,7 +310,6 @@ class PublicFunnelTests(unittest.TestCase):
                 self.assertRegex(text, r'(?:no network calls|without network calls|no-egress assessment)')
                 self.assertRegex(text, r'(?:no assessment data|assessment-data upload|no assessment-data|no assessment telemetry)')
                 self.assertIn('vios', text)
-                self.assertIn('disabled', text)
         readme = (ROOT/'README.md').read_text().lower()
         for required in ('ksh93', 'openssl', 'unzip', 'qsecofr', '--offline', 'pseudonym'):
             self.assertIn(required, readme)
@@ -302,6 +318,17 @@ class PublicFunnelTests(unittest.TestCase):
         self.assertRegex(privacy, r'not guaranteed anonym|not anonym')
         self.assertRegex(privacy, r'(?:review|inspect).*before sharing')
         self.assertRegex(privacy, r'(?:never|do not) share.*key')
+
+    def test_vios_claims_point_at_the_wrapper_or_support_matrix(self):
+        for path in VIOS_SURFACES:
+            text = ' '.join(path.read_text().lower().split())
+            with self.subTest(surface=str(path.relative_to(ROOT))):
+                self.assertIn('vios', text)
+                self.assertTrue('ptxray-vios.sh' in text or 'support-matrix.md' in text,
+                                'mentions VIOS without ptxray-vios.sh or a support-matrix link')
+                self.assertNotRegex(text, r'vios[^.]*disabled')
+                self.assertNotIn('cis vios', NEGATED_CIS_VIOS.sub('', text),
+                                 'CIS VIOS appears outside a negative form')
 
     def test_signature_first_guide_and_independent_fingerprint(self):
         guide = VERIFY_GUIDE.read_text()

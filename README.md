@@ -42,7 +42,7 @@ Reports contain sensitive system details. The bundled review-copy helper rejects
 
 PTxray's published assessment code is **open source under [Apache-2.0](LICENSE)**. Download and run it without an email address, form, or registration. You can inspect the shell code and the commands it uses before running it.
 
-The public AIX catalog contains 585 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. The IBM i report bundle contains its own 134-check catalog. These are tool counts, not counts of findings or benchmark controls.
+The public AIX catalog contains 601 standalone check tools with adjacent command manifests in [`checks/`](checks/). [`catalog.json`](catalog.json) records the inventory and exact SHA-256 hashes. The IBM i report bundle contains its own 134-check catalog. These are tool counts, not counts of findings or benchmark controls.
 
 IBM FLRTVC and IBM's APAR feed are separately acquired vendor inputs, not redistributed in the report bundles; their use remains subject to the applicable vendor terms.
 
@@ -56,6 +56,8 @@ Download the complete signed [PTxray v1.8.4 release](https://github.com/PowerTru
 - [IBM i report bundle](https://github.com/PowerTrueSYS/ptxray-public/releases/download/v1.8.4/ptxray-report-ibmi-1.8.4.tar)
 
 Follow [the verification guide](docs/VERIFY.md) before extracting or running code with privileges. Keep the complete bundle intact: the top-level runner copies require its tool tree, helpers, libraries, and data.
+
+The [support matrix](docs/SUPPORT-MATRIX.md) lists each supported platform with its OS levels, run command, and known limits.
 
 ## Run a complete AIX assessment
 
@@ -74,6 +76,27 @@ ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report
 The runner acquires signed definitions and the pinned IBM FLRTVC engine before assessment, captures fileset and interim-fix inventory, runs IBM FLRTVC offline, and includes the completed exposure results in HTML and JSON. It retains IBM's complete compact report as `report/flrtvc-report.txt`. An incomplete engine run does not produce a completed assessment report. Stale or unverified definitions cannot support a clean vulnerability conclusion.
 
 The separate `ptxray-defs.sh` downloader makes disclosed HTTPS requests before assessment and writes a protected local cache. It sends no assessment data. IBM's engine and APAR feed are acquired separately; they are not redistributed inside these bundles.
+
+## Run a VIOS assessment
+
+VIOS uses the AIX report bundle. Extract it on the VIOS the same way as for AIX. From the padmin shell, run `oem_setup_env`, then run as root from the extracted bundle:
+
+```sh
+mkdir -m 700 report
+ksh ptxray-vios.sh --html --pdf --json --compliance all --out report
+```
+
+`ptxray-vios.sh` checks that it is running as root on a VIOS, then runs the AIX runner. You get the full AIX catalog plus the VIOS checks. It is read-only and does not change VIOS configuration. The VIOS checks cover:
+
+- the VIOS level
+- Shared Ethernet Adapter failover and link state
+- virtual Fibre Channel (NPIV), virtual SCSI, and vNIC mappings
+- Shared Storage Pool health
+- configuration backups
+- VIOS login accounts
+- viosecure settings
+
+If a VIOS has no Shared Ethernet Adapter, NPIV, virtual SCSI, or Shared Storage Pool configured, the report shows those areas as not present. There is no CIS VIOS benchmark, so PTxray does not claim CIS VIOS certification. For a VIOS with no network route, see the bundle's `README-REPORT.md`. The [support matrix](docs/SUPPORT-MATRIX.md) lists the known limits.
 
 ## Run a complete IBM i assessment
 
@@ -97,7 +120,7 @@ Use `--offline` to consume verified cached inputs without acquisition requests. 
 
 ## Scope and support
 
-PTxray reports evidence and recommended actions; it does not remediate the host or prove security, compliance, or recoverability. Standards tags are alignment information, not certification. VIOS assessment remains disabled pending live acceptance. No unsupported platform coverage is implied by IBM Power branding.
+PTxray reports evidence and recommended actions; it does not remediate the host or prove security, compliance, or recoverability. Standards tags are alignment information, not certification. VIOS is supported through `ptxray-vios.sh` in the AIX report bundle (see [Run a VIOS assessment](#run-a-vios-assessment)). There is no CIS VIOS benchmark, so PTxray does not claim CIS VIOS certification. The [support matrix](docs/SUPPORT-MATRIX.md) is the reference for supported platforms and their limits. No unsupported platform coverage is implied by IBM Power branding.
 
 See [SECURITY.md](SECURITY.md) for the trust boundary and private vulnerability-reporting channel, and [docs/auditing-aix.md](docs/auditing-aix.md) for the audit guide. Use [GitHub issues](https://github.com/PowerTrueSYS/ptxray-public/issues) for ordinary bug reports; do not include sensitive assessment data.
 
