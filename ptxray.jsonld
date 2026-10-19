@@ -17,7 +17,7 @@
     "IBM i 7.5"
   ],
   "programmingLanguage": "KornShell; AIX FLRTVC requires native ksh93; IBM i uses PASE ksh",
-  "softwareRequirements": "AIX 7.2 or 7.3 with root, native ksh93 and supported OpenSSL; connected acquisition also needs curl and unzip. IBM i 7.4 or 7.5 requires PASE ksh and QSECOFR as session and effective user; see the bundle README for SQL services and tools. Extract the complete signed report bundle. VIOS assessment is disabled.",
+  "softwareRequirements": "AIX 7.2 or 7.3 with root, native ksh93 and supported OpenSSL; connected acquisition also needs curl and unzip. IBM i 7.4 or 7.5 requires PASE ksh and QSECOFR as session and effective user; see the bundle README for SQL services and tools. Extract the complete signed report bundle. VIOS runs as root with ptxray-vios.sh from the AIX report bundle.",
   "license": "https://www.apache.org/licenses/LICENSE-2.0",
   "provider": {
     "@type": "Organization",

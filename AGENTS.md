@@ -58,4 +58,6 @@ explicit. Do not use network-backed SQL services during assessment.
 The review-copy helper refuses current composed reports because their privacy
 annotations do not satisfy its strict contract. Manual privacy review is required
 before sharing a full report; never present a refusal as pseudonymization success.
-VIOS remains disabled pending live acceptance.
+VIOS is supported: `ptxray-vios.sh` in the AIX report bundle runs the AIX runner
+as root on a VIOS. There is no CIS VIOS benchmark; never claim CIS VIOS
+certification. docs/SUPPORT-MATRIX.md is the source of truth for platform support.

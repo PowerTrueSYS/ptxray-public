@@ -293,7 +293,8 @@ class PublicFunnelTests(unittest.TestCase):
                 self.assertRegex(text, r'(?:no network calls|without network calls|no-egress assessment)')
                 self.assertRegex(text, r'(?:no assessment data|assessment-data upload|no assessment-data|no assessment telemetry)')
                 self.assertIn('vios', text)
-                self.assertIn('disabled', text)
+                self.assertIn('ptxray-vios.sh', text)
+                self.assertNotRegex(text, r'vios[^.]*disabled')
         readme = (ROOT/'README.md').read_text().lower()
         for required in ('ksh93', 'openssl', 'unzip', 'qsecofr', '--offline', 'pseudonym'):
             self.assertIn(required, readme)

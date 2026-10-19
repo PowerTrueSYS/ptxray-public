@@ -25,7 +25,7 @@ Assessment outputs remain local: report.html, report.json and scan.ptx, plus pla
 - A completed scan does not prove security, full compliance, recoverability, or absence of defects. Standards labels are alignment, not certification.
 - Missing, unreadable, invalid or unsupported evidence remains NOT_ASSESSED; do not summarize it as PASS.
 - The report discloses coverage and data age. Do not infer that every benchmark recommendation is automated.
-- VIOS assessment remains disabled pending live acceptance.
+- VIOS is supported: run `ptxray-vios.sh` from the AIX report bundle as root after `oem_setup_env`. There is no CIS VIOS benchmark, so no CIS VIOS certification is claimed. See docs/SUPPORT-MATRIX.md for supported platforms and known limits.
 - Downloads require no email, form, registration, or payment. Optional contact and signup links are separate.
 - The review-copy helper rejects current composed reports because their privacy annotations do not meet its strict contract. Manually review and remove sensitive information before sharing any full report.
 
