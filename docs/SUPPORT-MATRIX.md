@@ -5,7 +5,7 @@ This page lists which platforms PTxray supports, from which release, on which OS
 | Platform | Status | Since | Supported OS levels | How to run (release asset) | Known limits |
 | --- | --- | --- | --- | --- | --- |
 | AIX | Shipped | 0.1.0 | AIX 7.2 and 7.3 | As root, from the extracted bundle: `ksh dist/tools/aixray-scan.ksh --html --pdf --json --compliance all --out report` (in `ptxray-report-aix-<version>.tar`) | See [AIX](#aix) |
-| VIOS | Shipped | 1.8.2 | Not documented (see [VIOS](#vios)) | From the padmin shell run `oem_setup_env`, then as root, from the extracted AIX bundle: `ksh ptxray-vios.sh --html --pdf --json --compliance all --out report` (in `ptxray-report-aix-<version>.tar`) | See [VIOS](#vios) |
+| VIOS | Shipped | 1.8.2 | VIOS 4.1 (tested on 4.1.2.00) | From the padmin shell run `oem_setup_env`, then as root, from the extracted AIX bundle: `ksh ptxray-vios.sh --html --pdf --json --compliance all --out report` (in `ptxray-report-aix-<version>.tar`) | See [VIOS](#vios) |
 | IBM i | Shipped | 1.3.0 | IBM i 7.4 and 7.5 | As QSECOFR (session and effective user), in PASE, from the extracted bundle: `ksh dist/tools/ibmi-scan.ksh --html --json --compliance all --out report` (in `ptxray-report-ibmi-<version>.tar`) | See [IBM i](#ibm-i) |
 | Linux | Planned | Not shipped | Not documented | None. No current release includes a Linux scanner. | See [Linux](#linux) |
 
@@ -34,10 +34,11 @@ This page lists which platforms PTxray supports, from which release, on which OS
   - VIOS configuration backups
   - extra login accounts and logins that bypass the restricted shell
   - viosecure firewall and hardening level
-- Supported VIOS levels are not documented. The bundled lifecycle data rates VIOS 4.1 as supported and VIOS 3.1 as end of support from 2026-04-30.
+- Tested end to end on a live VIOS 4.1.2.00 with PTxray 1.8.2 and 1.8.4 (September 2026); see [docs/evidence/vios-live-acceptance.md](evidence/vios-live-acceptance.md).
+- Supported VIOS level: VIOS 4.1, tested on 4.1.2.00. Other levels have not been run live. The bundled lifecycle data rates VIOS 4.1 as supported and VIOS 3.1 as end of support from 2026-04-30.
 - There is no CIS VIOS benchmark. PTxray does not claim CIS VIOS certification. Ordinary AIX, STIG, CIS, and vulnerability findings still apply on a VIOS.
 - If a VIOS has no Shared Ethernet Adapter, NPIV, virtual SCSI, or Shared Storage Pool configured, the report shows those areas as not present. It does not treat that as a tested redundant setup.
-- The checks for configured Shared Ethernet Adapter failover, NPIV, virtual SCSI, and Shared Storage Pools were built from IBM's documented command output and test data. They have not yet been run against a live VIOS that has those features configured.
+- The checks for configured Shared Ethernet Adapter failover, NPIV, virtual SCSI, and Shared Storage Pools were built from IBM's documented command output and test data. On a live VIOS they have been verified only in the not-present case: the tested VIOS had none of those features configured. They have not yet been run against a live VIOS that has those features configured.
 - If the command output can't be read, the result is a warning or "not assessed", never a pass.
 - A scan sees only the VIOS it runs on. It cannot confirm the partner VIOS in a dual-VIOS setup.
 - The AIX limits above also apply. For a VIOS with no network route, stage the inputs and add `--offline` as described in the bundle's `README-REPORT.md`.
@@ -73,8 +74,9 @@ Every cell above comes from these sources:
   - Command and `oem_setup_env`: the AIX bundle's `README-REPORT.md` ("On VIOS, after `oem_setup_env`, as root").
   - Wrapper behaviour: `ptxray-vios.sh` in the AIX bundle.
   - Check coverage: `checks/ck-vios-*`, `ck-viosecure-*`, `ck-sea-*`, `ck-npiv-*`, `ck-vscsi-*`, `ck-vnic-maps`, and `ck-ssp-*` manifests in [checks/](../checks/), plus RELEASE-NOTES v1.8.3 and v1.8.4.
+  - Supported OS level (VIOS 4.1, tested on 4.1.2.00) and the end-to-end live runs with 1.8.2 and 1.8.4: [docs/evidence/vios-live-acceptance.md](evidence/vios-live-acceptance.md).
   - Lifecycle data: `EOS_VIOS` in `dist/tools/ck-vios-level.ksh` in the AIX bundle.
-  - No CIS VIOS benchmark, the not-present behaviour, and the live-test limit: RELEASE-NOTES v1.8.2, v1.8.3, and v1.8.4.
+  - No CIS VIOS benchmark, the not-present behaviour, and the live-test limit: RELEASE-NOTES v1.8.2, v1.8.3, and v1.8.4, and [docs/evidence/vios-live-acceptance.md](evidence/vios-live-acceptance.md) (configured features verified live only in the not-present case).
   - Unreadable output never passes: [README.md](../README.md) ("Missing evidence is never silently counted as a pass") and the VIOS check manifests (for example `ck-npiv-maps`: "A failed lsmap is not assessed").
   - Built from IBM's documented command output and test data: the VIOS check manifests in [checks/](../checks/), which list the exact `ioscli` commands each check reads and cite IBM's documentation (for example `ck-sea-largesend`, `ck-sea-threading`, and `ck-vscsi-lv-backing`), and RELEASE-NOTES v1.8.3 ("a configured-branch fixture, an absence fixture"), together with the live-test statements in RELEASE-NOTES v1.8.3 and v1.8.4.
   - The single-VIOS limit: the `ck-vios-topology` manifest (it infers a partner VIOS from this VIOS's own Shared Ethernet Adapter and CAA cluster state) and the other VIOS check manifests, whose commands all run locally on the scanned VIOS.
