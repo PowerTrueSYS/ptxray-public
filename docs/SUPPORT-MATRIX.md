@@ -17,7 +17,7 @@ This page lists which platforms PTxray supports, from which release, on which OS
 - Before the assessment starts, the separate `ptxray-defs.sh` helper downloads signed definitions and IBM's pinned FLRTVC engine. On a host with no network route, stage those inputs first and add `--offline`; the bundle's `README-REPORT.md` has the exact steps. If a required input is missing or invalid, PTxray refuses and does not write a report.
 - IBM FLRTVC and IBM's APAR feed are acquired separately and are not included in the bundles. Their use is subject to IBM's terms.
 - Standards tags show alignment, not certification. A completed run does not prove compliance, security, or recoverability.
-- The full selection can take tens of minutes on a small partition.
+- Large assessments can take tens of minutes and use system resources. Choose a suitable time to run them.
 - The review-copy helper rejects the current report format. Remove sensitive details by hand before sharing a report.
 
 ## VIOS
@@ -66,7 +66,7 @@ Every cell above comes from these sources:
 - **AIX row.**
   - OS levels, root, ksh93, OpenSSL, curl/unzip, and the run command: [README.md](../README.md), "Run a complete AIX assessment", and the bundle's `README-REPORT.md`.
   - Since 0.1.0: the v0.1.0 GitHub release and the "v0.1.0 release-integrity note" in [RELEASE-NOTES.md](RELEASE-NOTES.md).
-  - Run time and review-helper limits: [README.md](../README.md) and [SECURITY.md](../SECURITY.md).
+  - Run time and review-helper limits: [README.md](../README.md), "Designed for safe, local assessment", and [SECURITY.md](../SECURITY.md), "Review-pack sharing".
   - FLRTVC/APAR boundary: [README.md](../README.md), "Open source and inspectable".
 - **VIOS row.**
   - Since 1.8.2: [RELEASE-NOTES.md](RELEASE-NOTES.md) v1.8.2. `ptxray-vios.sh` is in `ptxray-report-aix-1.8.2.tar` and later, and not in `ptxray-report-aix-1.8.1.tar`.
@@ -85,5 +85,5 @@ Every cell above comes from these sources:
   - `--pdf` documented for AIX only: [README.md](../README.md), "Reports and offline use".
 - **Linux row.**
   - The [v1.8.4 GitHub release](https://github.com/PowerTrueSYS/ptxray-public/releases/tag/v1.8.4) has eleven assets and none of them is a Linux scanner or bundle.
-  - The frozen Linux demo: the project changelog ("Linux reference ... frozen demo").
+  - The frozen Linux demo: `CHANGELOG.md` and `PROJECT.md` in the private source repository ("The Linux reference is frozen as a demo artifact").
   - Planned status: product decision. No release version or distribution list is documented.
