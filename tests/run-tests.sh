@@ -12,4 +12,6 @@ python3 "$ROOT/tests/test-composed-integrity.py" "$@" || FAILED=1
 
 python3 "$ROOT/tests/test-composed-release-integrity.py" "$@" || FAILED=1
 
+sh "$ROOT/tests/test-no-ibm-defs-distribution.sh" || FAILED=1
+
 exit "$FAILED"

@@ -34,6 +34,10 @@ jobs:
         run: python3 tests/check-packaged-egress.py
       - name: Reject redistributed IBM delivery data
         run: python3 tools/check-no-ibm-redistribution.py
+      - name: Reject IBM-derived data, definitions bundles and banned claims
+        run: |
+          python3 tools/check-no-ibm-defs-distribution.py
+          sh tests/test-no-ibm-defs-distribution.sh
 
   release-integrity:
     if: >-
